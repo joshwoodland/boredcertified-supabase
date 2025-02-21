@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-rgb: 245, 245, 245;
+}
+
+.dark {
+  --foreground-rgb: 228, 231, 234;
+  --background-rgb: 27, 32, 37;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+}
+
+.dark body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+}
+
+/* Custom scrollbar styles for dark mode */
+.dark textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dark textarea::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: 32px;
+}
+
+.dark textarea::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 114, 128, 0.5);
+  border-radius: 4px;
+  min-height: 40px;
+}
+
+.dark textarea::-webkit-scrollbar-corner {
+  background: transparent;
+} 
