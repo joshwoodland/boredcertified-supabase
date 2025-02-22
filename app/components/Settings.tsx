@@ -5,6 +5,7 @@ import { FiSettings, FiMoon, FiSun, FiX, FiInfo } from 'react-icons/fi';
 import Toast from './Toast';
 import SystemMessageEditor from './SystemMessageEditor';
 import ConfirmationDialog from './ConfirmationDialog';
+import { flushSync } from 'react-dom';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -37,24 +38,27 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const mouseDownTime = useRef<number>(0);
   const isSelectingText = useRef(false);
+  const settingsRef = useRef(settings);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   const handleSave = useCallback(async () => {
     console.log('handleSave triggered', { 
-      currentSettings: settings,
+      currentSettings: settingsRef.current,
       isSaveInProgress: !!savePromiseRef.current 
     });
 
-    // If there's already a save in progress, wait for it to complete
     if (savePromiseRef.current) {
       console.log('Save already in progress, waiting...');
       await savePromiseRef.current;
     }
 
     const startTime = Date.now();
-    
-    // Capture the current settings state to ensure we save the complete values
+
     const settingsToSave = {
-      ...settings,
+      ...settingsRef.current,
       initialVisitDescription: 'System message for initial psychiatric evaluation visits',
       followUpVisitDescription: 'System message for follow-up psychiatric visits',
     };
@@ -62,7 +66,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     console.log('Preparing to save settings:', settingsToSave);
 
     try {
-      // Create a new save promise
       savePromiseRef.current = new Promise(async (resolve, reject) => {
         try {
           console.log('Starting save operation');
@@ -80,11 +83,9 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             throw new Error(data.error || data.details || 'Failed to save settings');
           }
           
-          // Update initialSettings with the saved values
           initialSettings.current = settingsToSave;
           console.log('Updated initialSettings:', initialSettings.current);
           
-          // Ensure "saving" state shows for at least 500ms
           const elapsedTime = Date.now() - startTime;
           if (elapsedTime < 500) {
             await new Promise(resolve => setTimeout(resolve, 500 - elapsedTime));
@@ -110,7 +111,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     } finally {
       savePromiseRef.current = null;
     }
-  }, [settings]);
+  }, []);
 
   const handleClose = useCallback(() => {
     if (isDirty) {
@@ -122,42 +123,39 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   const handleChange = useCallback((changes: Partial<AppSettings>) => {
     console.log('handleChange called with:', changes);
-    
-    // Clear any existing save timeout first
+
     if (saveTimeoutId.current) {
       console.log('Clearing existing save timeout');
       clearTimeout(saveTimeoutId.current);
       saveTimeoutId.current = undefined;
     }
 
-    // Update local state immediately with the complete changes
-    setSettings(currentSettings => {
-      const newSettings = { ...currentSettings, ...changes };
-      console.log('Updating settings:', {
-        currentSettings,
-        changes,
-        newSettings
+    flushSync(() => {
+      setSettings(currentSettings => {
+        const newSettings = { ...currentSettings, ...changes };
+        console.log('Updating settings:', {
+          currentSettings,
+          changes,
+          newSettings
+        });
+        return newSettings;
       });
-      
-      // Schedule the save with the complete settings
-      if (!savePromiseRef.current) {
-        console.log('Scheduling new save operation');
-        saveTimeoutId.current = setTimeout(() => {
-          console.log('Save timeout triggered, current settings:', newSettings);
-          handleSave();
-        }, 1000);
-      } else {
-        console.log('Save already in progress, skipping new save schedule');
-      }
-      
-      return newSettings;
     });
 
     setIsDirty(true);
     setSaveButtonState('unsaved');
-  }, [handleSave]);
 
-  // Handle click outside
+    if (!savePromiseRef.current) {
+      console.log('Scheduling new save operation');
+      saveTimeoutId.current = setTimeout(() => {
+        console.log('Save timeout triggered, current settings:', settings);
+        handleSave();
+      }, 1000);
+    } else {
+      console.log('Save already in progress, skipping new save schedule');
+    }
+  }, [handleSave, settings]);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -170,7 +168,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
       const timeDiff = mouseUpTime - mouseDownTime.current;
       const isDragging = timeDiff > 200;
       
-      // Only process if it's a quick click (not a drag)
       if (!isDragging) {
         const target = event.target as Node;
         const isOutsideClick = modalRef.current && !modalRef.current.contains(target);
@@ -192,7 +189,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     };
   }, [isOpen, handleClose]);
 
-  // Handle keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -210,7 +206,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     }
   }, [isOpen, isDirty, handleSave]);
 
-  // Fetch settings on mount
   useEffect(() => {
     if (isOpen && initialRender.current) {
       fetchSettings();
@@ -219,7 +214,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   }, [isOpen]);
 
   useEffect(() => {
-    // Apply dark mode
     if (settings.darkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -242,7 +236,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     }
   };
 
-  // Track changes by comparing with initial settings
   useEffect(() => {
     if (initialSettings.current) {
       const hasChanges = JSON.stringify(settings) !== JSON.stringify(initialSettings.current);
@@ -256,7 +249,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     }
   }, [settings]);
 
-  // Cleanup timeouts on unmount or when modal closes
   useEffect(() => {
     return () => {
       if (saveTimeoutId.current) {
@@ -266,7 +258,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     };
   }, []);
 
-  // Footer with save status
   const renderSaveStatus = () => {
     if (isSaving) {
       return (
@@ -311,7 +302,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   return (
     <>
-      {/* Added confirmation dialog for unsaved changes */}
       {showConfirmation && (
         <div className="fixed inset-0 z-[100]">
           <ConfirmationDialog
@@ -329,17 +319,13 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         </div>
       )}
 
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black opacity-50 z-[40]" />
 
-      {/* Modal container */}
       <div className="fixed inset-0 z-[50] flex items-center justify-center">
-        {/* Modal box */}
         <div
           ref={modalRef}
           className="bg-white dark:bg-dark-secondary rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col relative"
         >
-          {/* Header */}
           <div className="p-6 border-b dark:border-dark-border sticky top-0 bg-white dark:bg-dark-secondary z-[51] flex justify-between items-center">
             <h2 id="settings-title" className="text-2xl font-semibold flex items-center gap-2 dark:text-dark-text">
               <FiSettings className="w-6 h-6" />
@@ -358,9 +344,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             </button>
           </div>
 
-          {/* Body (scrollable) */}
           <div className="p-6 space-y-10 overflow-y-auto flex-1">
-            {/* Dark Mode Toggle */}
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 dark:text-dark-text">
                 {settings.darkMode ? <FiMoon /> : <FiSun />}
@@ -382,7 +366,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               </button>
             </div>
 
-            {/* GPT Model Selection */}
             <div>
               <label className="block text-sm font-medium mb-2 dark:text-dark-text">
                 GPT Model
@@ -404,7 +387,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               </p>
             </div>
 
-            {/* System Prompts */}
             <div className="space-y-4">
               <div className="relative">
                 <div className="flex items-center mb-4">
@@ -439,7 +421,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
             </div>
           </div>
 
-          {/* Footer with save status */}
           <div className="p-4 border-t dark:border-dark-border flex justify-end bg-white dark:bg-dark-secondary items-center">
             <div className="text-sm text-gray-600 dark:text-dark-muted">
               {renderSaveStatus()}

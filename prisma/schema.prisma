@@ -14,36 +14,33 @@ datasource db {
 }
 
 model Patient {
-  id        String     @id @default(uuid())
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   name      String
-  isDeleted Boolean   @default(false)
+  isDeleted Boolean  @default(false)
   deletedAt DateTime?
-  soapNotes SOAPNote[]
+  notes     Note[]
 }
 
-model SOAPNote {
-  id           String   @id @default(uuid())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  patientId    String
-  patient      Patient  @relation(fields: [patientId], references: [id])
-  transcript   String
-  subjective   String
-  objective    String
-  assessment   String
-  plan         String
-  audioFileUrl String?
+model Note {
+  id            String   @id @default(uuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  patientId     String
+  patient       Patient  @relation(fields: [patientId], references: [id])
+  transcript    String
+  content       String
+  audioFileUrl  String?
   isInitialVisit Boolean @default(false)
 }
 
 model AppSettings {
-  id                    String   @id @default("default")
-  darkMode             Boolean  @default(false)
-  gptModel             String   @default("gpt-4-turbo-preview")
-  initialVisitPrompt   String   @default("You are a medical scribe assistant. Your task is to generate a SOAP note for an INITIAL VISIT based on the provided medical visit transcript.")
-  followUpVisitPrompt  String   @default("You are a medical scribe assistant. Your task is to generate a SOAP note for a FOLLOW-UP VISIT based on the provided medical visit transcript.")
-  autoSave             Boolean  @default(false)
-  updatedAt            DateTime @updatedAt
+  id                   String   @id @default("default")
+  darkMode            Boolean  @default(false)
+  gptModel            String   @default("gpt-4-turbo-preview")
+  initialVisitPrompt  String   @default("You are a medical scribe assistant. Your task is to generate a note for an INITIAL VISIT based on the provided medical visit transcript.")
+  followUpVisitPrompt String   @default("You are a medical scribe assistant. Your task is to generate a note for a FOLLOW-UP VISIT based on the provided medical visit transcript.")
+  autoSave            Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
 }

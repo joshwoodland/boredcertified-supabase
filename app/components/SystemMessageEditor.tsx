@@ -1,10 +1,27 @@
 import { useState, useRef, useEffect } from 'react';
 import { FiMaximize2, FiX } from 'react-icons/fi';
+import { flushSync } from 'react-dom';
 
 interface SystemMessageEditorProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
+}
+
+function detectFormatting(content: string): { headings: Map<string, number>, cleanContent: string } {
+  const lines = content.split('\n');
+  const headings = new Map<string, number>();
+  
+  lines.forEach(line => {
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const text = headingMatch[2].trim();
+      headings.set(text, level);
+    }
+  });
+
+  return { headings, cleanContent: content };
 }
 
 export default function SystemMessageEditor({ label, value, onChange }: SystemMessageEditorProps) {
@@ -40,13 +57,30 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
 
   const handleChange = (newValue: string) => {
     setLocalValue(newValue);
-    setIsDirty(true);
+    const { headings, cleanContent } = detectFormatting(newValue);
+    
+    // Preserve the detected formatting
+    const formatGuide = Object.fromEntries(headings);
+    const formattedContent = `format:${JSON.stringify(formatGuide)}\n${cleanContent}`;
+    
+    onChange(formattedContent);
   };
 
   const handleSave = () => {
-    onChange(localValue);
-    setIsDirty(false);
-    setIsExpanded(false);
+    if (textareaRef.current) {
+      textareaRef.current.blur();
+      flushSync(() => {});
+      requestAnimationFrame(() => {
+        const finalValue = textareaRef.current ? textareaRef.current.value : localValue;
+        onChange(finalValue);
+        setIsDirty(false);
+        setIsExpanded(false);
+      });
+    } else {
+      onChange(localValue);
+      setIsDirty(false);
+      setIsExpanded(false);
+    }
   };
 
   return (

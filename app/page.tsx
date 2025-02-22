@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import PatientList from './components/PatientList';
 import AudioRecorder from './components/AudioRecorder';
-import SOAPNote from './components/SOAPNote';
+import Note from './components/Note';
 import Settings from './components/Settings';
 import { FiSettings, FiTrash2 } from 'react-icons/fi';
 
@@ -12,13 +12,10 @@ interface Patient {
   name: string;
   isDeleted: boolean;
   deletedAt: string | null;
-  soapNotes: Array<{
+  notes: Array<{
     id: string;
     createdAt: string;
-    subjective: string;
-    objective: string;
-    assessment: string;
-    plan: string;
+    content: string;
     isInitialVisit: boolean;
   }>;
 }
@@ -26,8 +23,8 @@ interface Patient {
 export default function Home() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>();
-  const [currentNote, setCurrentNote] = useState<Patient['soapNotes'][0] | null>(null);
-  const [patientNotes, setPatientNotes] = useState<Patient['soapNotes']>([]);
+  const [currentNote, setCurrentNote] = useState<Patient['notes'][0] | null>(null);
+  const [patientNotes, setPatientNotes] = useState<Patient['notes']>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string>('');
@@ -37,23 +34,60 @@ export default function Home() {
   const [isManualInput, setIsManualInput] = useState(false);
   const [forceCollapse, setForceCollapse] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Processing...');
+  const [trashedPatientsData, setTrashedPatientsData] = useState<Patient[]>([]);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const loadingMessages = [
-    "The cookies are in the oven... 🍪",
-    "Expert medical scribe doing work rn 🤓",
-    "Sit back and relax, lazy ass 🛋️",
-    "Making your notes prettier than your handwriting 📝",
-    "Teaching AI to read doctor's handwriting... 🤔",
-    "Converting coffee into SOAP notes ☕",
-    "Bribing the AI with virtual cookies 🍪",
-    "Making medical terminology sound fancy AF 🎩",
-    "Doing your work while you scroll TikTok 📱",
-    "The hamsters powering our servers are tired 🐹",
-    "Translating doctor-speak to human language 🤖",
-    "Your note is being artisanally crafted ✨",
-    "Making your attending proud... maybe 🤷",
-    "Turning caffeine into documentation 🧪",
-    "The AI is having an existential crisis 🤯"
+    "Channeling Doctor Strange's medical expertise... Hold on, this might require some magic. 🪄",
+    "Barbie says: 'I'm not just a fashion icon—I'm also a doctor!' 👩‍⚕️",
+    "Taylor Swift is working on a new song: 'Patient History (10-Minute Version).' 🎵",
+    "Consulting with House, M.D.—but without the sarcasm. 🏥",
+    "Asking Wednesday Addams to brighten up this diagnosis… okay, maybe just a little. 🖤",
+    "Transforming your words into SOAP notes—Optimus Prime style. 🤖",
+    "Spider-Man's spidey sense is tingling… must be a breakthrough! 🕷️",
+    "Welcome to The Last of Us: Medical Documentation Edition—don't worry, this infection is just a typo. 🌿",
+    "Bluey's dad is helping write this note… turns out he's surprisingly good at it! 🐕",
+    "Ted Lasso is giving your medical records the pep talk they deserve. 📋",
+    "Baby Yoda is using the Force to organize these notes… but mostly just staring adorably. 👶",
+    "Roman Roy from Succession is attempting medical terminology… this could get interesting. 💼",
+    "Welcome to The Bear: Medical Scribe Kitchen Edition—yes, chef! 👨‍🍳",
+    "Ahsoka's lightsaber is making precise edits to your notes. ⚔️",
+    "Guardians of the Galaxy are on a mission… to ensure accurate documentation. 🚀",
+    "Mario and Luigi: Medical Scribe Bros—let's-a go! 🍄",
+    "Oppenheimer is calculating the most optimal treatment plan… with extreme precision. 💥",
+    "Beyoncé's Renaissance Tour is now a Medical Documentation World Tour! 🎤",
+    "Ken is trying his best at medical scribing… he's just Ken. 👱‍♂️",
+    "The Super Mario Bros. Movie presents: Journey to Perfect Notes! 🎮",
+    "Welcome to Avatar: The Way of Medical Documentation. 💧",
+    "Top Gun: Maverick's guide to swift and accurate scribing—because speed matters. ✈️",
+    "John Wick: Chapter 4… of your medical history. 🕴️",
+    "Everything Everywhere All At Once… but make it medical notes. 🥢",
+    "Following the Mandalorian's Code of Medical Documentation—this is the way. 🪖",
+    "Loki is causing mischief in the medical records… let's rein that in. 😈",
+    "Stranger Things are happening in these notes… better double-check. 🔮",
+    "The Last Airbender is mastering the four elements… of SOAP notes. 🌪️",
+    "Squid Game: Red Light, Green Light… but for medical documentation. 🦑",
+    "WandaVision's sitcom-style medical documentation—expect some plot twists. 📺",
+    "Bridgerton's Lady Whistledown is reviewing your medical history… and it's quite the scandal. 📜",
+    "Welcome to The White Lotus: Medical Scribe Resort Edition! 🌺",
+    "Cousin Greg from Succession is attempting medical terminology… bless his heart. 📱",
+    "Abbott Elementary's guide to keeping notes organized and stress-free. 📚",
+    "The Bear… but for medical notes. Brace yourself. 🔪",
+    "Only Murders in the Building—except we're solving medical mysteries instead. 🔍",
+    "Rick and Morty's interdimensional medical adventures… hold on, this might get weird. 🧪",
+    "The Crown's royal approach to medical documentation—strictly by the book. 👑",
+    "Heartstopper's gentle, well-organized medical notes—because details matter. 🍂",
+    "Shadow and Bone's magical approach to scribing… precision is key. ⚡",
+    "Toss a coin to your medical scribe—The Witcher is on the case! 🎵",
+    "Emily in Paris… but she's learning French medical terms. 🗼",
+    "Peaky Blinders' Tommy Shelby organizing patient files—by order of the medical board. 🎩",
+    "The Good Place's Janet computing medical data—this note is not a robot. 🤖",
+    "Brooklyn Nine-Nine's Jake Peralta is investigating symptoms—cool, cool, cool. 🚔",
+    "Moira Rose from Schitt's Creek is pronouncing medical terms… dramatically. 🌹",
+    "Michael Scott from The Office attempting medical documentation… what could go wrong? 📎",
+    "Leslie Knope from Parks and Recreation ensuring patient care is organized to perfection. 📋",
+    "The Community study group tackling medical terminology—self-taught, of course. 📖",
+    "Walter White from Breaking Bad is calculating medication dosages… let's double-check that. ⚗️"
   ];
 
   useEffect(() => {
@@ -82,7 +116,7 @@ export default function Home() {
 
   const fetchPatientNotes = async (patientId: string) => {
     try {
-      const response = await fetch(`/api/soap-notes?patientId=${patientId}`);
+      const response = await fetch(`/api/notes?patientId=${patientId}`);
       if (!response.ok) {
         throw new Error('Failed to fetch patient notes');
       }
@@ -100,29 +134,50 @@ export default function Home() {
       const response = await fetch(`/api/patients?showDeleted=${showTrash}`);
       const data = await response.json();
       setPatients(data);
+      setTrashedPatientsData(data.filter((p: Patient) => p.isDeleted));
     } catch (error) {
       console.error('Error fetching patients:', error);
       setError('Failed to load patients. Please refresh the page.');
     }
   };
 
-  const handleAddPatient = async () => {
-    const name = prompt('Enter patient name:');
+  const handleAddPatient = async (name: string) => {
     if (!name) return;
 
     try {
+      console.log('Adding patient:', name);
       const response = await fetch('/api/patients', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: name.trim() }),
       });
-      const newPatient = await response.json();
-      setPatients([...patients, newPatient]);
+
+      console.log('Response status:', response.status);
+      const contentType = response.headers.get('content-type');
+      console.log('Response content type:', contentType);
+
+      let data;
+      try {
+        const text = await response.text();
+        console.log('Response text:', text);
+        data = JSON.parse(text);
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError);
+        throw new Error('Invalid response from server');
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Failed to add patient');
+      }
+
+      // Refresh the patient list to ensure we have the latest data
+      await fetchPatients();
     } catch (error) {
       console.error('Error adding patient:', error);
-      setError('Failed to add patient. Please try again.');
+      setError(error instanceof Error ? error.message : 'Failed to add patient. Please try again.');
+      throw error;
     }
   };
 
@@ -167,6 +222,15 @@ export default function Home() {
     setLiveTranscript(transcript);
   };
 
+  const handleCancel = async () => {
+    if (abortController) {
+      abortController.abort();
+      setIsProcessing(false);
+      setError('Note generation cancelled');
+      setAbortController(null);
+    }
+  };
+
   const handleManualTranscriptSubmit = async () => {
     if (!selectedPatientId || !manualTranscript.trim()) {
       setError('Please select a patient and enter a transcript');
@@ -175,9 +239,11 @@ export default function Home() {
 
     setIsProcessing(true);
     setError(null);
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
-      const soapResponse = await fetch('/api/soap-notes', {
+      const soapResponse = await fetch('/api/notes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -186,24 +252,39 @@ export default function Home() {
           patientId: selectedPatientId,
           transcript: manualTranscript,
         }),
+        signal: controller.signal
       });
 
+      const responseData = await soapResponse.json();
+      
       if (!soapResponse.ok) {
-        throw new Error('Failed to generate SOAP note');
+        const errorMessage = typeof responseData === 'object' && responseData !== null
+          ? responseData.details || responseData.error || 'Failed to generate SOAP note'
+          : 'Failed to generate SOAP note';
+        console.error('SOAP note generation failed:', responseData);
+        throw new Error(errorMessage);
       }
 
-      const soapNote = await soapResponse.json();
-      setCurrentNote(soapNote);
+      if (!responseData || typeof responseData !== 'object') {
+        throw new Error('Invalid response format from server');
+      }
+
+      setCurrentNote(responseData);
       setManualTranscript('');
       setIsManualInput(false);
       setForceCollapse(prev => !prev);
       
       await fetchPatientNotes(selectedPatientId);
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Note generation cancelled');
+        return;
+      }
       console.error('Error processing transcript:', error);
       setError(error instanceof Error ? error.message : 'Error processing transcript. Please try again.');
     } finally {
       setIsProcessing(false);
+      setAbortController(null);
     }
   };
 
@@ -211,6 +292,8 @@ export default function Home() {
     try {
       setIsProcessing(true);
       setError(null);
+      const controller = new AbortController();
+      setAbortController(controller);
 
       if (!selectedPatientId) {
         throw new Error('No patient selected');
@@ -227,17 +310,26 @@ export default function Home() {
       const uploadResponse = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
+        signal: controller.signal
       });
 
+      const uploadData = await uploadResponse.json();
+
       if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json();
-        throw new Error(errorData.error || 'Failed to upload audio file');
+        const errorMessage = typeof uploadData === 'object' && uploadData !== null
+          ? uploadData.error || 'Failed to upload audio file'
+          : 'Failed to upload audio file';
+        throw new Error(errorMessage);
       }
 
-      const { url: audioFileUrl } = await uploadResponse.json();
+      if (!uploadData || typeof uploadData !== 'object' || !uploadData.url) {
+        throw new Error('Invalid upload response format');
+      }
+
+      const { url: audioFileUrl } = uploadData;
 
       // Generate SOAP note
-      const soapResponse = await fetch('/api/soap-notes', {
+      const soapResponse = await fetch('/api/notes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -247,33 +339,46 @@ export default function Home() {
           transcript,
           audioFileUrl,
         }),
+        signal: controller.signal
       });
 
+      const responseData = await soapResponse.json();
+
       if (!soapResponse.ok) {
-        const errorData = await soapResponse.json();
-        console.error('SOAP note generation failed:', errorData);
-        throw new Error(errorData.details || errorData.error || 'Failed to generate SOAP note');
+        const errorMessage = typeof responseData === 'object' && responseData !== null
+          ? responseData.details || responseData.error || 'Failed to generate SOAP note'
+          : 'Failed to generate SOAP note';
+        console.error('SOAP note generation failed:', responseData);
+        throw new Error(errorMessage);
       }
 
-      const soapNote = await soapResponse.json();
-
-      // Validate the SOAP note response
-      if (!soapNote || !soapNote.id) {
-        console.error('Invalid SOAP note response:', soapNote);
-        throw new Error('Invalid SOAP note response from server');
+      if (!responseData || typeof responseData !== 'object') {
+        throw new Error('Invalid response format from server');
       }
 
-      // Update patient's SOAP notes
-      setCurrentNote(soapNote);
-      setForceCollapse(prev => !prev);
-      setPatientNotes(prev => [soapNote, ...prev]);
-
-    } catch (error) {
-      console.error('Error in handleRecordingComplete:', error);
-      setError(error instanceof Error ? error.message : 'An unexpected error occurred');
+      setCurrentNote(responseData);
+      setLiveTranscript('');
+      
+      await fetchPatientNotes(selectedPatientId);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Note generation cancelled');
+        return;
+      }
+      console.error('Error processing recording:', error);
+      setError(error instanceof Error ? error.message : 'Error processing recording. Please try again.');
     } finally {
       setIsProcessing(false);
+      setAbortController(null);
     }
+  };
+
+  const handleUpdatePatient = (patientId: string, newName: string) => {
+    setPatients(prevPatients => 
+      prevPatients.map(patient =>
+        patient.id === patientId ? { ...patient, name: newName } : patient
+      )
+    );
   };
 
   const selectedPatient = patients.find(p => p.id === selectedPatientId);
@@ -314,12 +419,13 @@ export default function Home() {
         {/* Patient List */}
         <div className="md:col-span-3">
           <PatientList
-            patients={patients}
+            patients={showTrash ? trashedPatientsData : patients}
             selectedPatientId={selectedPatientId}
             onSelectPatient={setSelectedPatientId}
             onAddPatient={handleAddPatient}
             onMoveToTrash={handleMoveToTrash}
             onRestorePatient={handleRestorePatient}
+            onUpdatePatient={handleUpdatePatient}
             showTrash={showTrash}
           />
         </div>
@@ -357,6 +463,13 @@ export default function Home() {
                       <textarea
                         value={manualTranscript}
                         onChange={(e) => setManualTranscript(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            (e.target as HTMLTextAreaElement).blur();
+                            handleManualTranscriptSubmit();
+                          }
+                        }}
                         placeholder="Paste or type your transcript here..."
                         className="w-full h-48 p-4 border rounded-md dark:bg-dark-accent dark:border-dark-border dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted"
                       />
@@ -377,8 +490,16 @@ export default function Home() {
 
                   {isProcessing && (
                     <div className="text-center py-4">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                      <p className="mt-2 text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                      <div className="flex flex-col items-center gap-4">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
+                        <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                        <button
+                          onClick={handleCancel}
+                          className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                        >
+                          cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -389,9 +510,9 @@ export default function Home() {
           </div>
 
           {/* SOAP Notes Display */}
-          <div className="space-y-4">
+          <div className="space-y-6 max-w-4xl mx-auto bg-gray-50 dark:bg-gray-900 p-6 rounded-lg">
             {patientNotes.map((note, index) => (
-              <SOAPNote 
+              <Note 
                 key={note.id} 
                 note={note} 
                 isLatest={index === 0}

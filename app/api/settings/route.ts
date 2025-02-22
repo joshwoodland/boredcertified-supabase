@@ -4,6 +4,25 @@ import fs from 'fs/promises'
 import path from 'path'
 import { SystemMessage, SystemMessageUpdate } from '@/app/config/types'
 
+// Function to preserve markdown formatting
+function preserveMarkdownFormatting(content: string): string {
+  // Remove any existing formatting instructions
+  let cleanContent = content.replace(/^format:.*\n/, '');
+  
+  // Detect heading levels and formatting
+  const headingMatches = cleanContent.match(/^(#{1,6})\s+(.+)$/gm) || [];
+  const formatGuide = headingMatches.reduce((guide: any, match) => {
+    const level = match.match(/^(#{1,6})/)?.[0].length || 0;
+    const text = match.replace(/^#{1,6}\s+/, '').trim();
+    guide[text] = level;
+    return guide;
+  }, {});
+
+  // Store formatting information at the start of the content
+  const formatInstructions = JSON.stringify(formatGuide);
+  return `format:${formatInstructions}\n${cleanContent}`;
+}
+
 async function saveSystemMessage(type: 'initial' | 'followUp', update: SystemMessageUpdate) {
   const configDir = path.join(process.cwd(), 'app', 'config');
   const filename = type === 'initial' ? 'initialVisitPrompt.ts' : 'followUpVisitPrompt.ts';
@@ -13,8 +32,11 @@ async function saveSystemMessage(type: 'initial' | 'followUp', update: SystemMes
     throw new Error('System message content must be a string');
   }
 
+  // Preserve markdown formatting
+  const formattedContent = preserveMarkdownFormatting(update.content);
+
   const systemMessage: SystemMessage = {
-    content: update.content,
+    content: formattedContent,
     version: '1.0.0',
     lastUpdated: new Date().toISOString(),
     description: update.description || (type === 'initial' 

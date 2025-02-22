@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import OpenAI from 'openai'
-import { systemMessage as initialVisitPrompt } from '@/app/config/initialVisitPrompt'
-import { systemMessage as followUpVisitPrompt } from '@/app/config/followUpVisitPrompt'
+import systemMessages from '@/app/config/systemMessages'
 import { ChatCompletionMessageParam } from 'openai/resources/chat'
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
+import { formatSystemMessage } from '@/app/utils/formatSystemMessage'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -104,12 +104,45 @@ function truncateText(text: string, maxLength: number = 4000): string {
   return result;
 }
 
+interface NoteContent {
+  [key: string]: any;
+}
+
+// Helper function to extract content from GPT response
+function extractContentFromResponse(responseContent: string): NoteContent {
+  try {
+    // First try parsing as JSON
+    const parsedContent = JSON.parse(responseContent.trim());
+    return parsedContent;
+  } catch (error) {
+    // If not JSON, try to parse as markdown/text
+    const sections: NoteContent = {};
+    
+    // Split content into sections by headers
+    const sectionRegex = /(?:###|##|#)\s*([^#\n]+)([^#]*)/g;
+    let match;
+    
+    while ((match = sectionRegex.exec(responseContent)) !== null) {
+      const [, title, content] = match;
+      const sectionTitle = title.trim().toLowerCase();
+      sections[sectionTitle] = content.trim();
+    }
+    
+    // If no sections were found, use the entire text as content
+    if (Object.keys(sections).length === 0) {
+      sections.content = responseContent.trim();
+    }
+    
+    return sections;
+  }
+}
+
 interface SOAPContent {
-  subjective: string;
-  objective: string;
-  assessment: string;
-  plan: string;
-  [key: string]: string;
+  subjective?: string;
+  objective?: string;
+  assessment?: string;
+  plan?: string;
+  [key: string]: any; // Allow for additional fields
 }
 
 // Helper function to split transcript into chunks with overlap
@@ -213,89 +246,58 @@ function createCompletionParams(model: string, messages: any[]) {
   return params;
 }
 
-// Add type for OpenAI message
-type ChatMessage = {
-  role: "system" | "user" | "assistant";
-  content: string;
+// Define a ChatMessage type
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string
 }
 
-function createChunkSummaryPrompt(chunk: string, chunkIndex: number, totalChunks: number): ChatMessage {
+/**
+ * Creates a chunk summary prompt using the system message stored in settings.
+ *
+ * @param chunk - A transcript chunk to process.
+ * @param chunkIndex - The index of the current chunk.
+ * @param totalChunks - The total number of chunks.
+ * @param isInitialVisit - A flag to indicate if this is an initial visit.
+ * @returns A ChatMessage object with the correctly formatted system prompt.
+ */
+function createChunkSummaryPrompt(
+  chunk: string,
+  chunkIndex: number,
+  totalChunks: number,
+  isInitialVisit: boolean,
+  patientName: string
+): ChatMessage {
+  const rawPrompt = isInitialVisit ? systemMessages.initialVisit : systemMessages.followUpVisit
+  const systemMsg = formatSystemMessage(rawPrompt)
+  const content = `${systemMsg.content}\n\nIMPORTANT: The patient's name is "${patientName}". Always use this exact name throughout the note, regardless of any other names mentioned in the transcript. Please extract and organize the relevant medical information from this transcript chunk (${chunkIndex + 1}/${totalChunks}).`
   return {
-    role: "system",
-    content: `You are a medical scribe assistant. Your task is to extract and structure medical information from this transcript chunk (${chunkIndex + 1}/${totalChunks}). Maintain the exact format and structure for each section:
-
-1. Chief Complaint and History of Present Illness
-   - Exact patient complaints and symptoms
-   - Chronological progression
-   - Severity and frequency
-   - Impact on daily life
-
-2. Past Medical History, Family History, Social History
-   - All mentioned diagnoses with dates
-   - Family history updates
-   - Social circumstances, including:
-     * Living situation
-     * Employment
-     * Substance use
-     * Stressors
-
-3. Mental Status Examination
-   - Appearance and behavior
-   - Mood and affect
-   - Thought process and content
-   - Cognition and insight
-   - Any SI/HI/Risk factors
-
-4. Medications and Treatment
-   - Current medications with exact dosages
-   - Recent medication changes
-   - Side effects or concerns
-   - Treatment adherence
-
-5. Vital Signs and Measurements
-   - Any mentioned vital signs
-   - Weight changes
-   - Lab results
-
-6. Plan and Follow-up
-   - Medication adjustments
-   - Treatment recommendations
-   - Follow-up timing
-   - Referrals
-
-Preserve exact quotes when relevant to clinical assessment. Include all specific dates, numbers, and measurements. Do not summarize or paraphrase when exact details are provided.`
+    role: 'system',
+    content,
   }
 }
 
-async function createFinalSynthesisPrompt(transcript: string, isInitialVisit: boolean): Promise<ChatCompletionCreateParamsNonStreaming> {
-  const settings = await prisma.appSettings.findUnique({
-    where: { id: 'default' },
-  });
-
-  if (!settings) {
-    throw new Error('Settings not found');
-  }
-
-  const systemMessage = isInitialVisit ? initialVisitPrompt : followUpVisitPrompt;
-  console.log(`Using ${isInitialVisit ? 'initial' : 'follow-up'} visit system message`);
-
+async function createFinalSynthesisPrompt(
+  transcript: string,
+  isInitialVisit: boolean,
+  patientName: string
+): Promise<ChatCompletionCreateParamsNonStreaming> {
+  const rawSystemMessage = isInitialVisit ? systemMessages.initialVisit : systemMessages.followUpVisit;
+  const formattedSystemMessage = formatSystemMessage(rawSystemMessage);
+  
   const messages: ChatCompletionMessageParam[] = [
     {
       role: 'system',
-      content: systemMessage
+      content: `${formattedSystemMessage.content}\n\nIMPORTANT: The patient's name is "${patientName}". Always use this exact name throughout the note, regardless of any other names mentioned in the transcript.`
     },
-    {
-      role: 'user',
-      content: transcript
-    }
+    { role: 'user', content: transcript }
   ];
 
   return {
-    model: settings.gptModel,
+    model: 'gpt-4',
     messages,
-    max_tokens: 4000,
-    temperature: 0.7,
-    response_format: { type: 'text' } as const
+    temperature: 0.3,
+    max_tokens: 1000,
   };
 }
 
@@ -316,7 +318,7 @@ export async function POST(request: Request) {
       }, { status: 404 });
     }
 
-    console.log('Processing SOAP note request:', { 
+    console.log('Processing note request:', { 
       patientId, 
       transcriptLength: transcript?.length,
       hasAudioUrl: !!audioFileUrl 
@@ -337,7 +339,7 @@ export async function POST(request: Request) {
     }
 
     // Check if this is the first visit
-    const existingNotes = await prisma.sOAPNote.count({
+    const existingNotes = await prisma.note.count({
       where: { patientId },
     });
     const isInitialVisit = existingNotes === 0;
@@ -368,13 +370,6 @@ export async function POST(request: Request) {
 
     console.log('Using GPT model:', model);
 
-    let soapContent: SOAPContent = {
-      subjective: '',
-      objective: '',
-      assessment: '',
-      plan: ''
-    };
-
     try {
       // Determine chunk size based on transcript length
       const maxChunkSize = transcript.length > 100000 ? 32000 : 16000;
@@ -397,7 +392,7 @@ export async function POST(request: Request) {
             const completion = await openai.chat.completions.create({
               model,
               messages: [
-                createChunkSummaryPrompt(chunk, index, chunks.length),
+                createChunkSummaryPrompt(chunk, index, chunks.length, isInitialVisit, patient.name),
                 { role: "user", content: chunk }
               ],
               temperature: 0.3,
@@ -428,14 +423,15 @@ export async function POST(request: Request) {
 
       console.log(`Generated ${validSummaries.length} valid chunk summaries`);
 
-      // Step 2: Synthesize all summaries into final SOAP note with retries
+      // Step 2: Synthesize all summaries into final note with retries
       let attempts = 0;
       const maxAttempts = 3;
       
       while (attempts < maxAttempts) {
         try {
+          const finalContent = validSummaries.length > 1 ? validSummaries.join("\n") : transcript;
           const completion = await openai.chat.completions.create(
-            await createFinalSynthesisPrompt(transcript, isInitialVisit)
+            await createFinalSynthesisPrompt(finalContent, isInitialVisit, patient.name)
           );
 
           const responseContent = completion.choices[0]?.message?.content;
@@ -443,27 +439,22 @@ export async function POST(request: Request) {
             throw new Error('Empty response from OpenAI API');
           }
 
-          try {
-            const parsedContent = JSON.parse(responseContent.trim());
-            
-            // Validate the parsed content
-            if (!parsedContent.subjective || !parsedContent.objective || !parsedContent.assessment || !parsedContent.plan) {
-              throw new Error('Missing required SOAP note sections in response');
-            }
+          // Extract content from the response
+          const extractedContent = extractContentFromResponse(responseContent);
 
-            // Ensure all fields are strings
-            soapContent = {
-              subjective: String(parsedContent.subjective).trim(),
-              objective: String(parsedContent.objective).trim(),
-              assessment: String(parsedContent.assessment).trim(),
-              plan: String(parsedContent.plan).trim()
-            };
+          // Create note in database
+          const note = await prisma.note.create({
+            data: {
+              patientId,
+              transcript,
+              audioFileUrl,
+              isInitialVisit,
+              content: JSON.stringify(extractedContent),
+            },
+          });
 
-            break;
-          } catch (parseError) {
-            console.error('Error parsing GPT response:', parseError);
-            throw new Error('Failed to parse GPT response as valid JSON');
-          }
+          console.log('Note created:', note.id);
+          return NextResponse.json(note);
         } catch (error) {
           attempts++;
           if (attempts === maxAttempts) {
@@ -474,66 +465,18 @@ export async function POST(request: Request) {
         }
       }
 
-      // Validate and clean up the SOAP content
-      const requiredFields = ['subjective', 'objective', 'assessment', 'plan'] as const;
-      const missingFields = requiredFields.filter(field => !soapContent[field]);
-      if (missingFields.length > 0) {
-        console.error('Missing fields in GPT response:', missingFields, 'Content:', soapContent);
-        return NextResponse.json({
-          error: 'Invalid SOAP note format',
-          details: `Missing required fields: ${missingFields.join(', ')}`
-        }, { status: 500 });
-      }
-
-      // Ensure all fields are strings and remove any line breaks
-      requiredFields.forEach(field => {
-        if (typeof soapContent[field] !== 'string') {
-          soapContent[field] = String(soapContent[field]);
-        }
-        // Preserve line breaks but normalize them
-        soapContent[field] = soapContent[field]
-          .replace(/\r\n/g, '\n')  // Convert Windows line endings to Unix
-          .replace(/\r/g, '\n')    // Convert old Mac line endings to Unix
-          .trim();
-      });
-
-      try {
-        // Create SOAP note in database
-        const soapNote = await prisma.sOAPNote.create({
-          data: {
-            patientId,
-            transcript,
-            audioFileUrl,
-            isInitialVisit,
-            subjective: soapContent.subjective,
-            objective: soapContent.objective,
-            assessment: soapContent.assessment,
-            plan: soapContent.plan,
-          },
-        });
-
-        console.log('SOAP note created:', soapNote.id);
-        return NextResponse.json(soapNote);
-      } catch (error) {
-        console.error('Error saving SOAP note to database:', error);
-        return NextResponse.json({
-          error: 'Database error',
-          details: 'Failed to save SOAP note to database'
-        }, { status: 500 });
-      }
-
     } catch (error) {
       console.error('Error in OpenAI API call:', error);
       return NextResponse.json({
-        error: 'Failed to generate SOAP note',
+        error: 'Failed to generate note',
         details: error instanceof Error ? error.message : 'Error communicating with OpenAI API'
       }, { status: 500 });
     }
 
   } catch (error) {
-    console.error('Error in SOAP note generation:', error);
+    console.error('Error in note generation:', error);
     return NextResponse.json({ 
-      error: 'Failed to create SOAP note',
+      error: 'Failed to create note',
       details: error instanceof Error ? error.message : 'Unknown error occurred'
     }, { status: 500 });
   }
@@ -548,7 +491,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Patient ID is required' }, { status: 400 })
     }
 
-    const soapNotes = await prisma.sOAPNote.findMany({
+    const notes = await prisma.note.findMany({
       where: {
         patientId,
       },
@@ -557,9 +500,9 @@ export async function GET(request: Request) {
       },
     })
 
-    return NextResponse.json(soapNotes)
+    return NextResponse.json(notes)
   } catch (error) {
-    console.error('Error fetching SOAP notes:', error)
-    return NextResponse.json({ error: 'Failed to fetch SOAP notes' }, { status: 500 })
+    console.error('Error fetching notes:', error)
+    return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 })
   }
 }
