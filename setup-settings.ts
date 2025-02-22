@@ -1,56 +1,33 @@
 import { PrismaClient } from '@prisma/client'
+import { systemMessage as initialVisitPrompt } from './app/config/initialVisitPrompt'
+import { systemMessage as followUpVisitPrompt } from './app/config/followUpVisitPrompt'
 
 const prisma = new PrismaClient()
 
-const defaultSystemMessages = {
-  initialVisit: "You are a medical scribe assistant. Your task is to generate a SOAP note for an INITIAL VISIT based on the provided medical visit transcript.",
-  followUpVisit: "You are a medical scribe assistant. Your task is to generate a SOAP note for a FOLLOW-UP VISIT based on the provided medical visit transcript."
-};
-
 async function main() {
-  // First clear any existing data to avoid conflicts
-  await prisma.sOAPNote.deleteMany({});
-  await prisma.patient.deleteMany({});
-  await prisma.appSettings.deleteMany({});
-
-  // Restore settings with default system messages
-  const settings = await prisma.appSettings.upsert({
+  // Create or update default app settings
+  await prisma.appSettings.upsert({
     where: { id: 'default' },
     update: {
-      darkMode: true,
-      autoSave: true,
-      gptModel: 'gpt-4-turbo-preview',
-      initialVisitPrompt: defaultSystemMessages.initialVisit,
-      followUpVisitPrompt: defaultSystemMessages.followUpVisit,
-      updatedAt: new Date()
+      initialVisitPrompt: initialVisitPrompt.content,
+      followUpVisitPrompt: followUpVisitPrompt.content,
     },
     create: {
       id: 'default',
-      darkMode: true,
-      autoSave: true,
-      gptModel: 'gpt-4-turbo-preview',
-      initialVisitPrompt: defaultSystemMessages.initialVisit,
-      followUpVisitPrompt: defaultSystemMessages.followUpVisit,
-      updatedAt: new Date()
+      darkMode: false,
+      gptModel: 'gpt-4o',
+      initialVisitPrompt: initialVisitPrompt.content,
+      followUpVisitPrompt: followUpVisitPrompt.content,
+      autoSave: false,
     }
-  });
-  console.log('Settings restored:', settings);
+  })
 
-  // Restore Sarah's patient record
-  const sarah = await prisma.patient.create({
-    data: {
-      name: 'Sarah',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      isDeleted: false
-    }
-  });
-  console.log('Patient restored:', sarah);
+  console.log('Settings initialized successfully')
 }
 
 main()
-  .catch(e => {
-    console.error(e)
+  .catch((e) => {
+    console.log('Error:', e)
     process.exit(1)
   })
   .finally(async () => {

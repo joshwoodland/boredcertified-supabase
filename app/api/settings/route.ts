@@ -126,23 +126,25 @@ export async function POST(request: Request) {
         gptModel: data.gptModel,
         initialVisitPrompt: data.initialVisitPrompt,
         followUpVisitPrompt: data.followUpVisitPrompt,
+        autoSave: data.autoSave ?? false,
         updatedAt: new Date(),
       },
       create: {
         id: 'default',
-        darkMode: data.darkMode,
-        gptModel: data.gptModel,
-        initialVisitPrompt: data.initialVisitPrompt,
-        followUpVisitPrompt: data.followUpVisitPrompt,
+        darkMode: data.darkMode ?? false,
+        gptModel: data.gptModel ?? 'gpt-4o',
+        initialVisitPrompt: data.initialVisitPrompt ?? '',
+        followUpVisitPrompt: data.followUpVisitPrompt ?? '',
+        autoSave: data.autoSave ?? false,
         updatedAt: new Date(),
       },
     });
 
+    // Return the complete updated settings
     return NextResponse.json({
       ...settings,
-      systemMessages: updates,
-      initialVisitPrompt: updates.initialVisitPrompt?.content || settings.initialVisitPrompt,
-      followUpVisitPrompt: updates.followUpVisitPrompt?.content || settings.followUpVisitPrompt,
+      initialVisitPrompt: data.initialVisitPrompt,
+      followUpVisitPrompt: data.followUpVisitPrompt,
     });
   } catch (error) {
     console.error('Settings update failed:', error);

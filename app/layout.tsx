@@ -16,6 +16,20 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: `
+          .modal-open > main {
+            filter: brightness(40%) blur(1px);
+            transition: filter 0.2s ease-in-out;
+            pointer-events: none;
+          }
+          .settings-modal {
+            isolation: isolate;
+            pointer-events: auto;
+            filter: none !important;
+          }
+        `}} />
+      </head>
       <body className={`${inter.className} min-h-screen dark:bg-dark-main`}>
         <ThemeProvider />
         <main>

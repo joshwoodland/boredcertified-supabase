@@ -384,146 +384,152 @@ export default function Home() {
   const selectedPatient = patients.find(p => p.id === selectedPatientId);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-dark-text">Medical Scribe Assistant</h1>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setShowTrash(!showTrash)}
-            className={`p-2 rounded-full transition-colors ${
-              showTrash 
-                ? 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400' 
-                : 'hover:bg-gray-100 dark:hover:bg-dark-accent'
-            }`}
-            title={showTrash ? 'Show active patients' : 'Show trash'}
-          >
-            <FiTrash2 className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-dark-accent rounded-full transition-colors dark:text-dark-text"
-            title="Settings"
-          >
-            <FiSettings className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
-          {error}
-        </div>
-      )}
-
-      <div className="grid md:grid-cols-12 gap-6">
-        {/* Patient List */}
-        <div className="md:col-span-3">
-          <PatientList
-            patients={showTrash ? trashedPatientsData : patients}
-            selectedPatientId={selectedPatientId}
-            onSelectPatient={setSelectedPatientId}
-            onAddPatient={handleAddPatient}
-            onMoveToTrash={handleMoveToTrash}
-            onRestorePatient={handleRestorePatient}
-            onUpdatePatient={handleUpdatePatient}
-            showTrash={showTrash}
-          />
+    <>
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-dark-text">Medical Scribe Assistant</h1>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowTrash(!showTrash)}
+              className={`p-2 rounded-full transition-colors ${
+                showTrash 
+                  ? 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400' 
+                  : 'hover:bg-gray-100 dark:hover:bg-dark-accent'
+              }`}
+              title={showTrash ? 'Show active patients' : 'Show trash'}
+            >
+              <FiTrash2 className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => {
+                document.documentElement.classList.add('modal-open');
+                setIsSettingsOpen(true);
+              }}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-dark-accent rounded-full transition-colors dark:text-dark-text"
+              title="Settings"
+            >
+              <FiSettings className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        {/* Main Content Area */}
-        <div className="md:col-span-9 space-y-6">
-          <div className="bg-white dark:bg-dark-secondary rounded-lg shadow">
-            <div className="flex items-center justify-between p-6 border-b dark:border-dark-border">
-              <h2 className="text-2xl font-semibold dark:text-dark-text">Recording Session</h2>
-              {selectedPatient && (
-                <div className="text-gray-600 dark:text-dark-muted">
-                  Patient: <span className="font-medium dark:text-dark-text">{selectedPatient.name}</span>
-                </div>
-              )}
-            </div>
-            
-            <div className="p-6">
-              {selectedPatientId ? (
-                <div className="space-y-6">
-                  <div className="flex items-center gap-4">
-                    <button
-                      onClick={() => setIsManualInput(!isManualInput)}
-                      className={`px-4 py-2 rounded-md transition-colors ${
-                        isManualInput
-                          ? 'bg-blue-600 text-white dark:bg-blue-500'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-dark-accent dark:text-dark-text dark:hover:bg-dark-border'
-                      }`}
-                    >
-                      {isManualInput ? 'Switch to Recording' : 'Manual Input'}
-                    </button>
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
+            {error}
+          </div>
+        )}
+
+        <div className="grid md:grid-cols-12 gap-6">
+          {/* Patient List */}
+          <div className="md:col-span-3">
+            <PatientList
+              patients={showTrash ? trashedPatientsData : patients}
+              selectedPatientId={selectedPatientId}
+              onSelectPatient={setSelectedPatientId}
+              onAddPatient={handleAddPatient}
+              onMoveToTrash={handleMoveToTrash}
+              onRestorePatient={handleRestorePatient}
+              onUpdatePatient={handleUpdatePatient}
+              showTrash={showTrash}
+            />
+          </div>
+
+          {/* Main Content Area */}
+          <div className="md:col-span-9 space-y-6">
+            <div className="bg-white dark:bg-dark-secondary rounded-lg shadow">
+              <div className="flex items-center justify-between p-6 border-b dark:border-dark-border">
+                <h2 className="text-2xl font-semibold dark:text-dark-text">Recording Session</h2>
+                {selectedPatient && (
+                  <div className="text-gray-600 dark:text-dark-muted">
+                    Patient: <span className="font-medium dark:text-dark-text">{selectedPatient.name}</span>
                   </div>
-
-                  {isManualInput ? (
-                    <div className="space-y-4">
-                      <textarea
-                        value={manualTranscript}
-                        onChange={(e) => setManualTranscript(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            (e.target as HTMLTextAreaElement).blur();
-                            handleManualTranscriptSubmit();
-                          }
-                        }}
-                        placeholder="Paste or type your transcript here..."
-                        className="w-full h-48 p-4 border rounded-md dark:bg-dark-accent dark:border-dark-border dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted"
-                      />
+                )}
+              </div>
+              
+              <div className="p-6">
+                {selectedPatientId ? (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-4">
                       <button
-                        onClick={handleManualTranscriptSubmit}
-                        disabled={isProcessing}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+                        onClick={() => setIsManualInput(!isManualInput)}
+                        className={`px-4 py-2 rounded-md transition-colors ${
+                          isManualInput
+                            ? 'bg-blue-600 text-white dark:bg-blue-500'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-dark-accent dark:text-dark-text dark:hover:bg-dark-border'
+                        }`}
                       >
-                        Generate SOAP Note
+                        {isManualInput ? 'Switch to Recording' : 'Manual Input'}
                       </button>
                     </div>
-                  ) : (
-                    <AudioRecorder 
-                      onRecordingComplete={handleRecordingComplete}
-                      isProcessing={isProcessing}
-                    />
-                  )}
 
-                  {isProcessing && (
-                    <div className="text-center py-4">
-                      <div className="flex flex-col items-center gap-4">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
-                        <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                    {isManualInput ? (
+                      <div className="space-y-4">
+                        <textarea
+                          value={manualTranscript}
+                          onChange={(e) => setManualTranscript(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              (e.target as HTMLTextAreaElement).blur();
+                              handleManualTranscriptSubmit();
+                            }
+                          }}
+                          placeholder="Paste or type your transcript here..."
+                          className="w-full h-48 p-4 border rounded-md dark:bg-dark-accent dark:border-dark-border dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted"
+                        />
                         <button
-                          onClick={handleCancel}
-                          className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                          onClick={handleManualTranscriptSubmit}
+                          disabled={isProcessing}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
                         >
-                          cancel
+                          Generate SOAP Note
                         </button>
                       </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-gray-600 dark:text-dark-muted">Please select a patient to start recording</p>
-              )}
-            </div>
-          </div>
+                    ) : (
+                      <AudioRecorder 
+                        onRecordingComplete={handleRecordingComplete}
+                        isProcessing={isProcessing}
+                      />
+                    )}
 
-          {/* SOAP Notes Display */}
-          <div className="space-y-6 max-w-4xl mx-auto bg-gray-50 dark:bg-gray-900 p-6 rounded-lg">
-            {patientNotes.map((note, index) => (
-              <Note 
-                key={note.id} 
-                note={note} 
-                isLatest={index === 0}
-                forceCollapse={forceCollapse}
-              />
-            ))}
+                    {isProcessing && (
+                      <div className="text-center py-4">
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
+                          <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                          <button
+                            onClick={handleCancel}
+                            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                          >
+                            cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-gray-600 dark:text-dark-muted">Please select a patient to start recording</p>
+                )}
+              </div>
+            </div>
+
+            {/* SOAP Notes Display */}
+            <div className="space-y-6 max-w-4xl mx-auto bg-gray-50 dark:bg-gray-900 p-6 rounded-lg">
+              {patientNotes.map((note, index) => (
+                <Note 
+                  key={note.id} 
+                  note={note} 
+                  isLatest={index === 0}
+                  forceCollapse={forceCollapse}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
+      {/* Settings Modal - Outside the container */}
       <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-    </div>
+    </>
   );
 } 

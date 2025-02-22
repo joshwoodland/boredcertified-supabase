@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { getCurrentModel } from '@/app/utils/modelCache';
 
 const openai = new OpenAI();
 
@@ -12,8 +13,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Content is required' }, { status: 400 });
     }
 
+    const model = await getCurrentModel();
+
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
+      model,
       messages: [
         {
           role: 'system',
@@ -24,8 +27,7 @@ export async function POST(request: Request) {
 
 Example formats:
 - Reports improved anxiety. Started Lexapro 10mg, continue Trazodone 50mg.
-- Reports poor sleep and anxiety. Increased Lexapro to 20mg, continue Trazodone 50mg.
-- Reports stable mood, no changes. Continue Lexapro 10mg and Trazodone 50mg.
+- Reports poor sleep and anxiety. Increased Lexapro to 20mg, continue Wellbutrin 150mg.
 
 Be concise and focus only on these aspects. Use plain, direct language. Do not use any quotation marks in your response.`
         },

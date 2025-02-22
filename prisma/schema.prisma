@@ -31,6 +31,7 @@ model Note {
   patient       Patient  @relation(fields: [patientId], references: [id])
   transcript    String
   content       String
+  summary       String?  // Optional summary of the note for collapsed view
   audioFileUrl  String?
   isInitialVisit Boolean @default(false)
 }
@@ -38,7 +39,7 @@ model Note {
 model AppSettings {
   id                   String   @id @default("default")
   darkMode            Boolean  @default(false)
-  gptModel            String   @default("gpt-4-turbo-preview")
+  gptModel            String   @default("gpt-4o")
   initialVisitPrompt  String   @default("You are a medical scribe assistant. Your task is to generate a note for an INITIAL VISIT based on the provided medical visit transcript.")
   followUpVisitPrompt String   @default("You are a medical scribe assistant. Your task is to generate a note for a FOLLOW-UP VISIT based on the provided medical visit transcript.")
   autoSave            Boolean  @default(false)

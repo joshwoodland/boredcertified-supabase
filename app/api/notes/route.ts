@@ -13,12 +13,8 @@ const openai = new OpenAI({
 // Helper function to validate model name
 function isValidModel(model: string): boolean {
   const validModels = [
-    'gpt-4',
-    'gpt-4-turbo-preview',  // 4o
-    'gpt-4-0314',          // o1
-    'gpt-3.5-turbo',
-    'gpt-3.5-turbo-0125',  // 3o-mini
-    'gpt-3.5-turbo-0301',  // o3-mini
+    'gpt-4o',
+    'gpt-4o-mini'
   ];
   return validModels.includes(model);
 }
@@ -233,17 +229,14 @@ function supportsJsonFormat(model: string): boolean {
   return model.includes('turbo');
 }
 
-// Helper function to create completion parameters
-function createCompletionParams(model: string, messages: any[]) {
-  const params: any = {
-    model,
-    messages,
-    temperature: 0.7,
-    max_tokens: 4000,
-    response_format: { type: "text" }  // We want the raw text format since we're using markdown
-  };
-
-  return params;
+// Helper function to validate note structure
+function validateNoteStructure(content: any): boolean {
+  try {
+    // Basic structure check - just ensure we have a string
+    return typeof content === 'string' && content.length > 0;
+  } catch (error) {
+    return false;
+  }
 }
 
 // Define a ChatMessage type
@@ -277,10 +270,24 @@ function createChunkSummaryPrompt(
   }
 }
 
+// Helper function to create completion parameters
+function createCompletionParams(model: string, messages: any[]) {
+  const params: any = {
+    model,
+    messages,
+    temperature: 0.7,
+    max_tokens: 4000,
+    response_format: { type: "text" }
+  };
+
+  return params;
+}
+
 async function createFinalSynthesisPrompt(
   transcript: string,
   isInitialVisit: boolean,
-  patientName: string
+  patientName: string,
+  model: string
 ): Promise<ChatCompletionCreateParamsNonStreaming> {
   const rawSystemMessage = isInitialVisit ? systemMessages.initialVisit : systemMessages.followUpVisit;
   const formattedSystemMessage = formatSystemMessage(rawSystemMessage);
@@ -294,11 +301,62 @@ async function createFinalSynthesisPrompt(
   ];
 
   return {
-    model: 'gpt-4',
+    model,
     messages,
     temperature: 0.3,
-    max_tokens: 1000,
+    max_tokens: 4000,
+    response_format: { type: "text" }
   };
+}
+
+// Helper function to convert markdown sections to structured format
+function convertMarkdownToStructured(markdown: string): any {
+  const sections: any = {};
+  let currentMainSection = '';
+  let currentSubSection = '';
+  
+  const lines = markdown.split('\n');
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+
+    // Main section (##)
+    if (line.startsWith('## ')) {
+      currentMainSection = line.replace('## ', '').replace(/\*\*/g, '').trim();
+      sections[currentMainSection] = {};
+      currentSubSection = '';
+    }
+    // Subsection (###)
+    else if (line.startsWith('### ')) {
+      currentSubSection = line.replace('### ', '').replace(/\*\*/g, '').trim();
+      if (currentMainSection) {
+        if (typeof sections[currentMainSection] === 'string') {
+          sections[currentMainSection] = {
+            content: sections[currentMainSection],
+            [currentSubSection]: ''
+          };
+        } else {
+          sections[currentMainSection][currentSubSection] = '';
+        }
+      }
+    }
+    // Content
+    else if (currentMainSection) {
+      if (currentSubSection) {
+        if (typeof sections[currentMainSection][currentSubSection] === 'string') {
+          sections[currentMainSection][currentSubSection] += (sections[currentMainSection][currentSubSection] ? '\n' : '') + line;
+        }
+      } else {
+        if (typeof sections[currentMainSection] === 'string') {
+          sections[currentMainSection] += (sections[currentMainSection] ? '\n' : '') + line;
+        } else {
+          sections[currentMainSection].content = (sections[currentMainSection].content || '') + (sections[currentMainSection].content ? '\n' : '') + line;
+        }
+      }
+    }
+  }
+
+  return sections;
 }
 
 export async function POST(request: Request) {
@@ -431,7 +489,7 @@ export async function POST(request: Request) {
         try {
           const finalContent = validSummaries.length > 1 ? validSummaries.join("\n") : transcript;
           const completion = await openai.chat.completions.create(
-            await createFinalSynthesisPrompt(finalContent, isInitialVisit, patient.name)
+            await createFinalSynthesisPrompt(finalContent, isInitialVisit, patient.name, model)
           );
 
           const responseContent = completion.choices[0]?.message?.content;
@@ -439,17 +497,14 @@ export async function POST(request: Request) {
             throw new Error('Empty response from OpenAI API');
           }
 
-          // Extract content from the response
-          const extractedContent = extractContentFromResponse(responseContent);
-
-          // Create note in database
+          // Create note in database with the formatted string
           const note = await prisma.note.create({
             data: {
               patientId,
               transcript,
               audioFileUrl,
               isInitialVisit,
-              content: JSON.stringify(extractedContent),
+              content: JSON.stringify({ content: responseContent }),
             },
           });
 

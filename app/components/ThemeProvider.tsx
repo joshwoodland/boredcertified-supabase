@@ -4,6 +4,8 @@ import { useEffect } from 'react';
 
 export default function ThemeProvider() {
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     async function initializeTheme() {
       try {
         const response = await fetch('/api/settings');
@@ -24,14 +26,18 @@ export default function ThemeProvider() {
       } catch (error) {
         console.error('Error loading theme settings:', error);
         // Try to load from localStorage as fallback
-        const savedSettings = localStorage.getItem('appSettings');
-        if (savedSettings) {
-          const settings = JSON.parse(savedSettings);
-          if (settings.darkMode) {
-            document.documentElement.classList.add('dark');
-          } else {
-            document.documentElement.classList.remove('dark');
+        try {
+          const savedSettings = localStorage.getItem('appSettings');
+          if (savedSettings) {
+            const settings = JSON.parse(savedSettings);
+            if (settings.darkMode) {
+              document.documentElement.classList.add('dark');
+            } else {
+              document.documentElement.classList.remove('dark');
+            }
           }
+        } catch (e) {
+          console.error('Error loading from localStorage:', e);
         }
       }
     }

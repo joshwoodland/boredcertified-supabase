@@ -6,6 +6,8 @@ import Toast from './Toast';
 import SystemMessageEditor from './SystemMessageEditor';
 import ConfirmationDialog from './ConfirmationDialog';
 import { flushSync } from 'react-dom';
+import { MODEL_OPTIONS } from '@/app/config/models';
+import { invalidateModelCache } from '@/app/utils/modelCache';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -19,17 +21,19 @@ interface AppSettings {
   followUpVisitPrompt: string;
 }
 
+type SaveButtonState = 'hidden' | 'unsaved' | 'saved' | 'saving' | 'error';
+
 export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [settings, setSettings] = useState<AppSettings>({
-    darkMode: false,
-    gptModel: 'gpt-4',
+    darkMode: true,
+    gptModel: 'gpt-4o',
     initialVisitPrompt: '',
     followUpVisitPrompt: '',
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const [saveButtonState, setSaveButtonState] = useState<'hidden' | 'unsaved' | 'saved'>('hidden');
+  const [saveButtonState, setSaveButtonState] = useState<SaveButtonState>('hidden');
   const [showConfirmation, setShowConfirmation] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const initialRender = useRef(true);
@@ -44,82 +48,77 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     settingsRef.current = settings;
   }, [settings]);
 
-  const handleSave = useCallback(async () => {
-    console.log('handleSave triggered', { 
-      currentSettings: settingsRef.current,
-      isSaveInProgress: !!savePromiseRef.current 
-    });
-
-    if (savePromiseRef.current) {
-      console.log('Save already in progress, waiting...');
-      await savePromiseRef.current;
-    }
-
-    const startTime = Date.now();
-
-    const settingsToSave = {
-      ...settingsRef.current,
-      initialVisitDescription: 'System message for initial psychiatric evaluation visits',
-      followUpVisitDescription: 'System message for follow-up psychiatric visits',
-    };
-
-    console.log('Preparing to save settings:', settingsToSave);
-
+  const handleSave = async () => {
+    setSaveButtonState('saving');
     try {
-      savePromiseRef.current = new Promise(async (resolve, reject) => {
-        try {
-          console.log('Starting save operation');
-          setIsSaving(true);
-          const response = await fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settingsToSave),
-          });
-          
-          const data = await response.json();
-          console.log('Save response received:', { ok: response.ok, data });
-          
-          if (!response.ok) {
-            throw new Error(data.error || data.details || 'Failed to save settings');
-          }
-          
-          initialSettings.current = settingsToSave;
-          console.log('Updated initialSettings:', initialSettings.current);
-          
-          const elapsedTime = Date.now() - startTime;
-          if (elapsedTime < 500) {
-            await new Promise(resolve => setTimeout(resolve, 500 - elapsedTime));
-          }
-          
-          setIsDirty(false);
-          setSaveButtonState('saved');
-          resolve();
-        } catch (error) {
-          console.error('Save error:', error);
-          setToast({ 
-            message: error instanceof Error ? error.message : 'Failed to save settings', 
-            type: 'error' 
-          });
-          reject(error);
-        } finally {
-          console.log('Save operation completed');
-          setIsSaving(false);
-        }
+      const response = await fetch('/api/settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          darkMode: settings.darkMode,
+          gptModel: settings.gptModel,
+          initialVisitPrompt: settings.initialVisitPrompt,
+          followUpVisitPrompt: settings.followUpVisitPrompt,
+          initialVisitDescription: 'System message for initial psychiatric evaluation visits',
+          followUpVisitDescription: 'System message for follow-up psychiatric visits',
+        }),
       });
 
-      await savePromiseRef.current;
-    } finally {
-      savePromiseRef.current = null;
+      if (!response.ok) {
+        throw new Error('Failed to save settings');
+      }
+
+      const data = await response.json();
+      
+      // Update settings with the response data to ensure we have the latest
+      const newSettings = {
+        darkMode: data.darkMode,
+        gptModel: data.gptModel,
+        initialVisitPrompt: data.initialVisitPrompt,
+        followUpVisitPrompt: data.followUpVisitPrompt,
+      };
+      
+      setSettings(newSettings);
+      initialSettings.current = newSettings;
+      
+      // Invalidate the model cache to ensure we use the new settings
+      invalidateModelCache();
+      
+      setIsDirty(false);
+      setSaveButtonState('saved');
+      setToast({ message: 'Settings saved successfully', type: 'success' });
+
+      // Reset save button state after a delay
+      setTimeout(() => {
+        setSaveButtonState('hidden');
+      }, 2000);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      setSaveButtonState('error');
+      setToast({ message: 'Failed to save settings', type: 'error' });
     }
-  }, []);
+  };
 
   const handleClose = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    
     if (isDirty) {
       setShowConfirmation(true);
     } else {
+      document.documentElement.classList.remove('modal-open');
       onClose();
     }
   }, [isDirty, onClose]);
+
+  const handleConfirmClose = () => {
+    if (typeof window === 'undefined') return;
+    
+    document.documentElement.classList.remove('modal-open');
+    setShowConfirmation(false);
+    onClose();
+  };
 
   const handleChange = useCallback((changes: Partial<AppSettings>) => {
     console.log('handleChange called with:', changes);
@@ -130,31 +129,31 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
       saveTimeoutId.current = undefined;
     }
 
-    flushSync(() => {
-      setSettings(currentSettings => {
-        const newSettings = { ...currentSettings, ...changes };
-        console.log('Updating settings:', {
-          currentSettings,
-          changes,
-          newSettings
-        });
-        return newSettings;
+    // Update settings immediately
+    setSettings(currentSettings => {
+      const newSettings = { ...currentSettings, ...changes };
+      console.log('Updating settings:', {
+        currentSettings,
+        changes,
+        newSettings
       });
+      return newSettings;
     });
 
     setIsDirty(true);
     setSaveButtonState('unsaved');
 
+    // Schedule save if no save is in progress
     if (!savePromiseRef.current) {
       console.log('Scheduling new save operation');
       saveTimeoutId.current = setTimeout(() => {
-        console.log('Save timeout triggered, current settings:', settings);
+        console.log('Save timeout triggered, current settings:', settingsRef.current);
         handleSave();
       }, 1000);
     } else {
       console.log('Save already in progress, skipping new save schedule');
     }
-  }, [handleSave, settings]);
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -214,6 +213,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   }, [isOpen]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
     if (settings.darkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -221,14 +222,38 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     }
   }, [settings.darkMode]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    if (isOpen) {
+      document.documentElement.classList.add('modal-open');
+    } else {
+      document.documentElement.classList.remove('modal-open');
+    }
+    return () => {
+      document.documentElement.classList.remove('modal-open');
+    };
+  }, [isOpen]);
+
   const fetchSettings = async () => {
     try {
       const response = await fetch('/api/settings');
       const data = await response.json();
-      setSettings(data);
-      initialSettings.current = data;
+      
+      // Update settings with the response data
+      const newSettings = {
+        darkMode: data.darkMode,
+        gptModel: data.gptModel,
+        initialVisitPrompt: data.initialVisitPrompt,
+        followUpVisitPrompt: data.followUpVisitPrompt,
+      };
+      
+      setSettings(newSettings);
+      initialSettings.current = newSettings;
       setIsDirty(false);
+      setSaveButtonState('hidden');
     } catch (error) {
+      console.error('Error fetching settings:', error);
       if (!initialSettings.current) {
         initialSettings.current = settings;
       }
@@ -296,116 +321,112 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     return null;
   };
 
-  if (!isOpen) {
-    return null;
-  }
+  if (!isOpen) return null;
 
   return (
     <>
-      {showConfirmation && (
-        <div className="fixed inset-0 z-[100]">
-          <ConfirmationDialog
-            isOpen={showConfirmation}
-            onConfirm={async () => {
-              await handleSave();
-              setShowConfirmation(false);
-              onClose();
-            }}
-            onCancel={() => {
-              setShowConfirmation(false);
-              onClose();
-            }}
-          />
-        </div>
-      )}
+      {/* Modal Container - Higher z-index to cover everything */}
+      <div className="settings-modal fixed inset-0 z-[9999]">
+        {/* Backdrop - Semi-transparent overlay */}
+        <div 
+          className="fixed inset-0 bg-black/30"
+          aria-hidden="true"
+          onClick={handleClose}
+        />
+        
+        {/* Modal Content */}
+        <div className="relative flex items-center justify-center min-h-screen p-4">
+          <div
+            ref={modalRef}
+            className="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-lg shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-semibold dark:text-white flex items-center gap-2">
+                  <FiSettings className="w-6 h-6" />
+                  Settings
+                </h2>
+                <button
+                  onClick={handleClose}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <FiX className="w-6 h-6" />
+                </button>
+              </div>
 
-      <div className="fixed inset-0 bg-black opacity-50 z-[40]" />
-
-      <div className="fixed inset-0 z-[50] flex items-center justify-center">
-        <div
-          ref={modalRef}
-          className="bg-white dark:bg-dark-secondary rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col relative"
-        >
-          <div className="p-6 border-b dark:border-dark-border sticky top-0 bg-white dark:bg-dark-secondary z-[51] flex justify-between items-center">
-            <h2 id="settings-title" className="text-2xl font-semibold flex items-center gap-2 dark:text-dark-text">
-              <FiSettings className="w-6 h-6" />
-              Settings
-            </h2>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleClose();
-              }}
-              className="text-gray-500 hover:text-gray-700 dark:text-dark-muted dark:hover:text-dark-text"
-              aria-label="Close settings"
-            >
-              <FiX className="w-6 h-6" />
-            </button>
-          </div>
-
-          <div className="p-6 space-y-10 overflow-y-auto flex-1">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 dark:text-dark-text">
-                {settings.darkMode ? <FiMoon /> : <FiSun />}
-                Dark Mode
-              </label>
-              <button
-                onClick={() => handleChange({ darkMode: !settings.darkMode })}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  settings.darkMode ? 'bg-blue-500' : 'bg-gray-200 dark:bg-dark-accent'
-                }`}
-                role="switch"
-                aria-checked={settings.darkMode}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    settings.darkMode ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2 dark:text-dark-text">
-                GPT Model
-              </label>
-              <select
-                value={settings.gptModel}
-                onChange={(e) => handleChange({ gptModel: e.target.value })}
-                className="w-full p-2 border rounded-md dark:bg-dark-accent dark:border-dark-border dark:text-dark-text focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="gpt-4">GPT-4 (Base)</option>
-                <option value="gpt-4-turbo-preview">GPT-4 Turbo (4o) - Recommended</option>
-                <option value="gpt-4-0314">GPT-4 March (o1)</option>
-                <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Base)</option>
-                <option value="gpt-3.5-turbo-0125">GPT-3.5 Turbo Mini (3o-mini)</option>
-                <option value="gpt-3.5-turbo-0301">GPT-3.5 Turbo Mini (o3-mini - Newest)</option>
-              </select>
-              <p className="mt-1 text-sm text-gray-500 dark:text-dark-muted">
-                Select the model to use for generating SOAP notes. GPT-4 Turbo is recommended for best results.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="relative">
-                <div className="flex items-center mb-4">
-                  <h3 className="text-lg font-medium dark:text-dark-text">
-                    Chat GPT System Messages
-                  </h3>
-                  <div className="relative inline-flex ml-2">
+              <div className="space-y-6">
+                {/* Dark Mode Toggle */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-700 dark:text-gray-200">Dark Mode</span>
+                    {settings.darkMode ? <FiMoon /> : <FiSun />}
+                  </div>
+                  <div className="relative inline-block w-12 align-middle select-none">
                     <button
-                      className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors focus:outline-none group"
-                      aria-label="Information about system messages"
+                      role="switch"
+                      aria-checked={settings.darkMode}
+                      onClick={() => handleChange({ darkMode: !settings.darkMode })}
+                      className={`
+                        relative block w-12 h-6 rounded-full
+                        ${settings.darkMode ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}
+                        transition-colors duration-200
+                      `}
                     >
-                      <FiInfo className="w-4 h-4" />
-                      <div className="hidden group-hover:block absolute left-full ml-2 top-1/2 -translate-y-1/2 z-50 p-2 bg-white dark:bg-dark-secondary rounded-md shadow-lg">
-                        These are your specific instructions for Chat GPT to create your note how you want it.
-                      </div>
+                      <span 
+                        className={`
+                          absolute top-1/2 left-1 -translate-y-1/2
+                          h-4 w-4 rounded-full bg-white shadow
+                          transform transition-transform duration-200 ease-in-out
+                          ${settings.darkMode ? 'translate-x-6' : ''}
+                        `}
+                      />
                     </button>
                   </div>
                 </div>
-                <div className="space-y-4 [&_textarea]:!bg-dark-accent [&_textarea]:!border-dark-border [&_textarea]:!text-dark-text [&::-webkit-scrollbar-track]:!bg-dark-accent [&::-webkit-scrollbar-thumb]:!bg-gray-500/50 [&::-webkit-scrollbar-corner]:!bg-dark-accent">
+
+                {/* Model Selection */}
+                <div className="space-y-2">
+                  <label className="block text-gray-700 dark:text-gray-200">
+                    GPT Model
+                  </label>
+                  <div className="space-y-2">
+                    {MODEL_OPTIONS.map((model) => (
+                      <div
+                        key={model.value}
+                        className="flex items-center gap-2"
+                      >
+                        <input
+                          type="radio"
+                          id={model.value}
+                          name="gptModel"
+                          value={model.value}
+                          checked={settings.gptModel === model.value}
+                          onChange={(e) => handleChange({ gptModel: e.target.value })}
+                          className="text-blue-600 focus:ring-blue-500 dark:focus:ring-blue-600"
+                        />
+                        <label
+                          htmlFor={model.value}
+                          className="flex items-center gap-2 text-gray-700 dark:text-gray-200"
+                        >
+                          {model.label}
+                          {model.isRecommended && (
+                            <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-0.5 rounded-full">
+                              Recommended
+                            </span>
+                          )}
+                          <FiInfo
+                            className="text-gray-400 cursor-help"
+                            title={model.description}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* System Messages */}
+                <div className="space-y-4">
                   <SystemMessageEditor
                     label="Initial Visit System Message"
                     value={settings.initialVisitPrompt}
@@ -419,21 +440,30 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                 </div>
               </div>
             </div>
-          </div>
-
-          <div className="p-4 border-t dark:border-dark-border flex justify-end bg-white dark:bg-dark-secondary items-center">
-            <div className="text-sm text-gray-600 dark:text-dark-muted">
-              {renderSaveStatus()}
+            <div className="p-6 border-t dark:border-dark-border">
+              <div className="flex justify-end">
+                {renderSaveStatus()}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Toast */}
       {toast && (
         <Toast
           message={toast.message}
           type={toast.type}
           onClose={() => setToast(null)}
+        />
+      )}
+
+      {/* Confirmation Dialog */}
+      {showConfirmation && (
+        <ConfirmationDialog
+          isOpen={true}
+          onConfirm={handleConfirmClose}
+          onCancel={() => setShowConfirmation(false)}
         />
       )}
     </>

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { systemMessage as initialVisitPrompt } from '../app/config/initialVisitPrompt'
 import { systemMessage as followUpVisitPrompt } from '../app/config/followUpVisitPrompt'
+import { MODEL_MAP } from '../app/config/models'
 
 const prisma = new PrismaClient()
 
@@ -15,7 +16,7 @@ async function main() {
     create: {
       id: 'default',
       darkMode: false,
-      gptModel: 'gpt-4-turbo-preview',
+      gptModel: 'gpt-4o',
       initialVisitPrompt: initialVisitPrompt.content,
       followUpVisitPrompt: followUpVisitPrompt.content,
       autoSave: false,
