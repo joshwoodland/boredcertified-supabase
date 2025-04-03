@@ -7,6 +7,9 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        montserrat: ['var(--font-montserrat)'],
+      },
       colors: {
         primary: {
           50: '#f0f9ff',

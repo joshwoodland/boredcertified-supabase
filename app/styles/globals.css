@@ -22,6 +22,31 @@ body {
   background: rgb(var(--background-rgb));
 }
 
+.font-montserrat {
+  font-family: var(--font-montserrat), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.gradient-text {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-image: linear-gradient(to right, #4f46e5, #7c3aed, #d946ef);
+  background-size: 200% auto;
+  animation: shine 8s ease-in-out infinite;
+}
+
+@keyframes shine {
+  0% {
+    background-position: 0% center;
+  }
+  50% {
+    background-position: 100% center;
+  }
+  100% {
+    background-position: 0% center;
+  }
+}
+
 /* Custom scrollbar styles for dark mode */
 .dark textarea::-webkit-scrollbar {
   width: 8px;

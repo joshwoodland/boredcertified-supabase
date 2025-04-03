@@ -51,16 +51,17 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const handleSave = async () => {
     setSaveButtonState('saving');
     try {
+      const currentSettings = settingsRef.current;
       const response = await fetch('/api/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          darkMode: settings.darkMode,
-          gptModel: settings.gptModel,
-          initialVisitPrompt: settings.initialVisitPrompt,
-          followUpVisitPrompt: settings.followUpVisitPrompt,
+          darkMode: currentSettings.darkMode,
+          gptModel: currentSettings.gptModel,
+          initialVisitPrompt: currentSettings.initialVisitPrompt,
+          followUpVisitPrompt: currentSettings.followUpVisitPrompt,
           initialVisitDescription: 'System message for initial psychiatric evaluation visits',
           followUpVisitDescription: 'System message for follow-up psychiatric visits',
         }),
@@ -72,16 +73,8 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
       const data = await response.json();
       
-      // Update settings with the response data to ensure we have the latest
-      const newSettings = {
-        darkMode: data.darkMode,
-        gptModel: data.gptModel,
-        initialVisitPrompt: data.initialVisitPrompt,
-        followUpVisitPrompt: data.followUpVisitPrompt,
-      };
-      
-      setSettings(newSettings);
-      initialSettings.current = newSettings;
+      // Only update the initialSettings reference, don't change current settings
+      initialSettings.current = { ...currentSettings };
       
       // Invalidate the model cache to ensure we use the new settings
       invalidateModelCache();
@@ -132,6 +125,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     // Update settings immediately
     setSettings(currentSettings => {
       const newSettings = { ...currentSettings, ...changes };
+      settingsRef.current = newSettings; // Update the ref immediately
       console.log('Updating settings:', {
         currentSettings,
         changes,

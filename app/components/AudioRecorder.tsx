@@ -79,6 +79,9 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   const [finalTranscript, setFinalTranscript] = useState('');
   const [usedMessageIndices, setUsedMessageIndices] = useState<Set<number>>(new Set());
   const [currentLoadingMessage, setCurrentLoadingMessage] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [usingWhisper, setUsingWhisper] = useState(false);
+  const [whisperStatus, setWhisperStatus] = useState<string | null>(null);
   
   // Use refs for audio context and stream to prevent re-renders
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -141,6 +144,14 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
     try {
       // Clean up any existing recording
       cleanup();
+      
+      // Reset any previous errors
+      setError(null);
+
+      // Check if mediaDevices API is available
+      if (!navigator || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Media devices API not available in this browser or context');
+      }
 
       // Get audio stream
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -187,6 +198,7 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
       setFinalTranscript('');
     } catch (error) {
       console.error('Error starting recording:', error);
+      setError(error instanceof Error ? error.message : 'Failed to start recording');
       cleanup();
     }
   }, [cleanup]);
@@ -196,20 +208,91 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       
-      // Use the final transcript that's been accumulated
+      // Get the audio blob
       const audioBlob = new Blob(chunksRef.current, { type: 'audio/wav' });
-      const transcriptToUse = finalTranscript || transcript;
       
-      if (transcriptToUse.trim()) {
-        onRecordingComplete(audioBlob, transcriptToUse);
-      } else {
-        console.error('No transcript available');
+      // Store the browser transcript as backup
+      const browserTranscript = finalTranscript || transcript;
+      
+      // Send to local Whisper API
+      console.log("Sending audio to Whisper API...");
+      setWhisperStatus("Sending to Whisper API...");
+      
+      try {
+        // Create FormData for the file upload
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'recording.wav');
+        
+        // Use environment variable or fallback to development URL
+        // Repository: https://github.com/hoshwoodland/whisperAPI
+        const whisperApiUrl = process.env.NEXT_PUBLIC_WHISPER_API_URL || 'https://whisperapi.vercel.app';
+        
+        // Send to Whisper API
+        fetch(`${whisperApiUrl}/transcribe`, {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => {
+          if (!response.ok) {
+            setWhisperStatus("Whisper API error: " + response.status);
+            throw new Error(`Whisper API error: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          // Use Whisper transcript
+          setWhisperStatus("Whisper transcription complete!");
+          console.log("WHISPER TRANSCRIPT:", data.transcript);
+          console.log("BROWSER TRANSCRIPT:", browserTranscript);
+          
+          const whisperTranscript = data.transcript?.trim();
+          
+          if (!whisperTranscript) {
+            throw new Error("Whisper returned empty transcript");
+          }
+          
+          console.log("Using Whisper transcript (length:", whisperTranscript.length, "chars)");
+          setUsingWhisper(true);
+          
+          // Send the Whisper transcript to the onRecordingComplete callback
+          onRecordingComplete(audioBlob, whisperTranscript);
+        })
+        .catch(error => {
+          // Log error and fall back to browser transcript
+          setWhisperStatus("Whisper failed, using browser transcript");
+          console.error("Whisper API failed:", error);
+          setUsingWhisper(false);
+          
+          if (!browserTranscript.trim()) {
+            console.error('No transcript available from either source');
+            setError('No transcript was generated. Please try again.');
+            cleanup();
+            setTranscript('');
+            setFinalTranscript('');
+            return;
+          }
+          
+          console.log("Falling back to browser transcript (length:", browserTranscript.length, "chars)");
+          
+          // Use browser transcript as fallback
+          onRecordingComplete(audioBlob, browserTranscript);
+        })
+        .finally(() => {
+          // Reset for next recording
+          cleanup();
+          setTranscript('');
+          setFinalTranscript('');
+        });
+      } catch (error) {
+        // Handle any errors in the try block (unlikely but possible)
+        console.error("Error sending to Whisper:", error);
+        onRecordingComplete(audioBlob, browserTranscript);
+        
+        // Reset for next recording
+        cleanup();
+        setTranscript('');
+        setFinalTranscript('');
       }
-      
-      // Reset for next recording
-      cleanup();
-      setTranscript('');
-      setFinalTranscript('');
     }
   }, [transcript, finalTranscript, onRecordingComplete, cleanup]);
 
@@ -225,6 +308,14 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
 
   return (
     <div className="flex flex-col items-center gap-6">
+      {error && (
+        <div className="w-full max-w-md bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border border-red-200 dark:border-red-800 mb-2">
+          <p className="text-red-800 dark:text-red-200">
+            {error}. Please try using Chrome, Edge, or Safari and ensure you've granted microphone permissions.
+          </p>
+        </div>
+      )}
+      
       <div className="relative flex justify-center items-center">
         <button
           onClick={isRecording ? stopRecording : startRecording}
@@ -234,7 +325,7 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
             flex items-center justify-center
             ${isRecording 
               ? 'bg-red-500 hover:bg-red-600 scale-110' 
-              : 'bg-blue-500 hover:bg-blue-600 hover:scale-105'
+              : 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 hover:scale-105'
             }
             disabled:opacity-50 disabled:cursor-not-allowed
             shadow-lg hover:shadow-xl
@@ -298,6 +389,11 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
           <p className="mt-2 text-gray-600 dark:text-gray-400 animate-fade-in transition-opacity duration-500">
             {currentLoadingMessage}
           </p>
+          {usingWhisper && (
+            <div className="mt-2 text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-full px-3 py-1 inline-block">
+              Using Whisper AI Transcription
+            </div>
+          )}
         </div>
       )}
 
@@ -322,6 +418,13 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
           />
         </Suspense>
       </div>
+      
+      {/* Whisper Status Indicator */}
+      {whisperStatus && (
+        <div className="mt-2 text-sm p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-700 dark:text-blue-400">
+          {whisperStatus}
+        </div>
+      )}
     </div>
   );
 }

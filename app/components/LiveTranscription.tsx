@@ -51,7 +51,7 @@ interface Window {
 export default function LiveTranscription({ isRecording, onTranscriptUpdate }: LiveTranscriptionProps) {
   const [transcript, setTranscript] = useState('');
   const [isSupported, setIsSupported] = useState(false);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef(false);
   const fullTranscriptRef = useRef('');
   const timeoutRef = useRef<NodeJS.Timeout>();
@@ -75,6 +75,12 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
   }, []);
 
   useEffect(() => {
+    // Check if browser is supported by checking window object exists
+    if (typeof window === 'undefined') {
+      setIsSupported(false);
+      return;
+    }
+    
     // Check if SpeechRecognition is supported
     const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
     setIsSupported(!!SpeechRecognition);
@@ -202,7 +208,8 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
           bg-gray-50 dark:bg-gray-800/50 backdrop-blur-sm
           p-6 rounded-2xl h-[200px] relative overflow-y-auto
           transition-all duration-300 shadow-lg
-        ` : 'text-center py-2'}
+          mt-8
+        ` : 'text-center py-2 mt-8'}
       `}
     >
       {transcript || isRecording ? (

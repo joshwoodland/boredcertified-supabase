@@ -1,0 +1,50 @@
+# SOAP Note Formatting
+
+The application now includes a post-processing step that transforms raw markdown-formatted SOAP notes into clean, properly formatted HTML or styled text for easier reading and copying to EMR systems.
+
+## Formatting Features
+
+- **Headings**: Markdown headings (e.g., `### Subjective`, `## Assessment`) are converted to **bolded headings**
+- **Subsections**: Bold subsection titles (e.g., `**Mood:**`, `**Affect:**`) are preserved as bold text
+- **Paragraphs**: Properly formatted with spacing between sections
+- **Lists**: Bullet points are converted to proper HTML lists
+
+## How It Works
+
+The formatting happens automatically in two places:
+
+1. When viewing notes in the Note component:
+   - Click "Show Formatted" to see the formatted version
+   - Click "Show Raw" to see the original markdown
+   - Use "Copy Note" to copy the formatted note to your clipboard
+
+2. When using the API:
+   - The `/api/chat` endpoint now returns both `content` (raw) and `formattedContent` (HTML)
+   - The `/api/notes` endpoint stores both versions in the database
+
+## Using Formatted Content in Custom Applications
+
+If you're building a custom application that uses our API, you can access the formatted content:
+
+```typescript
+// Example API response
+{
+  "content": "### Subjective\n\n**Chief Complaint:** Anxiety and mood swings...",
+  "formattedContent": "<strong>Subjective</strong><br><br><strong>Chief Complaint:</strong> Anxiety and mood swings..."
+}
+```
+
+## Formatting Utility Function
+
+You can also use the formatter directly in your code:
+
+```typescript
+import { formatSoapNote } from '@/app/utils/formatSoapNote';
+
+// Format a markdown note
+const formattedHtml = formatSoapNote(markdownText);
+
+// For plain text formatting without HTML
+import { formatSoapNotePlainText } from '@/app/utils/formatSoapNote';
+const plainText = formatSoapNotePlainText(markdownText);
+``` 

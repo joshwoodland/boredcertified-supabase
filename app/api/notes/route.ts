@@ -5,6 +5,7 @@ import systemMessages from '@/app/config/systemMessages'
 import { ChatCompletionMessageParam } from 'openai/resources/chat'
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
 import { formatSystemMessage } from '@/app/utils/formatSystemMessage'
+import { formatSoapNote } from '@/app/utils/formatSoapNote'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -107,11 +108,7 @@ interface NoteContent {
 // Helper function to extract content from GPT response
 function extractContentFromResponse(responseContent: string): NoteContent {
   try {
-    // First try parsing as JSON
-    const parsedContent = JSON.parse(responseContent.trim());
-    return parsedContent;
-  } catch (error) {
-    // If not JSON, try to parse as markdown/text
+    // First try parsing as markdown/text
     const sections: NoteContent = {};
     
     // Split content into sections by headers
@@ -130,6 +127,15 @@ function extractContentFromResponse(responseContent: string): NoteContent {
     }
     
     return sections;
+  } catch (error) {
+    // If parsing as text fails for some reason, try JSON as fallback
+    try {
+      const parsedContent = JSON.parse(responseContent.trim());
+      return parsedContent;
+    } catch (jsonError) {
+      // If all parsing fails, just return the raw text
+      return { content: responseContent.trim() };
+    }
   }
 }
 
@@ -226,14 +232,16 @@ function mergeSoapSections(soapResults: SOAPContent[]): SOAPContent {
 
 // Helper function to check if model supports JSON response format
 function supportsJsonFormat(model: string): boolean {
-  return model.includes('turbo');
+  // Disable JSON format for all models to ensure they use the detailed template format
+  return false;
 }
 
 // Helper function to validate note structure
 function validateNoteStructure(content: any): boolean {
   try {
-    // Basic structure check - just ensure we have a string
-    return typeof content === 'string' && content.length > 0;
+    // Basic structure check - just ensure we have a string or object with content
+    return (typeof content === 'string' && content.length > 0) || 
+           (typeof content === 'object' && content !== null);
   } catch (error) {
     return false;
   }
@@ -311,52 +319,11 @@ async function createFinalSynthesisPrompt(
 
 // Helper function to convert markdown sections to structured format
 function convertMarkdownToStructured(markdown: string): any {
-  const sections: any = {};
-  let currentMainSection = '';
-  let currentSubSection = '';
-  
-  const lines = markdown.split('\n');
-  for (let line of lines) {
-    line = line.trim();
-    if (!line) continue;
-
-    // Main section (##)
-    if (line.startsWith('## ')) {
-      currentMainSection = line.replace('## ', '').replace(/\*\*/g, '').trim();
-      sections[currentMainSection] = {};
-      currentSubSection = '';
-    }
-    // Subsection (###)
-    else if (line.startsWith('### ')) {
-      currentSubSection = line.replace('### ', '').replace(/\*\*/g, '').trim();
-      if (currentMainSection) {
-        if (typeof sections[currentMainSection] === 'string') {
-          sections[currentMainSection] = {
-            content: sections[currentMainSection],
-            [currentSubSection]: ''
-          };
-        } else {
-          sections[currentMainSection][currentSubSection] = '';
-        }
-      }
-    }
-    // Content
-    else if (currentMainSection) {
-      if (currentSubSection) {
-        if (typeof sections[currentMainSection][currentSubSection] === 'string') {
-          sections[currentMainSection][currentSubSection] += (sections[currentMainSection][currentSubSection] ? '\n' : '') + line;
-        }
-      } else {
-        if (typeof sections[currentMainSection] === 'string') {
-          sections[currentMainSection] += (sections[currentMainSection] ? '\n' : '') + line;
-        } else {
-          sections[currentMainSection].content = (sections[currentMainSection].content || '') + (sections[currentMainSection].content ? '\n' : '') + line;
-        }
-      }
-    }
-  }
-
-  return sections;
+  // Return both the original markdown content and formatted HTML version
+  return { 
+    content: markdown,
+    formattedContent: formatSoapNote(markdown)
+  };
 }
 
 export async function POST(request: Request) {
@@ -497,16 +464,48 @@ export async function POST(request: Request) {
             throw new Error('Empty response from OpenAI API');
           }
 
-          // Create note in database with the formatted string
+          // Format the note content with HTML
+          const formattedContent = formatSoapNote(responseContent);
+          
+          // Create note in database with both raw and formatted content
           const note = await prisma.note.create({
             data: {
               patientId,
               transcript,
               audioFileUrl,
               isInitialVisit,
-              content: JSON.stringify({ content: responseContent }),
+              content: JSON.stringify({ 
+                content: responseContent,
+                formattedContent 
+              }),
             },
           });
+
+          // Generate a summary focusing on medication changes
+          try {
+            const summaryResponse = await fetch(new URL('/api/summary', request.url).toString(), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ content: responseContent }),
+            });
+            
+            if (summaryResponse.ok) {
+              const { summary } = await summaryResponse.json();
+              
+              // Update the note with the generated summary
+              await prisma.note.update({
+                where: { id: note.id },
+                data: { summary }
+              });
+              
+              note.summary = summary;
+            }
+          } catch (summaryError) {
+            console.error('Error generating note summary:', summaryError);
+            // Continue without summary if there's an error
+          }
 
           console.log('Note created:', note.id);
           return NextResponse.json(note);

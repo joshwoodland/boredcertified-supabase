@@ -5,6 +5,7 @@ import PatientList from './components/PatientList';
 import AudioRecorder from './components/AudioRecorder';
 import Note from './components/Note';
 import Settings from './components/Settings';
+import SoapNoteGenerator from './components/SoapNoteGenerator';
 import { FiSettings, FiTrash2 } from 'react-icons/fi';
 
 interface Patient {
@@ -303,6 +304,10 @@ export default function Home() {
         throw new Error('No transcript generated. Please try recording again.');
       }
 
+      // Log transcript details for debugging
+      console.log(`Sending transcript to note API (${transcript.length} chars)`);
+      console.log("Transcript preview:", transcript.substring(0, 100) + (transcript.length > 100 ? "..." : ""));
+
       // Upload audio file
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.wav');
@@ -387,14 +392,25 @@ export default function Home() {
     <>
       <div className="container mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-dark-text">Medical Scribe Assistant</h1>
+          <div className="flex items-center space-x-3">
+            <h1 className="text-6xl font-black gradient-text tracking-tight drop-shadow-sm font-montserrat">
+              BORED CERTIFIED
+            </h1>
+            <span className="px-3 py-1 text-xs uppercase tracking-widest bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md font-bold shadow-md">BETA</span>
+          </div>
           <div className="flex items-center gap-4">
+            <a 
+              href="/formatter"
+              className="flex items-center px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all shadow-md hover:shadow-lg"
+            >
+              Format SOAP Notes
+            </a>
             <button
               onClick={() => setShowTrash(!showTrash)}
-              className={`p-2 rounded-full transition-colors ${
+              className={`p-2 rounded-full transition-colors shadow-md ${
                 showTrash 
-                  ? 'bg-red-100 text-red-600 dark:bg-red-900/20 dark:text-red-400' 
-                  : 'hover:bg-gray-100 dark:hover:bg-dark-accent'
+                  ? 'bg-red-500 text-white dark:bg-red-600' 
+                  : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'
               }`}
               title={showTrash ? 'Show active patients' : 'Show trash'}
             >
@@ -462,48 +478,77 @@ export default function Home() {
                       </button>
                     </div>
 
-                    {isManualInput ? (
-                      <div className="space-y-4">
+                    {/* Manual Transcript Input Section */}
+                    {isManualInput && (
+                      <div className="w-full mt-6 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+                        <h2 className="text-lg font-semibold mb-4 dark:text-white">Transcript Entry</h2>
                         <textarea
                           value={manualTranscript}
                           onChange={(e) => setManualTranscript(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              (e.target as HTMLTextAreaElement).blur();
-                              handleManualTranscriptSubmit();
-                            }
-                          }}
-                          placeholder="Paste or type your transcript here..."
-                          className="w-full h-48 p-4 border rounded-md dark:bg-dark-accent dark:border-dark-border dark:text-dark-text placeholder:text-gray-400 dark:placeholder:text-dark-muted"
-                        />
-                        <button
-                          onClick={handleManualTranscriptSubmit}
+                          placeholder="Paste or type the visit transcript here..."
+                          className="w-full min-h-[300px] p-4 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                           disabled={isProcessing}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
-                        >
-                          Generate SOAP Note
-                        </button>
-                      </div>
-                    ) : (
-                      <AudioRecorder 
-                        onRecordingComplete={handleRecordingComplete}
-                        isProcessing={isProcessing}
-                      />
-                    )}
-
-                    {isProcessing && (
-                      <div className="text-center py-4">
-                        <div className="flex flex-col items-center gap-4">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
-                          <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                        />
+                        
+                        {/* Replace the manual buttons with the SoapNoteGenerator component */}
+                        <SoapNoteGenerator 
+                          patientId={selectedPatientId}
+                          transcript={manualTranscript}
+                          onNoteGenerated={(note) => {
+                            setCurrentNote(note);
+                            setManualTranscript('');
+                            setIsManualInput(false);
+                            setForceCollapse(prev => !prev);
+                            fetchPatientNotes(selectedPatientId!);
+                          }}
+                          onError={(errorMessage) => setError(errorMessage)}
+                          disabled={isProcessing || !selectedPatientId || !manualTranscript.trim()}
+                        />
+                        
+                        {isProcessing && (
+                          <div className="mt-4 text-center">
+                            <div className="flex justify-center mb-2">
+                              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                            </div>
+                            <p className="text-gray-600 dark:text-gray-400">{loadingMessage}</p>
+                            <button
+                              onClick={handleCancel}
+                              className="mt-4 px-4 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-end mt-4">
                           <button
-                            onClick={handleCancel}
-                            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                            onClick={() => setIsManualInput(false)}
+                            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                           >
-                            cancel
+                            Cancel
                           </button>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Audio Recording Section */}
+                    {!isManualInput && (
+                      <div className="w-full">
+                        <AudioRecorder 
+                          onRecordingComplete={handleRecordingComplete}
+                          isProcessing={isProcessing}
+                        />
+                      </div>
+                    )}
+
+                    {isProcessing && !isManualInput && (
+                      <div className="text-center py-4">
+                        <button
+                          onClick={handleCancel}
+                          className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                        >
+                          cancel
+                        </button>
                       </div>
                     )}
                   </div>

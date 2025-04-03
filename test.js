@@ -1,1 +1,0 @@
-const fs = require("fs"); const content = fs.readFileSync("test_note.md", "utf8"); const headings = {}; content.split("\n").forEach(line => { const match = line.match(/^(#{1,6})\s+(.+)$/); if (match) { headings[match[2].trim()] = match[1].length; }}); console.log(JSON.stringify(headings, null, 2));

@@ -9,7 +9,10 @@ interface SystemMessageEditorProps {
 }
 
 function detectFormatting(content: string): { headings: Map<string, number>, cleanContent: string } {
-  const lines = content.split('\n');
+  // Remove any existing format strings
+  const cleanedContent = content.replace(/^format:\{[^}]*\}\n/gm, '');
+  
+  const lines = cleanedContent.split('\n');
   const headings = new Map<string, number>();
   
   lines.forEach(line => {
@@ -21,18 +24,21 @@ function detectFormatting(content: string): { headings: Map<string, number>, cle
     }
   });
 
-  return { headings, cleanContent: content };
+  return { headings, cleanContent: cleanedContent };
 }
 
 export default function SystemMessageEditor({ label, value, onChange }: SystemMessageEditorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [localValue, setLocalValue] = useState(value);
+  const [localValue, setLocalValue] = useState('');
   const [isDirty, setIsDirty] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const changeTimeoutRef = useRef<NodeJS.Timeout>();
 
   useEffect(() => {
-    setLocalValue(value);
+    // Remove format string from display value
+    const displayValue = value.replace(/^format:\{[^}]*\}\n/gm, '');
+    setLocalValue(displayValue);
   }, [value]);
 
   useEffect(() => {
@@ -41,10 +47,20 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
     }
   }, [isExpanded]);
 
+  useEffect(() => {
+    return () => {
+      if (changeTimeoutRef.current) {
+        clearTimeout(changeTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleClose = () => {
     if (!isDirty || confirm('You have unsaved changes. Are you sure you want to close?')) {
       setIsExpanded(false);
-      setLocalValue(value);
+      // Remove format string from display value
+      const displayValue = value.replace(/^format:\{[^}]*\}\n/gm, '');
+      setLocalValue(displayValue);
       setIsDirty(false);
     }
   };
@@ -56,14 +72,26 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
   };
 
   const handleChange = (newValue: string) => {
+    // Update the display value without format string
     setLocalValue(newValue);
+    setIsDirty(true);
+    
     const { headings, cleanContent } = detectFormatting(newValue);
-    
-    // Preserve the detected formatting
     const formatGuide = Object.fromEntries(headings);
-    const formattedContent = `format:${JSON.stringify(formatGuide)}\n${cleanContent}`;
     
-    onChange(formattedContent);
+    // Only add format string if there are headings
+    const formattedContent = Object.keys(formatGuide).length > 0 
+      ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
+      : cleanContent;
+    
+    // Debounce the onChange callback
+    if (changeTimeoutRef.current) {
+      clearTimeout(changeTimeoutRef.current);
+    }
+    
+    changeTimeoutRef.current = setTimeout(() => {
+      onChange(formattedContent);
+    }, 300);
   };
 
   const handleSave = () => {
@@ -72,12 +100,22 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
       flushSync(() => {});
       requestAnimationFrame(() => {
         const finalValue = textareaRef.current ? textareaRef.current.value : localValue;
-        onChange(finalValue);
+        const { headings, cleanContent } = detectFormatting(finalValue);
+        const formatGuide = Object.fromEntries(headings);
+        const formattedContent = Object.keys(formatGuide).length > 0 
+          ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
+          : cleanContent;
+        onChange(formattedContent);
         setIsDirty(false);
         setIsExpanded(false);
       });
     } else {
-      onChange(localValue);
+      const { headings, cleanContent } = detectFormatting(localValue);
+      const formatGuide = Object.fromEntries(headings);
+      const formattedContent = Object.keys(formatGuide).length > 0 
+        ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
+        : cleanContent;
+      onChange(formattedContent);
       setIsDirty(false);
       setIsExpanded(false);
     }
@@ -91,8 +129,12 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
       
       <div className="relative">
         <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={localValue}
+          onChange={(e) => {
+            setLocalValue(e.target.value);
+            setIsDirty(true);
+            handleChange(e.target.value);
+          }}
           className="w-full h-32 p-2 border rounded-md resize-none dark:bg-dark-accent dark:border-dark-border dark:text-dark-text focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:!bg-dark-accent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500/50 [&::-webkit-scrollbar-corner]:!bg-dark-accent"
           placeholder={`Enter the system message for ${label.toLowerCase()}...`}
         />
