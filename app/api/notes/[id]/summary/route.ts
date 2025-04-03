@@ -6,12 +6,19 @@ import { getCurrentModel } from '@/app/utils/modelCache';
 const prisma = new PrismaClient();
 const openai = new OpenAI();
 
+// Define an interface for the context object expected by Next.js
+interface RouteContext {
+  params: {
+    id: string;
+  };
+}
+
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: RouteContext // Use the defined interface for the second argument
 ) {
   try {
-    const noteId = params.id;
+    const noteId = context.params.id; // Access id via context.params
     
     // Find the note
     const note = await prisma.note.findUnique({
