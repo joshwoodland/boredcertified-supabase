@@ -6,19 +6,19 @@ import { getCurrentModel } from '@/app/utils/modelCache';
 const prisma = new PrismaClient();
 const openai = new OpenAI();
 
-// Define an interface for the context object expected by Next.js
-interface RouteContext {
-  params: {
-    id: string;
-  };
-}
+// Removing the interface as it didn't resolve the type error
+// interface RouteContext {
+//   params: {
+//     id: string;
+//   };
+// }
 
 export async function POST(
   request: NextRequest,
-  context: RouteContext // Use the defined interface for the second argument
+  { params }: { params: { id: string } } // Revert to destructured params type
 ) {
   try {
-    const noteId = context.params.id; // Access id via context.params
+    const noteId = params.id; // Access id directly via params
     
     // Find the note
     const note = await prisma.note.findUnique({
