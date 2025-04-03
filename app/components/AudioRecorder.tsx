@@ -80,7 +80,7 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   const [usedMessageIndices, setUsedMessageIndices] = useState<Set<number>>(new Set());
   const [currentLoadingMessage, setCurrentLoadingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [usingWhisper, setUsingWhisper] = useState(false);
+  const [usingBackendTranscription, setUsingBackendTranscription] = useState(false);
   const [whisperStatus, setWhisperStatus] = useState<string | null>(null);
   
   // Use refs for audio context and stream to prevent re-renders
@@ -204,97 +204,113 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   }, [cleanup]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording') {
+    if (mediaRecorderRef.current?.state === 'recording' && audioContextRef.current) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       
-      // Get the audio blob
-      const audioBlob = new Blob(chunksRef.current, { type: 'audio/wav' });
+      // 1. Concatenate Float32Array chunks
+      const totalLength = chunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+      const concatenatedData = new Float32Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunksRef.current) {
+        concatenatedData.set(chunk, offset);
+        offset += chunk.length;
+      }
       
-      // Store the browser transcript as backup
+      // 2. Create WAV buffer using the helper function
+      const sampleRate = audioContextRef.current.sampleRate;
+      const wavBuffer = createWavBuffer(concatenatedData, sampleRate);
+      
+      // 3. Create Blob from the WAV ArrayBuffer
+      const audioBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+      
+      // Store the browser transcript as backup (still potentially useful)
       const browserTranscript = finalTranscript || transcript;
       
-      // Send to local Whisper API
-      console.log("Sending audio to Whisper API...");
-      setWhisperStatus("Sending to Whisper API...");
+      // Send to OUR backend API route
+      console.log("Sending audio to backend API (/api/transcribe)...");
+      setWhisperStatus("Processing audio via backend..."); // Update status message
       
       try {
         // Create FormData for the file upload
         const formData = new FormData();
-        formData.append('file', audioBlob, 'recording.wav');
+        formData.append('file', audioBlob, 'recording.wav'); // Key matches API route expectation
         
-        // Use environment variable or fallback to development URL
-        // Repository: https://github.com/hoshwoodland/whisperAPI
-        const whisperApiUrl = process.env.NEXT_PUBLIC_WHISPER_API_URL || 'https://whisperapi.vercel.app';
-        
-        // Send to Whisper API
-        fetch(`${whisperApiUrl}/transcribe`, {
+        // Send to our internal API route
+        fetch('/api/transcribe', { // Updated URL
           method: 'POST',
           body: formData
         })
-        .then(response => {
+        .then(async response => { // Add async here to await response.json()
+          const responseBody = await response.json(); // Parse JSON regardless of status
           if (!response.ok) {
-            setWhisperStatus("Whisper API error: " + response.status);
-            throw new Error(`Whisper API error: ${response.status}`);
+            // Use error message from backend if available
+            const errorMessage = responseBody.error || `Server error: ${response.status}`;
+            setWhisperStatus(`Backend Error: ${errorMessage}`); 
+            throw new Error(errorMessage);
           }
-          return response.json();
+          return responseBody; // Contains { transcript: "..." } or { error: "..." }
         })
         .then(data => {
-          // Use Whisper transcript
-          setWhisperStatus("Whisper transcription complete!");
-          console.log("WHISPER TRANSCRIPT:", data.transcript);
-          console.log("BROWSER TRANSCRIPT:", browserTranscript);
+          // Use Google Cloud transcript from our API route
+          setWhisperStatus("Transcription complete!"); 
+          console.log("BACKEND TRANSCRIPT:", data.transcript);
+          console.log("BROWSER TRANSCRIPT (for comparison):", browserTranscript);
           
-          const whisperTranscript = data.transcript?.trim();
+          const backendTranscript = data.transcript?.trim();
           
-          if (!whisperTranscript) {
-            throw new Error("Whisper returned empty transcript");
+          if (backendTranscript === undefined || backendTranscript === null) { // Check for undefined/null explicitly
+            throw new Error("Backend returned invalid transcript data");
           }
           
-          console.log("Using Whisper transcript (length:", whisperTranscript.length, "chars)");
-          setUsingWhisper(true);
+          // Use the backend transcript even if empty, as GCSTT might genuinely return nothing
+          console.log("Using backend transcript (length:", backendTranscript.length, "chars)");
+          setUsingBackendTranscription(true);
           
-          // Send the Whisper transcript to the onRecordingComplete callback
-          onRecordingComplete(audioBlob, whisperTranscript);
+          // Send the backend transcript to the onRecordingComplete callback
+          onRecordingComplete(audioBlob, backendTranscript); 
         })
         .catch(error => {
-          // Log error and fall back to browser transcript
-          setWhisperStatus("Whisper failed, using browser transcript");
-          console.error("Whisper API failed:", error);
-          setUsingWhisper(false);
+          // Log error and decide if fallback is needed
+          console.error("Backend API failed:", error);
+          // Don't automatically fall back, as backend error might be config issue
+          setError(`Transcription failed: ${error.message}. Please check console or try again.`);
+          setWhisperStatus(`Error: ${error.message}`);
           
-          if (!browserTranscript.trim()) {
-            console.error('No transcript available from either source');
-            setError('No transcript was generated. Please try again.');
-            cleanup();
-            setTranscript('');
-            setFinalTranscript('');
-            return;
-          }
+          // Optionally, fall back to browser transcript if backend consistently fails
+          // console.log("Falling back to browser transcript due to backend error.");
+          // onRecordingComplete(audioBlob, browserTranscript);
           
-          console.log("Falling back to browser transcript (length:", browserTranscript.length, "chars)");
-          
-          // Use browser transcript as fallback
-          onRecordingComplete(audioBlob, browserTranscript);
-        })
-        .finally(() => {
-          // Reset for next recording
+          // Reset state even on error
           cleanup();
           setTranscript('');
           setFinalTranscript('');
+        })
+        .finally(() => {
+          // Reset for next recording unless error handler did it
+          if (error === null) { // Only cleanup/reset if no error occurred in catch
+             cleanup();
+             setTranscript('');
+             setFinalTranscript('');
+          }
         });
       } catch (error) {
-        // Handle any errors in the try block (unlikely but possible)
-        console.error("Error sending to Whisper:", error);
-        onRecordingComplete(audioBlob, browserTranscript);
-        
-        // Reset for next recording
+        // Handle synchronous errors (e.g., FormData creation failed - unlikely)
+        console.error("Error setting up transcription request:", error);
+        setError(error instanceof Error ? error.message : 'Unknown error during setup');
+        setWhisperStatus("Error preparing request");
+        setIsRecording(false); // Ensure UI is updated
         cleanup();
         setTranscript('');
         setFinalTranscript('');
       }
+    } else if (!audioContextRef.current) {
+      console.error("AudioContext not available, cannot process recording.");
+      setError("Audio processing failed. Please refresh and try again.");
+      setIsRecording(false); // Ensure UI reflects stopped state
+      cleanup(); // Clean up resources
     }
-  }, [transcript, finalTranscript, onRecordingComplete, cleanup]);
+  }, [transcript, finalTranscript, onRecordingComplete, cleanup, error]); // Added error dependency
 
   const handleTranscriptUpdate = useCallback((newTranscript: string, isFinal: boolean) => {
     if (isFinal) {
@@ -389,9 +405,9 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
           <p className="mt-2 text-gray-600 dark:text-gray-400 animate-fade-in transition-opacity duration-500">
             {currentLoadingMessage}
           </p>
-          {usingWhisper && (
+          {usingBackendTranscription && (
             <div className="mt-2 text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-full px-3 py-1 inline-block">
-              Using Whisper AI Transcription
+              Using Cloud Transcription
             </div>
           )}
         </div>
