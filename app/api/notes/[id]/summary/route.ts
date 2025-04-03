@@ -15,10 +15,17 @@ const openai = new OpenAI();
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } } // Revert to destructured params type
+  context: any // Use 'any' type as a diagnostic step
 ) {
   try {
-    const noteId = params.id; // Access id directly via params
+    // Access params through the context object, assuming it has a params property
+    const noteId = context?.params?.id; 
+
+    // Add a check to ensure noteId was found
+    if (!noteId) {
+      console.error('Could not extract noteId from context params');
+      return NextResponse.json({ error: 'Invalid request context' }, { status: 400 });
+    }
     
     // Find the note
     const note = await prisma.note.findUnique({
