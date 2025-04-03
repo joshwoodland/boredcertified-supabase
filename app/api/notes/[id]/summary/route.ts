@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import OpenAI from 'openai';
 import { getCurrentModel } from '@/app/utils/modelCache';
@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 const openai = new OpenAI();
 
 export async function POST(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
