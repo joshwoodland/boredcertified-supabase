@@ -49,3 +49,6 @@ prisma/dev.db-journal
 
 # venv
 .venv/
+
+# Other projects/folders
+Creating my own Lindy/
