@@ -51,17 +51,27 @@ interface Window {
 export default function LiveTranscription({ isRecording, onTranscriptUpdate }: LiveTranscriptionProps) {
   const [transcript, setTranscript] = useState('');
   const [isSupported, setIsSupported] = useState(false);
+  const [networkError, setNetworkError] = useState(false);
+  const [networkErrorMessage, setNetworkErrorMessage] = useState('');
+  const [noSpeechDetected, setNoSpeechDetected] = useState(false);
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef(false);
   const fullTranscriptRef = useRef('');
   const timeoutRef = useRef<NodeJS.Timeout>();
   const lastResultIndexRef = useRef(0);
   const interimResultRef = useRef('');
+  const retryCountRef = useRef(0);
+  const noSpeechCountRef = useRef(0);
+  const lastActivityRef = useRef(Date.now());
+  const watchdogRef = useRef<NodeJS.Timeout>();
 
   // Cleanup function
   const cleanup = useCallback(() => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
+    }
+    if (watchdogRef.current) {
+      clearInterval(watchdogRef.current);
     }
     if (recognitionRef.current) {
       try {
@@ -72,6 +82,11 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
     }
     lastResultIndexRef.current = 0;
     interimResultRef.current = '';
+    retryCountRef.current = 0;
+    noSpeechCountRef.current = 0;
+    setNetworkError(false);
+    setNetworkErrorMessage('');
+    setNoSpeechDetected(false);
   }, []);
 
   useEffect(() => {
@@ -92,6 +107,13 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
       recognition.lang = 'en-US';
 
       recognition.onresult = (event: any) => {
+        // Update activity timestamp
+        lastActivityRef.current = Date.now();
+        
+        // Reset no-speech warning when we get results
+        noSpeechCountRef.current = 0;
+        setNoSpeechDetected(false);
+        
         let currentTranscript = '';
         let isFinal = false;
 
@@ -130,8 +152,84 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
       };
 
       recognition.onerror = (event: any) => {
+        // Update activity timestamp
+        lastActivityRef.current = Date.now();
+        
         console.error('Speech recognition error:', event.error);
+        
         if (event.error === 'no-speech') {
+          // Increment no-speech counter
+          noSpeechCountRef.current += 1;
+          
+          // Only show the no-speech message after 3 consecutive occurrences
+          if (noSpeechCountRef.current >= 3) {
+            setNoSpeechDetected(true);
+          }
+          
+          // Still restart recognition
+          if (isRecordingRef.current && recognition.state === 'inactive') {
+            timeoutRef.current = setTimeout(() => {
+              try {
+                recognition.start();
+              } catch (error) {
+                console.error('Error restarting recognition:', error);
+              }
+            }, 100);
+          }
+          return;
+        }
+        
+        // Reset no-speech counter for other errors
+        noSpeechCountRef.current = 0;
+        setNoSpeechDetected(false);
+        
+        if (event.error === 'network') {
+          setNetworkError(true);
+          retryCountRef.current += 1;
+          
+          // Set a more informative error message
+          setNetworkErrorMessage(
+            retryCountRef.current > 3 
+              ? 'Persistent network issues. Check your connection.'
+              : 'Network connection issue. Attempting to reconnect...'
+          );
+          
+          // Replace exponential backoff with a quicker fixed retry delay
+          // Use a short fixed delay (500ms) for faster recovery
+          const retryDelay = 500;
+          
+          // For network errors, retry with fixed delay if still recording
+          if (isRecordingRef.current && recognition.state === 'inactive') {
+            timeoutRef.current = setTimeout(() => {
+              try {
+                recognition.start();
+                
+                // If reconnection is successful, reset error states after a short delay
+                setTimeout(() => {
+                  if (isRecordingRef.current) {
+                    setNetworkError(false);
+                    setNetworkErrorMessage('');
+                    retryCountRef.current = 0;
+                  }
+                }, 2000);
+              } catch (error) {
+                console.error('Error restarting recognition after network error:', error);
+                
+                // If we fail to restart, try again immediately
+                if (isRecordingRef.current) {
+                  timeoutRef.current = setTimeout(() => {
+                    try {
+                      recognition.start();
+                    } catch (innerError) {
+                      console.error('Error on second restart attempt:', innerError);
+                      // Update error message for persistent failures
+                      setNetworkErrorMessage('Unable to reconnect. Try clicking "Retry" or restarting the recording.');
+                    }
+                  }, 100);
+                }
+              }
+            }, retryDelay);
+          }
           return;
         }
         
@@ -164,6 +262,10 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
       fullTranscriptRef.current = '';
       interimResultRef.current = '';
       lastResultIndexRef.current = 0;
+      retryCountRef.current = 0;
+      noSpeechCountRef.current = 0;
+      setNetworkError(false);
+      setNoSpeechDetected(false);
       setTranscript('');
       
       try {
@@ -184,11 +286,108 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Auto-scroll to bottom when transcript updates
-    if (transcriptContainerRef.current) {
-      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+    // Always auto-scroll to bottom when transcript updates during recording
+    if (transcriptContainerRef.current && isRecording) {
+      const container = transcriptContainerRef.current;
+      
+      // Using setTimeout to ensure the DOM has updated
+      setTimeout(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }, 0);
+    }
+  }, [transcript, isRecording]);
+
+  // Always scroll to bottom when transcript updates, even when not recording
+  useEffect(() => {
+    if (transcriptContainerRef.current && transcript) {
+      const container = transcriptContainerRef.current;
+      
+      // Using setTimeout to ensure the DOM has updated
+      setTimeout(() => {
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }, 0);
     }
   }, [transcript]);
+
+  // Add a manual retry function
+  const handleManualRetry = useCallback(() => {
+    if (!recognitionRef.current || !isRecordingRef.current) return;
+    
+    try {
+      setNetworkError(false);
+      setNetworkErrorMessage('');
+      retryCountRef.current = 0;
+      
+      // Clear any pending timeouts before retrying
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      
+      recognitionRef.current.stop();
+      setTimeout(() => {
+        try {
+          recognitionRef.current.start();
+        } catch (error) {
+          console.error('Error in manual retry:', error);
+          setNetworkErrorMessage('Failed to restart. Please try again.');
+        }
+      }, 100);
+    } catch (error) {
+      console.error('Error in manual retry:', error);
+    }
+  }, []);
+
+  // Add a function to check if recognition is active
+  const checkRecognitionActive = useCallback(() => {
+    if (isRecordingRef.current && recognitionRef.current) {
+      const now = Date.now();
+      const timeSinceLastActivity = now - lastActivityRef.current;
+      
+      // If it's been more than 5 seconds since the last activity (result or error)
+      // and we should be recording, but recognition state is inactive, restart it
+      if (timeSinceLastActivity > 5000) {
+        try {
+          const recognition = recognitionRef.current;
+          
+          // Only restart if we're in inactive state
+          if (recognition.state === 'inactive' || recognition.state === '') {
+            console.log('Watchdog: Restarting inactive recognition service');
+            recognition.stop();
+            setTimeout(() => {
+              try {
+                recognition.start();
+                lastActivityRef.current = Date.now();
+              } catch (error) {
+                console.error('Watchdog: Error restarting recognition service:', error);
+              }
+            }, 100);
+          }
+        } catch (error) {
+          console.error('Watchdog: Error checking recognition state:', error);
+        }
+      }
+    }
+  }, []);
+
+  // Add a useEffect to set up the watchdog timer
+  useEffect(() => {
+    // Set up watchdog timer to check for inactive recognition every 2 seconds
+    if (isRecording) {
+      watchdogRef.current = setInterval(checkRecognitionActive, 2000);
+    } else if (watchdogRef.current) {
+      clearInterval(watchdogRef.current);
+    }
+    
+    return () => {
+      if (watchdogRef.current) {
+        clearInterval(watchdogRef.current);
+      }
+    };
+  }, [isRecording, checkRecognitionActive]);
 
   if (!isSupported) {
     return (
@@ -203,24 +402,77 @@ export default function LiveTranscription({ isRecording, onTranscriptUpdate }: L
   return (
     <div 
       ref={transcriptContainerRef}
-      className={`
-        ${transcript || isRecording ? `
-          bg-gray-50 dark:bg-gray-800/50 backdrop-blur-sm
-          p-6 rounded-2xl h-[200px] relative overflow-y-auto
-          transition-all duration-300 shadow-lg
-          mt-8
-        ` : 'text-center py-2 mt-8'}
-      `}
+      className="w-full bg-gray-800 dark:bg-gray-800 p-6 rounded-2xl relative shadow-lg"
+      style={{
+        height: '200px',
+        maxHeight: '200px',
+        overflowY: 'auto',
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(156, 163, 175, 0.5) transparent',
+        /* WebKit browsers */
+        WebkitOverflowScrolling: 'touch'
+      }}
     >
-      {transcript || isRecording ? (
-        <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
-          {transcript || 'Listening...'}
-        </p>
-      ) : (
-        <p className="text-gray-400 dark:text-gray-500 text-sm">
-          Click the button above to start recording
-        </p>
-      )}
+      <style jsx>{`
+        div::-webkit-scrollbar {
+          width: 8px;
+        }
+        div::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        div::-webkit-scrollbar-thumb {
+          background-color: rgba(156, 163, 175, 0.5);
+          border-radius: 20px;
+          border: 3px solid transparent;
+        }
+        .dark div::-webkit-scrollbar-thumb {
+          background-color: rgba(75, 85, 99, 0.5);
+        }
+      `}</style>
+      <div className="h-full">
+        {networkError && (
+          <div className="bg-red-600/20 text-red-200 px-3 py-2 rounded-md mb-3 text-sm">
+            <div className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <span className="flex-1">{networkErrorMessage || `Network connection issue. Reconnecting... (Attempt ${retryCountRef.current})`}</span>
+            </div>
+            <div className="mt-2 flex justify-end">
+              <button
+                onClick={handleManualRetry}
+                className="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded text-xs transition-colors"
+              >
+                Retry Now
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {noSpeechDetected && (
+          <div className="bg-amber-600/20 text-amber-200 px-3 py-2 rounded-md mb-3 text-sm flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+            </svg>
+            No speech detected. Please check if:
+            <ul className="list-disc ml-6 mt-1">
+              <li>Your microphone is working</li>
+              <li>You're speaking loud enough</li>
+              <li>You've allowed microphone access</li>
+            </ul>
+          </div>
+        )}
+        
+        {transcript || isRecording ? (
+          <p className="text-white whitespace-pre-wrap leading-relaxed">
+            {transcript || 'Listening...'}
+          </p>
+        ) : (
+          <p className="text-gray-400 dark:text-gray-400 text-sm">
+            Click the button above to start recording
+          </p>
+        )}
+      </div>
       {isRecording && (
         <div className="absolute top-4 right-4 flex items-center gap-2">
           <span className="flex h-2 w-2">

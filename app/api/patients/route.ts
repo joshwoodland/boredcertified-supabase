@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { Prisma } from '@prisma/client'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const showDeleted = searchParams.get('showDeleted') === 'true'
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   console.log('POST /api/patients - Starting request processing');
   
   // Check database connection first
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
     const json = await request.json()
     const { id, action, name } = json

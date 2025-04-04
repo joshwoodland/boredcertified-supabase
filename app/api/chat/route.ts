@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { formatSoapNote } from '@/app/utils/formatSoapNote';
 
@@ -7,7 +7,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     // Parse request body
     const body = await request.json();

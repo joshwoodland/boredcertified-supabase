@@ -80,14 +80,15 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   const [usedMessageIndices, setUsedMessageIndices] = useState<Set<number>>(new Set());
   const [currentLoadingMessage, setCurrentLoadingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [usingBackendTranscription, setUsingBackendTranscription] = useState(false);
-  const [whisperStatus, setWhisperStatus] = useState<string | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editableTranscript, setEditableTranscript] = useState('');
   
   // Use refs for audio context and stream to prevent re-renders
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<CustomMediaRecorder | null>(null);
   const chunksRef = useRef<Float32Array[]>([]);
+  const audioBlobRef = useRef<Blob | null>(null);
 
   // Get a random unused loading message
   const getRandomLoadingMessage = useCallback(() => {
@@ -96,24 +97,44 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
     
     if (unusedIndices.length === 0) {
       // Reset if all messages have been used
-      setUsedMessageIndices(new Set());
       const randomIndex = Math.floor(Math.random() * loadingMessages.length);
-      setUsedMessageIndices(new Set([randomIndex]));
       return loadingMessages[randomIndex];
     }
     
     const randomIndex = unusedIndices[Math.floor(Math.random() * unusedIndices.length)];
-    setUsedMessageIndices(prev => new Set([...Array.from(prev), randomIndex]));
     return loadingMessages[randomIndex];
   }, [usedMessageIndices]);
 
   // Update loading message every 3 seconds
   useEffect(() => {
     if (isProcessing) {
-      setCurrentLoadingMessage(getRandomLoadingMessage());
+      // Get initial message without setting state directly
+      const initialMessage = getRandomLoadingMessage();
+      setCurrentLoadingMessage(initialMessage);
+      
+      // Track used messages by updating the set
+      const updateUsedMessages = (message: string) => {
+        const index = loadingMessages.indexOf(message);
+        if (index !== -1) {
+          setUsedMessageIndices(prev => {
+            const newSet = new Set([...Array.from(prev), index]);
+            if (newSet.size >= loadingMessages.length) {
+              return new Set(); // Reset when all messages have been used
+            }
+            return newSet;
+          });
+        }
+      };
+      
+      // Update the used messages set for the initial message
+      updateUsedMessages(initialMessage);
+      
       const interval = setInterval(() => {
-        setCurrentLoadingMessage(getRandomLoadingMessage());
+        const message = getRandomLoadingMessage();
+        setCurrentLoadingMessage(message);
+        updateUsedMessages(message);
       }, 3000);
+      
       return () => clearInterval(interval);
     }
   }, [isProcessing, getRandomLoadingMessage]);
@@ -204,113 +225,48 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   }, [cleanup]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording' && audioContextRef.current) {
+    if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       
-      // 1. Concatenate Float32Array chunks
-      const totalLength = chunksRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
-      const concatenatedData = new Float32Array(totalLength);
-      let offset = 0;
-      for (const chunk of chunksRef.current) {
-        concatenatedData.set(chunk, offset);
-        offset += chunk.length;
+      // Use the final transcript that's been accumulated
+      const audioBlob = new Blob(chunksRef.current, { type: 'audio/wav' });
+      const transcriptToUse = finalTranscript || transcript;
+      
+      if (transcriptToUse.trim()) {
+        // Instead of immediately calling onRecordingComplete, set editable mode
+        setEditableTranscript(transcriptToUse);
+        setIsEditMode(true);
+      } else {
+        console.error('No transcript available');
       }
       
-      // 2. Create WAV buffer using the helper function
-      const sampleRate = audioContextRef.current.sampleRate;
-      const wavBuffer = createWavBuffer(concatenatedData, sampleRate);
+      // Reset for next recording but keep audioBlob
+      cleanup();
+      setTranscript('');
+      setFinalTranscript('');
       
-      // 3. Create Blob from the WAV ArrayBuffer
-      const audioBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-      
-      // Store the browser transcript as backup (still potentially useful)
-      const browserTranscript = finalTranscript || transcript;
-      
-      // Send to OUR backend API route
-      console.log("Sending audio to backend API (/api/transcribe)...");
-      setWhisperStatus("Processing audio via backend..."); // Update status message
-      
-      try {
-        // Create FormData for the file upload
-        const formData = new FormData();
-        formData.append('file', audioBlob, 'recording.wav'); // Key matches API route expectation
-        
-        // Send to our internal API route
-        fetch('/api/transcribe', { // Updated URL
-          method: 'POST',
-          body: formData
-        })
-        .then(async response => { // Add async here to await response.json()
-          const responseBody = await response.json(); // Parse JSON regardless of status
-          if (!response.ok) {
-            // Use error message from backend if available
-            const errorMessage = responseBody.error || `Server error: ${response.status}`;
-            setWhisperStatus(`Backend Error: ${errorMessage}`); 
-            throw new Error(errorMessage);
-          }
-          return responseBody; // Contains { transcript: "..." } or { error: "..." }
-        })
-        .then(data => {
-          // Use Google Cloud transcript from our API route
-          setWhisperStatus("Transcription complete!"); 
-          console.log("BACKEND TRANSCRIPT:", data.transcript);
-          console.log("BROWSER TRANSCRIPT (for comparison):", browserTranscript);
-          
-          const backendTranscript = data.transcript?.trim();
-          
-          if (backendTranscript === undefined || backendTranscript === null) { // Check for undefined/null explicitly
-            throw new Error("Backend returned invalid transcript data");
-          }
-          
-          // Use the backend transcript even if empty, as GCSTT might genuinely return nothing
-          console.log("Using backend transcript (length:", backendTranscript.length, "chars)");
-          setUsingBackendTranscription(true);
-          
-          // Send the backend transcript to the onRecordingComplete callback
-          onRecordingComplete(audioBlob, backendTranscript); 
-        })
-        .catch(error => {
-          // Log error and decide if fallback is needed
-          console.error("Backend API failed:", error);
-          // Don't automatically fall back, as backend error might be config issue
-          setError(`Transcription failed: ${error.message}. Please check console or try again.`);
-          setWhisperStatus(`Error: ${error.message}`);
-          
-          // Optionally, fall back to browser transcript if backend consistently fails
-          // console.log("Falling back to browser transcript due to backend error.");
-          // onRecordingComplete(audioBlob, browserTranscript);
-          
-          // Reset state even on error
-          cleanup();
-          setTranscript('');
-          setFinalTranscript('');
-        })
-        .finally(() => {
-          // Reset for next recording unless error handler did it
-          if (error === null) { // Only cleanup/reset if no error occurred in catch
-             cleanup();
-             setTranscript('');
-             setFinalTranscript('');
-          }
-        });
-      } catch (error) {
-        // Handle synchronous errors (e.g., FormData creation failed - unlikely)
-        console.error("Error setting up transcription request:", error);
-        setError(error instanceof Error ? error.message : 'Unknown error during setup');
-        setWhisperStatus("Error preparing request");
-        setIsRecording(false); // Ensure UI is updated
-        cleanup();
-        setTranscript('');
-        setFinalTranscript('');
-      }
-    } else if (!audioContextRef.current) {
-      console.error("AudioContext not available, cannot process recording.");
-      setError("Audio processing failed. Please refresh and try again.");
-      setIsRecording(false); // Ensure UI reflects stopped state
-      cleanup(); // Clean up resources
+      // Store audioBlob in ref for later use
+      audioBlobRef.current = audioBlob;
     }
-  }, [transcript, finalTranscript, onRecordingComplete, cleanup, error]); // Added error dependency
+  }, [transcript, finalTranscript, cleanup]);
+
+  // Add a function to submit the edited transcript
+  const submitTranscript = useCallback(() => {
+    if (audioBlobRef.current && editableTranscript.trim()) {
+      onRecordingComplete(audioBlobRef.current, editableTranscript);
+      setIsEditMode(false);
+      setEditableTranscript('');
+      audioBlobRef.current = null;
+    }
+  }, [editableTranscript, onRecordingComplete]);
+
+  // Add a function to cancel editing
+  const cancelEditing = useCallback(() => {
+    setIsEditMode(false);
+    setEditableTranscript('');
+    audioBlobRef.current = null;
+  }, []);
 
   const handleTranscriptUpdate = useCallback((newTranscript: string, isFinal: boolean) => {
     if (isFinal) {
@@ -332,113 +288,124 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
         </div>
       )}
       
-      <div className="relative flex justify-center items-center">
-        <button
-          onClick={isRecording ? stopRecording : startRecording}
-          disabled={isProcessing}
-          className={`
-            relative w-20 h-20 rounded-full transition-all duration-300 ease-in-out
-            flex items-center justify-center
-            ${isRecording 
-              ? 'bg-red-500 hover:bg-red-600 scale-110' 
-              : 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 hover:scale-105'
-            }
-            disabled:opacity-50 disabled:cursor-not-allowed
-            shadow-lg hover:shadow-xl
-            ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'transform hover:-translate-y-1'}
-          `}
-          aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
-        >
-          {/* Microphone icon */}
-          <svg 
-            className={`w-10 h-10 text-white transition-transform duration-200 ${isRecording ? 'scale-90' : 'scale-100'}`} 
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d={isRecording 
-                ? "M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" 
-                : "M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+      {!isEditMode && (
+        <div className="relative flex justify-center items-center">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isProcessing}
+            className={`
+              relative w-20 h-20 rounded-full transition-all duration-300 ease-in-out
+              flex items-center justify-center
+              ${isRecording 
+                ? 'bg-red-500 hover:bg-red-600 scale-110' 
+                : 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 hover:scale-105'
               }
-            />
-          </svg>
-          {/* Recording indicator ring */}
-          {isRecording && (
-            <svg
-              className="absolute w-full h-full text-white opacity-20"
-              viewBox="0 0 100 100"
-              fill="none"
+              disabled:opacity-50 disabled:cursor-not-allowed
+              shadow-lg hover:shadow-xl
+              ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'transform hover:-translate-y-1'}
+            `}
+            aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
+          >
+            {/* Microphone icon */}
+            <svg 
+              className={`w-10 h-10 text-white transition-transform duration-200 ${isRecording ? 'scale-90' : 'scale-100'}`} 
+              fill="none" 
+              viewBox="0 0 24 24" 
               stroke="currentColor"
             >
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                strokeWidth="3"
-                className="animate-[spin_3s_linear_infinite]"
-                strokeDasharray="70,30"
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d={isRecording 
+                  ? "M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" 
+                  : "M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+                }
               />
             </svg>
-          )}
-        </button>
-        
-        {/* Status text */}
-        <span className={`
-          absolute -bottom-8 text-sm font-medium tracking-wide
-          transition-all duration-300
-          ${isRecording 
-            ? 'text-red-500 dark:text-red-400' 
-            : 'text-gray-400 dark:text-gray-500'
-          }
-        `}>
-          {isRecording ? 'Recording...' : 'Ready'}
-        </span>
-      </div>
-
-      {isProcessing && (
-        <div className="text-center py-4 w-full max-w-md">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="mt-2 text-gray-600 dark:text-gray-400 animate-fade-in transition-opacity duration-500">
-            {currentLoadingMessage}
-          </p>
-          {usingBackendTranscription && (
-            <div className="mt-2 text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-full px-3 py-1 inline-block">
-              Using Cloud Transcription
-            </div>
-          )}
+            {/* Recording indicator ring */}
+            {isRecording && (
+              <svg
+                className="absolute w-full h-full text-white opacity-20"
+                viewBox="0 0 100 100"
+                fill="none"
+                stroke="currentColor"
+              >
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="45"
+                  strokeWidth="3"
+                  className="animate-[spin_3s_linear_infinite]"
+                  strokeDasharray="70,30"
+                />
+              </svg>
+            )}
+          </button>
+          
+          {/* Status text */}
+          <span className={`
+            absolute -bottom-8 text-sm font-medium tracking-wide
+            transition-all duration-300
+            ${isRecording 
+              ? 'text-red-500 dark:text-red-400' 
+              : 'text-gray-400 dark:text-gray-500'
+            }
+          `}>
+            {isRecording ? 'Recording...' : 'Ready'}
+          </span>
         </div>
       )}
 
-      <div className={`
-        w-full max-w-2xl transition-all duration-300 ease-in-out
-        ${isRecording ? 'opacity-100 translate-y-0' : 'opacity-80 translate-y-2'}
-      `}>
-        <Suspense fallback={
-          <div className="bg-gray-50 dark:bg-gray-800/50 backdrop-blur-sm p-6 rounded-2xl h-[200px] relative overflow-hidden">
-            <div className="flex items-center justify-center h-full">
-              <div className="animate-pulse flex space-x-4">
-                <div className="h-3 w-3 bg-gray-300 dark:bg-gray-600 rounded-full"></div>
-                <div className="h-3 w-3 bg-gray-300 dark:bg-gray-600 rounded-full"></div>
-                <div className="h-3 w-3 bg-gray-300 dark:bg-gray-600 rounded-full"></div>
+      {isEditMode ? (
+        <div className="w-full mt-6 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <h2 className="text-lg font-semibold mb-4 dark:text-white">Edit Transcript</h2>
+          <textarea
+            value={editableTranscript}
+            onChange={(e) => setEditableTranscript(e.target.value)}
+            placeholder="Edit the transcript here..."
+            className="w-full min-h-[300px] p-4 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={isProcessing}
+          />
+          
+          <div className="flex justify-end mt-4 gap-3">
+            <button
+              onClick={cancelEditing}
+              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+              disabled={isProcessing}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submitTranscript}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isProcessing || !editableTranscript.trim()}
+            >
+              Generate Note
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className={`
+          w-full max-w-2xl transition-all duration-300 ease-in-out mt-10
+          ${isRecording ? 'opacity-100 translate-y-0' : 'opacity-80 translate-y-2'}
+        `}>
+          <Suspense fallback={
+            <div className="bg-gray-800 dark:bg-gray-800 p-6 rounded-2xl h-[200px] relative overflow-hidden">
+              <div className="flex items-center justify-center h-full">
+                <div className="animate-pulse flex space-x-4">
+                  <div className="h-3 w-3 bg-gray-600 dark:bg-gray-600 rounded-full"></div>
+                  <div className="h-3 w-3 bg-gray-600 dark:bg-gray-600 rounded-full"></div>
+                  <div className="h-3 w-3 bg-gray-600 dark:bg-gray-600 rounded-full"></div>
+                </div>
               </div>
             </div>
-          </div>
-        }>
-          <LiveTranscription 
-            isRecording={isRecording} 
-            onTranscriptUpdate={handleTranscriptUpdate}
-          />
-        </Suspense>
-      </div>
-      
-      {/* Whisper Status Indicator */}
-      {whisperStatus && (
-        <div className="mt-2 text-sm p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-700 dark:text-blue-400">
-          {whisperStatus}
+          }>
+            <LiveTranscription 
+              isRecording={isRecording} 
+              onTranscriptUpdate={handleTranscriptUpdate}
+            />
+          </Suspense>
         </div>
       )}
     </div>

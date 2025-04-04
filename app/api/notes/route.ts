@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import OpenAI from 'openai'
 import systemMessages from '@/app/config/systemMessages'
@@ -326,7 +326,7 @@ function convertMarkdownToStructured(markdown: string): any {
   };
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const json = await request.json();
     const { patientId, transcript, audioFileUrl } = json;
@@ -536,7 +536,7 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const patientId = searchParams.get('patientId')

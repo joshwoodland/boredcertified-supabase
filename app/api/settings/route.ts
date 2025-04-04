@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import fs from 'fs/promises'
 import path from 'path'
@@ -85,7 +85,7 @@ export async function GET() {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const data = await request.json();
     const updates: { [key: string]: SystemMessage } = {};

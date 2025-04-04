@@ -304,13 +304,10 @@ export default function Home() {
         throw new Error('No transcript generated. Please try recording again.');
       }
 
-      // Log transcript details for debugging
-      console.log(`Sending transcript to note API (${transcript.length} chars)`);
-      console.log("Transcript preview:", transcript.substring(0, 100) + (transcript.length > 100 ? "..." : ""));
-
       // Upload audio file
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.wav');
+      formData.append('transcript', transcript);
       
       const uploadResponse = await fetch('/api/upload', {
         method: 'POST',
@@ -543,12 +540,16 @@ export default function Home() {
 
                     {isProcessing && !isManualInput && (
                       <div className="text-center py-4">
-                        <button
-                          onClick={handleCancel}
-                          className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                        >
-                          cancel
-                        </button>
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
+                          <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                          <button
+                            onClick={handleCancel}
+                            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                          >
+                            cancel
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

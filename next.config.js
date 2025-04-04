@@ -2,9 +2,7 @@
 const nextConfig = {
   output: 'standalone',
   experimental: {
-    serverActions: {
-      allowedOrigins: ['localhost:3000'],
-    },
+    serverComponentsExternalPackages: [],
   },
   async rewrites() {
     return [

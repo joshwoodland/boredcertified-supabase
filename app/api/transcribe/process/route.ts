@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/app/lib/db';
 import OpenAI from 'openai';
 import systemMessages from '@/app/config/systemMessages';
@@ -88,7 +88,7 @@ async function generateSummary(content: string, model: string): Promise<string> 
 }
 
 // Example usage in an API route
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const json = await request.json();
     const { patientId, transcript, audioFileUrl } = json;

@@ -23,13 +23,36 @@ export function formatSoapNote(markdownText: string): string {
   // Process any remaining bold text
   formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   
+  // Add special formatting for Diagnosis and Rule Out sections
+  formattedText = formattedText.replace(
+    /(Diagnosis:|Assessment:|Rule Out:)\s*(<br>)?([^<]*)/gi,
+    (match, label, br, content) => {
+      // If the content is empty, don't format
+      if (!content.trim()) return match;
+      
+      // Split content by lines, process each numbered/bulleted item
+      const lines = content.split(/\n/).filter((line: string) => line.trim().length > 0);
+      const items = lines.map((line: string) => {
+        // Check if line has numbering (1. Something) or bullets (- Something)
+        const trimmed = line.trim();
+        if (trimmed.match(/^\d+\.\s+/) || trimmed.match(/^-\s+/)) {
+          return `<li>${trimmed.replace(/^\d+\.\s+|-\s+/, '')}</li>`;
+        }
+        return `<li>${trimmed}</li>`;
+      });
+      
+      // Return a properly formatted section with list
+      return `<strong>${label}</strong><br><ul class="pl-4 my-2">${items.join('')}</ul>`;
+    }
+  );
+  
   // Convert paragraphs (double newlines) to HTML paragraphs with breaks
   formattedText = formattedText.replace(/\n\n/g, '<br><br>');
   
   // Convert single newlines to breaks
   formattedText = formattedText.replace(/\n/g, '<br>');
   
-  // Convert bullet points to HTML lists
+  // Convert bullet points to HTML lists (for remaining bullets not in Diagnosis/Rule Out)
   formattedText = formattedText.replace(/(<br>|^)- (.*?)(<br>|$)/g, (match, p1, p2, p3) => {
     // Check if we need to start a new list
     const startList = p1 && !p1.includes('</li>') ? '<ul>' : '';

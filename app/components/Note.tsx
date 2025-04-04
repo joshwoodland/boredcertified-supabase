@@ -5,6 +5,7 @@ import { FiChevronDown, FiChevronUp, FiEdit, FiCopy } from 'react-icons/fi';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
 import Toast from './Toast';
+import DiagnosisSection from './DiagnosisSection';
 
 interface Note {
   id: string;
@@ -32,6 +33,8 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
   const [isFetchingSummary, setIsFetchingSummary] = useState<boolean>(false);
   const [showRawFormat, setShowRawFormat] = useState<boolean>(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [diagnoses, setDiagnoses] = useState<string[]>([]);
+  const [ruleOuts, setRuleOuts] = useState<string[]>([]);
 
   // Fetch summary if not available
   useEffect(() => {
@@ -112,6 +115,47 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
     }
   }, [isLatest, forceCollapse]);
 
+  // Extract diagnoses and rule outs from the content
+  useEffect(() => {
+    // Parse the note content to extract diagnoses and rule outs
+    const extractDiagnosesAndRuleOuts = () => {
+      const diagnosisRegex = /(?:Diagnosis|Assessment):\s*(?:\n|<br>)*((?:.|\n)+?)(?:\n\n|<br><br>|$)/i;
+      const ruleOutRegex = /Rule Out:\s*(?:\n|<br>)*((?:.|\n)+?)(?:\n\n|<br><br>|$)/i;
+      
+      // Try to find the diagnoses section
+      const diagnosisMatch = parsedContent.match(diagnosisRegex);
+      if (diagnosisMatch && diagnosisMatch[1]) {
+        // Extract individual diagnoses using numbered or bulleted list format
+        const diagnosisText = diagnosisMatch[1];
+        const diagnosisList = diagnosisText
+          .split(/\n|<br>/)
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.match(/^\d+\.\s+/) || line.match(/^-\s+/) || line.length > 0)
+          .map((line: string) => line.replace(/^\d+\.\s+|-\s+/, '').trim())
+          .filter(Boolean);
+        
+        setDiagnoses(diagnosisList);
+      }
+      
+      // Try to find the rule out section
+      const ruleOutMatch = parsedContent.match(ruleOutRegex);
+      if (ruleOutMatch && ruleOutMatch[1]) {
+        // Extract individual rule outs
+        const ruleOutText = ruleOutMatch[1];
+        const ruleOutList = ruleOutText
+          .split(/\n|<br>/)
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.match(/^\d+\.\s+/) || line.match(/^-\s+/) || line.length > 0)
+          .map((line: string) => line.replace(/^\d+\.\s+|-\s+/, '').trim())
+          .filter(Boolean);
+        
+        setRuleOuts(ruleOutList);
+      }
+    };
+    
+    extractDiagnosesAndRuleOuts();
+  }, [parsedContent]);
+
   const formattedDate = new Date(note.createdAt).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
@@ -127,8 +171,32 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
   };
 
   const handleSave = async () => {
-    // Here you would implement the save functionality
-    setIsEditing(false);
+    try {
+      // Update the diagnoses and rule outs in the content before saving
+      updateNoteContent(diagnoses, ruleOuts);
+      
+      // Make API call to save the note
+      const response = await fetch(`/api/notes/${note.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content: editableContent }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to save note');
+      }
+      
+      // Show success toast
+      setToast({ message: 'Note saved successfully', type: 'success' });
+      
+      // Exit editing mode
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error saving note:', error);
+      setToast({ message: 'Failed to save note', type: 'error' });
+    }
   };
 
   const copyNoteToClipboard = () => {
@@ -147,6 +215,89 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
       console.error('Failed to copy note:', err);
       setToast({ message: 'Failed to copy note', type: 'error' });
     });
+  };
+
+  const handleDiagnosesChange = (newDiagnoses: string[]) => {
+    setDiagnoses(newDiagnoses);
+    updateNoteContent(newDiagnoses, ruleOuts);
+  };
+
+  const handleRuleOutsChange = (newRuleOuts: string[]) => {
+    setRuleOuts(newRuleOuts);
+    updateNoteContent(diagnoses, newRuleOuts);
+  };
+
+  // Function to update the note content with new diagnoses and rule outs
+  const updateNoteContent = (newDiagnoses: string[], newRuleOuts: string[]) => {
+    // Replace or add the diagnoses section in the editable content
+    let updatedContent = editableContent;
+    
+    // Replace or add the diagnosis section
+    if (newDiagnoses.length > 0) {
+      const diagnosisText = newDiagnoses.map((d, i) => `${i + 1}. ${d}`).join('\n');
+      const diagnosisSection = `Diagnosis:\n${diagnosisText}`;
+      
+      // Check if there's already a diagnosis section
+      const diagnosisRegex = /(?:Diagnosis|Assessment):\s*(?:\n|<br>)*((?:.|\n)+?)(?:\n\n|<br><br>|$)/i;
+      if (updatedContent.match(diagnosisRegex)) {
+        updatedContent = updatedContent.replace(diagnosisRegex, `Diagnosis:\n${diagnosisText}\n\n`);
+      } else {
+        // If there's no diagnosis section, add it before Plan or at the end
+        const planIndex = updatedContent.indexOf('Plan:');
+        if (planIndex > -1) {
+          updatedContent = updatedContent.slice(0, planIndex) + diagnosisSection + '\n\n' + updatedContent.slice(planIndex);
+        } else {
+          updatedContent += '\n\n' + diagnosisSection;
+        }
+      }
+    } else {
+      // If diagnoses is empty and there's a diagnosis section, remove it
+      const diagnosisRegex = /(?:Diagnosis|Assessment):\s*(?:\n|<br>)*((?:.|\n)+?)(?:\n\n|<br><br>|$)/i;
+      if (updatedContent.match(diagnosisRegex)) {
+        updatedContent = updatedContent.replace(diagnosisRegex, '');
+      }
+    }
+    
+    // Replace or add the rule out section
+    if (newRuleOuts.length > 0) {
+      const ruleOutText = newRuleOuts.map((r, i) => `${i + 1}. ${r}`).join('\n');
+      const ruleOutSection = `Rule Out:\n${ruleOutText}`;
+      
+      // Check if there's already a rule out section
+      const ruleOutRegex = /Rule Out:\s*(?:\n|<br>)*((?:.|\n)+?)(?:\n\n|<br><br>|$)/i;
+      if (updatedContent.match(ruleOutRegex)) {
+        updatedContent = updatedContent.replace(ruleOutRegex, `Rule Out:\n${ruleOutText}\n\n`);
+      } else {
+        // If there's no rule out section, add it after Diagnosis or before Plan
+        const diagnosisEnd = updatedContent.indexOf('Diagnosis:');
+        const planIndex = updatedContent.indexOf('Plan:');
+        
+        if (diagnosisEnd > -1) {
+          // Find the end of the diagnosis section
+          const afterDiagnosis = updatedContent.substring(diagnosisEnd);
+          const nextSectionMatch = afterDiagnosis.match(/\n\n([A-Z])/);
+          
+          if (nextSectionMatch && nextSectionMatch.index !== undefined) {
+            const insertPoint = diagnosisEnd + nextSectionMatch.index;
+            updatedContent = updatedContent.slice(0, insertPoint) + '\n\n' + ruleOutSection + updatedContent.slice(insertPoint);
+          } else {
+            updatedContent += '\n\n' + ruleOutSection;
+          }
+        } else if (planIndex > -1) {
+          updatedContent = updatedContent.slice(0, planIndex) + ruleOutSection + '\n\n' + updatedContent.slice(planIndex);
+        } else {
+          updatedContent += '\n\n' + ruleOutSection;
+        }
+      }
+    } else {
+      // If rule outs is empty and there's a rule out section, remove it
+      const ruleOutRegex = /Rule Out:\s*(?:\n|<br>)*((?:.|\n)+?)(?:\n\n|<br><br>|$)/i;
+      if (updatedContent.match(ruleOutRegex)) {
+        updatedContent = updatedContent.replace(ruleOutRegex, '');
+      }
+    }
+    
+    setEditableContent(updatedContent);
   };
 
   return (
@@ -217,6 +368,17 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
               </button>
             </div>
           </div>
+
+          {/* Editable Diagnosis Section - show when editing or in raw mode */}
+          {(isEditing || showRawFormat) && (
+            <DiagnosisSection
+              initialDiagnoses={diagnoses}
+              initialRuleOuts={ruleOuts}
+              onDiagnosesChange={handleDiagnosesChange}
+              onRuleOutsChange={handleRuleOutsChange}
+              readOnly={showRawFormat}
+            />
+          )}
 
           {/* Note Content */}
           <div className="prose dark:prose-invert max-w-none">

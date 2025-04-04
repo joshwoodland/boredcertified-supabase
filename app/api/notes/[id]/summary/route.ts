@@ -6,25 +6,18 @@ import { getCurrentModel } from '@/app/utils/modelCache';
 const prisma = new PrismaClient();
 const openai = new OpenAI();
 
-// Removing the interface as it didn't resolve the type error
-// interface RouteContext {
-//   params: {
-//     id: string;
-//   };
-// }
-
+// Simplified handler using only the request parameter
 export async function POST(
-  request: NextRequest,
-  context: any // Revert to 'any' type to bypass build error
+  request: NextRequest
 ) {
   try {
-    // Access params through the context object, assuming it has a params property
-    const noteId = context?.params?.id; 
+    // Extract the ID from the URL path
+    const url = new URL(request.url);
+    const pathSegments = url.pathname.split('/');
+    const noteId = pathSegments[pathSegments.indexOf('notes') + 1];
 
-    // Add a check to ensure noteId was found
     if (!noteId) {
-      console.error('Could not extract noteId from context params');
-      return NextResponse.json({ error: 'Invalid request context' }, { status: 400 });
+      return NextResponse.json({ error: 'Note ID not found in URL' }, { status: 400 });
     }
 
     // Find the note
