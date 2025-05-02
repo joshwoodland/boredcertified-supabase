@@ -121,28 +121,46 @@ export default function SupabasePatientList({
   // Function to add a new patient
   const addPatient = async (name: string) => {
     try {
+      let newPatientId = '';
+      
       if (dataSource === 'supabase') {
-        // Add to Supabase
+        // Get current user's session to access their email
+        const { data: { session } } = await supabase.auth.getSession();
+        const userEmail = session?.user?.email;
+        
+        console.log('Creating patient with provider email:', userEmail);
+        
+        // Generate a new UUID for the patient
+        newPatientId = crypto.randomUUID();
+        
+        // Add to Supabase with provider email
         const { error } = await supabase.from('patients').insert({
-          id: crypto.randomUUID(),
+          id: newPatientId,
           name: name,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           is_deleted: false,
+          provider_email: userEmail || 'joshwoodland@gmail.com', // Use current user's email or fallback
         });
         
         if (error) throw error;
       } else {
         // Add to SQLite
-        await prisma.patient.create({
+        const newPatient = await prisma.patient.create({
           data: {
             name: name,
           },
         });
+        newPatientId = newPatient.id;
       }
       
       // Reload the patient list
-      loadPatients();
+      await loadPatients();
+      
+      // Select the newly created patient
+      if (newPatientId) {
+        onSelectPatient(newPatientId);
+      }
     } catch (err) {
       console.error('Error adding patient:', err);
       setError('Failed to add patient');
@@ -281,8 +299,9 @@ export default function SupabasePatientList({
       const isSupabaseAvailable = await checkSupabaseConnection();
       
       if (isSupabaseAvailable) {
-        // Get data from Supabase
-        const supabasePatients = await getSupabasePatients();
+        // Get data from Supabase - explicitly filter by current user email
+        console.log('Loading patients from Supabase with provider email filtering');
+        const supabasePatients = await getSupabasePatients(true);
         
         // Convert to Prisma format
         const formattedPatients = supabasePatients

@@ -1,21 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
 
-// Initialize Supabase client with appropriate environment variables
-// For client-side, use the NEXT_PUBLIC_ prefixed env vars
-// For server-side, use the regular env vars
-const supabaseUrl = isClient
-  ? process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-  : process.env.SUPABASE_URL || '';
+// Get environment variables
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-const supabaseKey = isClient
-  ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' // Use anon key for client-side
-  : process.env.SUPABASE_SERVICE_ROLE_KEY || ''; // Use service role key for server-side
+// Create Browser Client (with proper cookie handling)
+export const createBrowserSupabaseClient = () => 
+  createBrowserClient(supabaseUrl, supabaseAnonKey);
 
-// Create Supabase client instance
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Create client-side instance with cookie support
+export const supabase = isClient
+  ? createBrowserSupabaseClient()
+  : createClient(supabaseUrl, supabaseServiceKey);
+
+// Export a server-side client creation function
+export const createServerSupabaseClient = () => 
+  createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+    }
+  });
 
 /**
  * Checks if the Supabase connection is available
@@ -36,14 +45,29 @@ export async function checkSupabaseConnection(): Promise<boolean> {
 }
 
 /**
- * Fetches all patients from Supabase
+ * Fetches patients from Supabase
+ * @param filterByCurrentUser Whether to filter patients by the current user's email (true by default)
  * @returns Array of patients
  */
-export async function getSupabasePatients() {
-  const { data, error } = await supabase
+export async function getSupabasePatients(filterByCurrentUser = true) {
+  // Get current user's session to access their email
+  const { data: { session } } = await supabase.auth.getSession();
+  const userEmail = session?.user?.email;
+  
+  // Build query
+  let query = supabase
     .from('patients')
     .select('*')
     .order('created_at', { ascending: false });
+  
+  // Filter by provider email if requested
+  if (filterByCurrentUser && userEmail) {
+    // First get patients assigned to the current user
+    query = query.eq('provider_email', userEmail);
+    console.log(`Filtering patients for provider email: ${userEmail}`);
+  }
+  
+  const { data, error } = await query;
   
   if (error) {
     console.error('Error fetching patients from Supabase:', error);
@@ -104,6 +128,7 @@ interface SupabasePatient {
   name: string;
   is_deleted: boolean;
   deleted_at: string | null;
+  provider_email: string | null;
 }
 
 interface SupabaseNote {
@@ -138,6 +163,7 @@ interface PrismaPatient {
   name: string;
   isDeleted: boolean;
   deletedAt: Date | null;
+  providerEmail: string | null;
 }
 
 interface PrismaNote {
@@ -178,6 +204,7 @@ export function convertToPrismaFormat(record: SupabaseRecord, type: 'patient' | 
         name: patientRecord.name,
         isDeleted: patientRecord.is_deleted,
         deletedAt: patientRecord.deleted_at ? new Date(patientRecord.deleted_at) : null,
+        providerEmail: patientRecord.provider_email,
       };
     }
     case 'note': {
@@ -230,6 +257,7 @@ export function convertToSupabaseFormat(record: PrismaRecord, type: 'patient' | 
         name: patientRecord.name,
         is_deleted: patientRecord.isDeleted,
         deleted_at: patientRecord.deletedAt ? new Date(patientRecord.deletedAt).toISOString() : null,
+        provider_email: patientRecord.providerEmail,
       };
     }
     case 'note': {

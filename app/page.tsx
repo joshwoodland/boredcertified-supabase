@@ -12,6 +12,7 @@ import FollowUpModal from './components/FollowUpModal';
 import InitialVisitModal from './components/InitialVisitModal';
 import ManualTranscriptModal from './components/ManualTranscriptModal';
 import { FiSettings, FiTrash2, FiPlayCircle, FiSearch, FiUser } from 'react-icons/fi';
+import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 
 interface Patient {
@@ -630,6 +631,7 @@ export default function Home() {
             >
               <FiSettings className="w-5 h-5" />
             </button>
+            <UserProfile />
           </div>
         </div>
 

@@ -102,7 +102,8 @@ async function uploadToSupabase() {
   
   // Store patients in Supabase
   let patientsUploaded = 0;
-  
+  const providerEmail = 'joshwoodland@gmail.com';  // Set default provider email
+
   for (const patient of samplePatients) {
     // Insert patient
     const { error: patientError } = await supabase
@@ -114,6 +115,7 @@ async function uploadToSupabase() {
         name: patient.name,
         is_deleted: patient.isDeleted,
         deleted_at: null,
+        provider_email: providerEmail,  // Add provider email
       });
     
     if (patientError) {

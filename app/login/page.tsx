@@ -1,0 +1,102 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { createBrowserSupabaseClient } from '../lib/supabase';
+
+export default function LoginPage() {
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [supabase, setSupabase] = useState(() => createBrowserSupabaseClient());
+
+  const handleLogin = async () => {
+    try {
+      // Generate the redirect URL dynamically
+      const redirectUrl = `${window.location.protocol}//${window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}`;
+      
+      console.log('Login initiated, redirect URL:', redirectUrl);
+      
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          // Ensure cookies are properly set
+          skipBrowserRedirect: false,
+        },
+      });
+      
+      if (error) {
+        console.error('Login error:', error.message);
+        alert(`Login failed: ${error.message}`);
+      }
+    } catch (err) {
+      console.error('Unexpected login error:', err);
+      alert('An unexpected error occurred during login');
+    }
+  };
+
+  useEffect(() => {
+    // Check current session
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUserEmail(session?.user?.email ?? null);
+      
+      // If user is already logged in, redirect to home page
+      if (session?.user?.email) {
+        console.log('Existing session found, redirecting to home');
+        window.location.href = '/';
+      } else {
+        console.log('No active session found');
+      }
+    };
+    
+    checkSession();
+
+    // Listen for auth state changes
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('Auth state changed:', _event);
+      setUserEmail(session?.user?.email ?? null);
+      
+      // If user becomes logged in, redirect to home page
+      if (session?.user?.email) {
+        console.log('User logged in, redirecting to home');
+        window.location.href = '/';
+      }
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  return (
+    <main className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#1B2025]">
+      <div className="flex flex-col items-center mb-8">
+        <img 
+          src="/logo.png" 
+          alt="Bored Certified Logo" 
+          className="h-96 w-auto"
+        />
+      </div>
+      <div className="bg-[#242A32] shadow-lg rounded-xl p-8 max-w-md w-full">
+        <h1 className="text-2xl font-bold mb-6 text-center text-white">Login</h1>
+        
+        {userEmail ? (
+          <div className="text-center text-white">
+            <p className="mb-4">You're logged in as:</p>
+            <p className="font-semibold">{userEmail}</p>
+            <p className="mt-2 text-sm text-gray-300">Redirecting to home...</p>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={handleLogin}
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white py-2 px-4 rounded transition transform hover:scale-105 active:scale-95 shadow-md"
+            >
+              Login with Google
+            </button>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}

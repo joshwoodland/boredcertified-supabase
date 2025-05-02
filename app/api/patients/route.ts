@@ -23,6 +23,7 @@ interface Patient {
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
+  providerEmail: string | null;
   notes: Note[];
 }
 
@@ -162,11 +163,15 @@ export async function POST(request: NextRequest) {
       console.log('Using Supabase for patient creation');
       
       try {
+        // Get current user's session to access their email
+        const { data: { session } } = await supabase.auth.getSession();
+        const userEmail = session?.user?.email;
+        
         // Generate a new UUID for the patient
         const patientId = crypto.randomUUID();
         const now = new Date().toISOString();
         
-        // Insert patient into Supabase
+        // Insert patient into Supabase with provider email
         const { data, error } = await supabase
           .from('patients')
           .insert({
@@ -174,7 +179,8 @@ export async function POST(request: NextRequest) {
             name: trimmedName,
             is_deleted: false,
             created_at: now,
-            updated_at: now
+            updated_at: now,
+            provider_email: userEmail
           })
           .select()
           .single();

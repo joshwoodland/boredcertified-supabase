@@ -63,6 +63,22 @@ npm run supabase:full-migration
 
 This will prompt you to run the SQL setup script and then perform the data migration.
 
+### 5. Assigning Provider Emails to Patients
+
+To assign provider emails to existing patients, run the migration script:
+
+```bash
+node scripts/migrate-provider-emails.js provider@example.com
+```
+
+Or for TypeScript:
+
+```bash
+npx ts-node scripts/migrate-provider-emails.ts provider@example.com
+```
+
+This will assign the specified email address to all patients that don't currently have a provider assigned.
+
 ## Environment Variables
 
 Ensure the following environment variables are set in your `.env.local` file:
@@ -89,6 +105,7 @@ The migration maintains the following schema:
    - created_at, updated_at (TIMESTAMPS)
    - is_deleted (BOOLEAN)
    - deleted_at (TIMESTAMP, nullable)
+   - provider_email (TEXT, nullable) - Email of the provider who owns this patient
 
 2. **Notes** - Stores patient notes
    - id (UUID)
@@ -112,6 +129,15 @@ The application includes utility functions in `app/lib/supabase.ts` to:
 - Check Supabase connection
 - Fetch patients, notes and app settings from Supabase
 - Convert between Prisma and Supabase data formats
+- Filter patients by provider email to ensure users only see their own patients
+
+### Row Level Security
+
+Row Level Security (RLS) is enabled on the patients and notes tables to ensure providers can only access their own patient data:
+
+- Patients are restricted to the authenticated user via the provider_email field
+- Notes are restricted to the authenticated user via the patient's provider_email
+- App settings are accessible to all authenticated users
 
 ## Troubleshooting
 
@@ -128,6 +154,6 @@ For persistent issues, inspect the backup JSON files in the `temp` directory to 
 
 The script uses the service role key, which has full database access. In production:
 
-1. Consider enabling Row Level Security (RLS) in Supabase (commented policies are provided in the setup SQL)
+1. Row Level Security (RLS) is enabled by default for patients and notes tables
 2. Store sensitive credentials in a secure manner
 3. Implement proper user authentication for accessing data

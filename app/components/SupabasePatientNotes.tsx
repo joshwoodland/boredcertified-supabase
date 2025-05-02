@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { checkSupabaseConnection, getSupabaseNotes, convertToPrismaFormat, supabase } from '../lib/supabase';
 import { prisma, connectWithFallback } from '../lib/db';
-import { FiCalendar, FiFileText, FiPlus, FiRefreshCw } from 'react-icons/fi';
+import { FiCalendar, FiFileText, FiRefreshCw } from 'react-icons/fi';
 
 interface Note {
   id: string;
@@ -102,50 +102,6 @@ export default function SupabasePatientNotes({
     loadNotes();
   }, [patientId]);
   
-  // Example function to add a new note
-  const addNote = async () => {
-    try {
-      if (!patientId) return;
-      
-      const noteData = {
-        transcript: "Sample transcript for new note",
-        content: "This is a sample note created to demonstrate Supabase integration.",
-        summary: "Sample note for demonstration",
-        isInitialVisit: false
-      };
-      
-      if (dataSource === 'supabase') {
-        // Add to Supabase
-        const { error } = await supabase.from('notes').insert({
-          id: crypto.randomUUID(),
-          patient_id: patientId,
-          transcript: noteData.transcript,
-          content: noteData.content,
-          summary: noteData.summary,
-          audio_file_url: null,
-          is_initial_visit: noteData.isInitialVisit,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-        
-        if (error) throw error;
-      } else {
-        // Add to SQLite
-        await prisma.note.create({
-          data: {
-            ...noteData,
-            patientId,
-          },
-        });
-      }
-      
-      // Reload the notes list without full page refresh
-      loadNotes();
-    } catch (err) {
-      console.error('Error adding note:', err);
-      setError('Failed to add note');
-    }
-  };
 
   // Function to load notes
   const loadNotes = async () => {
@@ -242,14 +198,6 @@ export default function SupabasePatientNotes({
           <p className="text-gray-500 dark:text-gray-400 mb-4">
             This patient doesn't have any notes yet.
           </p>
-          <button 
-            type="button"
-            onClick={addNote}
-            className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all shadow-md hover:shadow-lg"
-          >
-            <FiPlus className="w-4 h-4 mr-2" />
-            Create Sample Note
-          </button>
         </div>
       ) : (
         <div className="space-y-6">

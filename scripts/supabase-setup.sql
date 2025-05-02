@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS public.patients (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   name TEXT NOT NULL,
   is_deleted BOOLEAN NOT NULL DEFAULT false,
-  deleted_at TIMESTAMP WITH TIME ZONE
+  deleted_at TIMESTAMP WITH TIME ZONE,
+  provider_email TEXT
 );
 
 -- Create notes table with relation to patients
@@ -40,22 +41,33 @@ CREATE INDEX IF NOT EXISTS idx_patients_name ON public.patients(name);
 CREATE INDEX IF NOT EXISTS idx_notes_patient_id ON public.notes(patient_id);
 CREATE INDEX IF NOT EXISTS idx_notes_is_initial_visit ON public.notes(is_initial_visit);
 
--- Create RLS policies for secure access
--- Uncomment these if you want to set up Row Level Security
-/*
+-- Enable Row Level Security
 ALTER TABLE public.patients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow full access to authenticated users" ON public.patients 
-  FOR ALL TO authenticated USING (true);
+-- Create patient access policy based on provider email
+CREATE POLICY "Providers can only access their own patients" ON public.patients 
+  FOR ALL TO authenticated 
+  USING (auth.jwt() ->> 'email' = provider_email OR provider_email IS NULL);
+
+-- Create policy for notes: only accessible if the patient is accessible
+CREATE POLICY "Providers can only access notes for their own patients" ON public.notes 
+  FOR ALL TO authenticated 
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.patients 
+      WHERE patients.id = notes.patient_id 
+      AND (patients.provider_email = auth.jwt() ->> 'email' OR patients.provider_email IS NULL)
+    )
+  );
   
-CREATE POLICY "Allow full access to authenticated users" ON public.notes 
-  FOR ALL TO authenticated USING (true);
-  
+-- Settings are accessible to all authenticated users
 CREATE POLICY "Allow full access to authenticated users" ON public.app_settings 
   FOR ALL TO authenticated USING (true);
-*/
+
+-- Create an index on provider_email for better performance
+CREATE INDEX IF NOT EXISTS idx_patients_provider_email ON public.patients(provider_email);
 
 -- Note: After running this script, run the backup-to-supabase.js script to migrate your data
 -- Command: node scripts/backup-to-supabase.js
