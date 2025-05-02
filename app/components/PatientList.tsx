@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { format, isToday, isYesterday, isSameDay } from 'date-fns';
 import { FiUser, FiTrash2, FiRefreshCw, FiSearch, FiX, FiEdit2 } from 'react-icons/fi';
 import Toast from './Toast';
 
@@ -12,6 +13,14 @@ interface Patient {
   notes: Array<{
     createdAt: string;
   }>;
+}
+
+// Interface for grouped patients
+interface PatientGroup {
+  dateLabel: string;
+  formattedDate: string;
+  date: Date;
+  patients: Patient[];
 }
 
 interface PatientListProps {
@@ -43,13 +52,61 @@ export default function PatientList({
   const [isAddingPatient, setIsAddingPatient] = useState(false);
   const [newPatientName, setNewPatientName] = useState('');
 
-  // Filter patients based on search query
-  const filteredPatients = useMemo(() => {
-    if (!searchQuery.trim()) return patients;
-    const query = searchQuery.toLowerCase();
-    return patients.filter(patient => 
-      patient.name.toLowerCase().includes(query)
-    );
+  // Group patients by visit date and filter based on search query
+  const groupedAndFilteredPatients = useMemo(() => {
+    // First, filter patients based on search query
+    let filteredList = patients;
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filteredList = patients.filter(patient => 
+        patient.name.toLowerCase().includes(query)
+      );
+    }
+    
+    // Then group filtered patients by the date of their most recent visit
+    const groups: PatientGroup[] = [];
+    const dateMap = new Map<string, PatientGroup>();
+    
+    filteredList.forEach(patient => {
+      // Get the date of the patient's most recent visit, or use today's date if no visits
+      let visitDate = new Date();
+      if (patient.notes && patient.notes.length > 0) {
+        visitDate = new Date(patient.notes[0].createdAt);
+      }
+      
+      // Format the date as YYYY-MM-DD for grouping
+      const dateKey = format(visitDate, 'yyyy-MM-dd');
+      
+      // Create a human-readable label for the date
+      let dateLabel = format(visitDate, 'MMMM d, yyyy');
+      if (isToday(visitDate)) {
+        dateLabel = 'Today';
+      } else if (isYesterday(visitDate)) {
+        dateLabel = 'Yesterday';
+      }
+      
+      // Format display date
+      const formattedDate = format(visitDate, 'MMMM d, yyyy');
+      
+      // Add the patient to the appropriate date group
+      if (!dateMap.has(dateKey)) {
+        const newGroup = {
+          dateLabel,
+          formattedDate,
+          date: visitDate,
+          patients: []
+        };
+        dateMap.set(dateKey, newGroup);
+        groups.push(newGroup);
+      }
+      
+      dateMap.get(dateKey)!.patients.push(patient);
+    });
+    
+    // Sort the groups by date, newest first
+    groups.sort((a, b) => b.date.getTime() - a.date.getTime());
+    
+    return groups;
   }, [patients, searchQuery]);
 
   const handleMoveToTrash = async (patientId: string, event: React.MouseEvent) => {
@@ -146,7 +203,23 @@ export default function PatientList({
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-      <div className="p-4 border-b dark:border-gray-700">
+      {/* Custom CSS for the gradient border */}
+      <style jsx>{`
+        .gradient-border-left {
+          position: relative;
+        }
+        .gradient-border-left::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 4px; /* Match the original border-l-4 width */
+          height: 100%;
+          background: linear-gradient(to bottom, #9333ea, #3b82f6); /* Deeper purple to blue */
+          z-index: 10;
+        }
+      `}</style>
+      <div className="p-4 border-b dark:border-gray-700 dark:bg-gray-900">
         <div className="flex flex-col gap-2">
           <h2 className="text-xl font-semibold dark:text-white">
             {showTrash ? 'Trash' : 'Patients'}
@@ -232,22 +305,34 @@ export default function PatientList({
       </div>
 
       <div className="divide-y dark:divide-gray-700">
-        {filteredPatients.map((patient) => (
-          <div
-            key={patient.id}
-            className={`p-4 cursor-pointer transition-colors ${
-              selectedPatientId === patient.id
-                ? 'bg-gray-100 dark:bg-dark-accent'
-                : 'bg-white dark:bg-dark-secondary hover:bg-gray-50 dark:hover:bg-dark-accent'
-            }`}
-            onClick={() => {
-              if (isEditing) {
-                setIsEditing(null);
-                setEditName('');
-              }
-              onSelectPatient(patient.id);
-            }}
-          >
+        {groupedAndFilteredPatients.map((group, groupIndex) => (
+          <div key={group.dateLabel}>
+            {/* Date header */}
+            <div className="px-4 py-2 bg-gray-50 dark:bg-gray-900 sticky top-0 z-1">
+              <h3 className="text-sm font-medium text-gray-500 dark:text-white">
+                {group.dateLabel}
+                {isToday(group.date) || isYesterday(group.date) ? 
+                  <span className="text-xs ml-1 text-gray-500 dark:text-white">- {group.formattedDate}</span> : null}
+              </h3>
+            </div>
+            
+            {/* Patients in this group */}
+            {group.patients.map((patient) => (
+              <div
+                key={patient.id}
+                className={`p-4 cursor-pointer transition-all group ${
+                  selectedPatientId === patient.id
+                    ? 'gradient-border-left bg-gray-100 dark:bg-gray-800 shadow-inner shadow-black/30 dark:shadow-black/60 font-medium'
+                    : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                onClick={() => {
+                  if (isEditing) {
+                    setIsEditing(null);
+                    setEditName('');
+                  }
+                  onSelectPatient(patient.id);
+                }}
+              >
             {isEditing === patient.id ? (
               // Editing mode - update input background to match theme
               <div onClick={(e) => e.stopPropagation()} className="flex items-center">
@@ -301,7 +386,7 @@ export default function PatientList({
               </div>
             ) : (
               // Display mode
-              <div className="flex items-center justify-between group">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3 flex-1 min-w-0">
                   <div className="p-2 bg-gray-100 dark:bg-gray-600 rounded-full flex-shrink-0">
                     <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
@@ -344,10 +429,12 @@ export default function PatientList({
                 </div>
               </div>
             )}
+              </div>
+            ))}
           </div>
         ))}
-
-        {filteredPatients.length === 0 && (
+        
+        {groupedAndFilteredPatients.length === 0 && (
           <div className="p-4 text-center text-gray-500 dark:text-gray-400">
             {showTrash
               ? 'Trash is empty'
@@ -378,4 +465,4 @@ export default function PatientList({
       )}
     </div>
   );
-} 
+}

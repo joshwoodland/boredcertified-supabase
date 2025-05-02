@@ -1,39 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir } from 'fs/promises';
-import { dirname, join } from 'path';
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-
-    if (!file) {
-      return NextResponse.json(
-        { error: 'No file uploaded' },
-        { status: 400 }
-      );
-    }
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    // Save file to the uploads directory
-    const uploadDir = join(process.cwd(), 'uploads');
-    await mkdir(uploadDir, { recursive: true });
-
+    // No longer saving audio files
+    console.log('Audio file storage functionality has been disabled');
+    
+    // Create a dummy timestamp for compatibility
     const timestamp = Date.now();
-    const filePath = join(uploadDir, `recording-${timestamp}.wav`);
-    await writeFile(filePath, buffer);
-
-    return NextResponse.json({ 
+    const placeholderFilename = `placeholder-${timestamp}.mp3`;
+    
+    // Return a success response with placeholder data
+    // This allows the app flow to continue without actually storing audio
+    return NextResponse.json({
       success: true,
-      filePath: `recording-${timestamp}.wav` 
+      filePath: placeholderFilename,
+      url: `/uploads/${placeholderFilename}`,
+      disabled: true,
+      message: 'Audio recording storage has been disabled'
     });
   } catch (error) {
     console.error('Error handling file upload:', error);
     return NextResponse.json(
-      { error: 'Failed to upload file' },
+      { error: 'Failed to process upload' },
       { status: 500 }
     );
   }
-} 
+}

@@ -19,6 +19,7 @@ interface AppSettings {
   gptModel: string;
   initialVisitPrompt: string;
   followUpVisitPrompt: string;
+  lowEchoCancellation?: boolean;
 }
 
 type SaveButtonState = 'hidden' | 'unsaved' | 'saved' | 'saving' | 'error';
@@ -29,6 +30,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     gptModel: 'gpt-4o',
     initialVisitPrompt: '',
     followUpVisitPrompt: '',
+    lowEchoCancellation: false,
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -62,6 +64,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
           gptModel: currentSettings.gptModel,
           initialVisitPrompt: currentSettings.initialVisitPrompt,
           followUpVisitPrompt: currentSettings.followUpVisitPrompt,
+          lowEchoCancellation: currentSettings.lowEchoCancellation,
           initialVisitDescription: 'System message for initial psychiatric evaluation visits',
           followUpVisitDescription: 'System message for follow-up psychiatric visits',
         }),
@@ -72,13 +75,13 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
       }
 
       const data = await response.json();
-      
+
       // Only update the initialSettings reference, don't change current settings
       initialSettings.current = { ...currentSettings };
-      
+
       // Invalidate the model cache to ensure we use the new settings
       invalidateModelCache();
-      
+
       setIsDirty(false);
       setSaveButtonState('saved');
       setToast({ message: 'Settings saved successfully', type: 'success' });
@@ -96,7 +99,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   const handleClose = useCallback(() => {
     if (typeof window === 'undefined') return;
-    
+
     if (isDirty) {
       setShowConfirmation(true);
     } else {
@@ -107,7 +110,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   const handleConfirmClose = () => {
     if (typeof window === 'undefined') return;
-    
+
     document.documentElement.classList.remove('modal-open');
     setShowConfirmation(false);
     onClose();
@@ -160,11 +163,11 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
       const mouseUpTime = Date.now();
       const timeDiff = mouseUpTime - mouseDownTime.current;
       const isDragging = timeDiff > 200;
-      
+
       if (!isDragging) {
         const target = event.target as Node;
         const isOutsideClick = modalRef.current && !modalRef.current.contains(target);
-        
+
         if (isOutsideClick) {
           event.preventDefault();
           event.stopPropagation();
@@ -208,7 +211,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
+
     if (settings.darkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -218,7 +221,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
+
     if (isOpen) {
       document.documentElement.classList.add('modal-open');
     } else {
@@ -233,15 +236,16 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     try {
       const response = await fetch('/api/settings');
       const data = await response.json();
-      
+
       // Update settings with the response data
       const newSettings = {
         darkMode: data.darkMode,
         gptModel: data.gptModel,
         initialVisitPrompt: data.initialVisitPrompt,
         followUpVisitPrompt: data.followUpVisitPrompt,
+        lowEchoCancellation: data.lowEchoCancellation || false,
       };
-      
+
       setSettings(newSettings);
       initialSettings.current = newSettings;
       setIsDirty(false);
@@ -289,7 +293,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         </span>
       );
     }
-    
+
     if (saveButtonState === 'saved') {
       return (
         <span className="flex items-center text-green-600 dark:text-green-400">
@@ -320,16 +324,16 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   return (
     <>
       {/* Modal Container - Higher z-index to cover everything */}
-      <div className="settings-modal fixed inset-0 z-[9999]">
+      <div className="fixed inset-0 z-[9999] isolate">
         {/* Backdrop - Semi-transparent overlay */}
-        <div 
+        <div
           className="fixed inset-0 bg-black/30"
           aria-hidden="true"
           onClick={handleClose}
         />
-        
+
         {/* Modal Content */}
-        <div className="relative flex items-center justify-center min-h-screen p-4">
+        <div className="relative flex items-center justify-center min-h-screen p-4 z-[10000]">
           <div
             ref={modalRef}
             className="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-lg shadow-xl"
@@ -367,12 +371,45 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                         transition-colors duration-200
                       `}
                     >
-                      <span 
+                      <span
                         className={`
                           absolute top-1/2 left-1 -translate-y-1/2
                           h-4 w-4 rounded-full bg-white shadow
                           transform transition-transform duration-200 ease-in-out
                           ${settings.darkMode ? 'translate-x-6' : ''}
+                        `}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Low Echo Cancellation Toggle */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-700 dark:text-gray-200">Low Echo Cancellation</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Disables echo cancellation to help capture patient audio from speakers
+                    </p>
+                  </div>
+                  <div className="relative inline-block w-12 align-middle select-none">
+                    <button
+                      role="switch"
+                      aria-checked={settings.lowEchoCancellation}
+                      onClick={() => handleChange({ lowEchoCancellation: !settings.lowEchoCancellation })}
+                      className={`
+                        relative block w-12 h-6 rounded-full
+                        ${settings.lowEchoCancellation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}
+                        transition-colors duration-200
+                      `}
+                    >
+                      <span
+                        className={`
+                          absolute top-1/2 left-1 -translate-y-1/2
+                          h-4 w-4 rounded-full bg-white shadow
+                          transform transition-transform duration-200 ease-in-out
+                          ${settings.lowEchoCancellation ? 'translate-x-6' : ''}
                         `}
                       />
                     </button>
@@ -419,15 +456,15 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   </div>
                 </div>
 
-                {/* System Messages */}
+                {/* SOAP Note Templates */}
                 <div className="space-y-4">
                   <SystemMessageEditor
-                    label="Initial Visit System Message"
+                    label="Initial Visit SOAP Note Template"
                     value={settings.initialVisitPrompt}
                     onChange={(value) => handleChange({ initialVisitPrompt: value })}
                   />
                   <SystemMessageEditor
-                    label="Follow-up Visit System Message"
+                    label="Follow-up Visit SOAP Note Template"
                     value={settings.followUpVisitPrompt}
                     onChange={(value) => handleChange({ followUpVisitPrompt: value })}
                   />
@@ -462,4 +499,4 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
       )}
     </>
   );
-} 
+}

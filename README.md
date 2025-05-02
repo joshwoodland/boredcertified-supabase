@@ -1,24 +1,27 @@
-# Medical Scribe Assistant
+# Bored Certified Web
 
-A web application for medical professionals to record patient conversations and automatically generate SOAP notes using AI. The application uses OpenAI's Whisper for speech-to-text transcription and GPT-4 for generating structured SOAP notes.
+A web application for medical professionals to record patient conversations and automatically generate SOAP notes using AI. The application uses Deepgram for speech-to-text transcription and GPT-4 for generating structured SOAP notes.
 
 ## Features
 
 - 🎙️ Audio recording of patient conversations
-- 📝 Automatic transcription using OpenAI Whisper
+- 📝 Automatic transcription using Deepgram
 - 🤖 AI-powered SOAP note generation
 - 👥 Patient management system
 - 📁 Organized storage of patient records
 - 🔄 Historical context integration
+- 💾 Audio file storage
+- 🔄 Data synchronization
 
 ## Tech Stack
 
-- Next.js 14 with App Router
+- Next.js with App Router
 - TypeScript
 - Tailwind CSS
 - Prisma (SQLite database)
-- OpenAI API (Whisper & GPT-4)
-- React Audio Voice Recorder
+- OpenAI API (GPT-4)
+- Deepgram for speech-to-text transcription
+- React Media Recorder
 
 ## Getting Started
 
@@ -32,6 +35,7 @@ A web application for medical professionals to record patient conversations and 
    Create a `.env` file in the root directory with:
    ```
    OPENAI_API_KEY=your_openai_api_key
+   DEEPGRAM_API_KEY=your_deepgram_api_key
    ```
 
 4. Initialize the database:
@@ -72,6 +76,16 @@ The application can be deployed to any platform that supports Next.js applicatio
 - Ensure HIPAA compliance when deploying for medical use
 - Use secure environment variables for API keys
 
+## API
+
+The web app provides a RESTful API for data access. The following endpoints are available:
+
+- `/api/patients` - Manage patient data
+- `/api/notes` - Manage note data
+- `/api/audio-recordings` - Manage audio recordings
+
+See the API documentation for more details.
+
 ## License
 
-MIT License 
+ISC License

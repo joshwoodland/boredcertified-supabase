@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/app/lib/db'
+import { prisma, connectWithFallback } from '@/app/lib/db'
+import { checkSupabaseConnection, getSupabaseNotes, convertToPrismaFormat, supabase } from '@/app/lib/supabase'
 import OpenAI from 'openai'
 import systemMessages from '@/app/config/systemMessages'
 import { ChatCompletionMessageParam } from 'openai/resources/chat'
 import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
 import { formatSystemMessage } from '@/app/utils/formatSystemMessage'
 import { formatSoapNote } from '@/app/utils/formatSoapNote'
+import { estimateTokenCount, mightExceedTokenLimit } from '@/app/utils/tokenEncoding'
+import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -329,19 +332,52 @@ function convertMarkdownToStructured(markdown: string): any {
 export async function POST(request: NextRequest) {
   try {
     const json = await request.json();
-    const { patientId, transcript, audioFileUrl } = json;
+    const { patientId, transcript, audioFileUrl, useStructuredPrompt = false, isInitialEvaluation, patientName } = json;
 
-    // Get patient details including name
-    const patient = await prisma.patient.findUnique({
-      where: { id: patientId },
-    });
-
-    if (!patient) {
-      return NextResponse.json({
-        error: 'Patient not found',
-        details: 'Invalid patient ID'
-      }, { status: 404 });
+    // Check if Supabase is available
+    const isSupabaseAvailable = await checkSupabaseConnection();
+    
+    let patient;
+    if (isSupabaseAvailable) {
+      console.log('Using Supabase to get patient');
+      // Get patient from Supabase
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*')
+        .eq('id', patientId)
+        .single();
+        
+      if (error) {
+        console.error('Error fetching patient from Supabase:', error);
+        // Fall back to Prisma if Supabase query fails
+      } else if (!data) {
+        return NextResponse.json({
+          error: 'Patient not found',
+          details: 'Invalid patient ID'
+        }, { status: 404 });
+      } else {
+        patient = convertToPrismaFormat(data, 'patient');
+      }
     }
+    
+    // Fall back to Prisma if Supabase is unavailable or query failed
+    if (!patient) {
+      console.log('Falling back to Prisma to get patient');
+      const db = await connectWithFallback();
+      patient = await db.patient.findUnique({
+        where: { id: patientId },
+      });
+
+      if (!patient) {
+        return NextResponse.json({
+          error: 'Patient not found',
+          details: 'Invalid patient ID'
+        }, { status: 404 });
+      }
+    }
+    
+    // Use provided patient name if available, otherwise fallback to the name from the database
+    const effectivePatientName = patientName || patient.name;
 
     console.log('Processing note request:', { 
       patientId, 
@@ -364,17 +400,134 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if this is the first visit
-    const existingNotes = await prisma.note.count({
-      where: { patientId },
+    let existingNotes = 0;
+    
+    if (isSupabaseAvailable) {
+      console.log('Using Supabase to count existing notes');
+      const { count, error } = await supabase
+        .from('notes')
+        .select('id', { count: 'exact', head: true })
+        .eq('patient_id', patientId);
+        
+      if (error) {
+        console.error('Error counting notes in Supabase:', error);
+        // Fall back to Prisma if Supabase query fails
+      } else {
+        existingNotes = count || 0;
+      }
+    }
+    
+    // Fall back to Prisma if Supabase is unavailable or query failed
+    if (existingNotes === 0 && !isSupabaseAvailable) {
+      console.log('Falling back to Prisma to count existing notes');
+      const db = await connectWithFallback();
+      existingNotes = await db.note.count({
+        where: { patientId },
+      });
+    }
+    
+    // Use the provided isInitialEvaluation parameter if available, otherwise fall back to checking for existing notes
+    const isInitialVisit = isInitialEvaluation !== undefined ? isInitialEvaluation : existingNotes === 0;
+    
+    console.log('Visit type determination:', { 
+      isInitialEvaluationProvided: isInitialEvaluation !== undefined,
+      isInitialEvaluation, 
+      existingNotes, 
+      finalDecision: isInitialVisit ? 'Initial Visit' : 'Follow-up Visit' 
     });
-    const isInitialVisit = existingNotes === 0;
+
+    // Get the most recent previous note if this is not the initial visit
+    let enhancedTranscript = transcript;
+    if (!isInitialVisit) {
+      try {
+        let previousNote = null;
+        
+        if (isSupabaseAvailable) {
+          console.log('Using Supabase to get previous note');
+          // Get the most recent note from Supabase
+          const { data, error } = await supabase
+            .from('notes')
+            .select('content')
+            .eq('patient_id', patientId)
+            .order('created_at', { ascending: false })
+            .limit(1);
+            
+          if (error) {
+            console.error('Error fetching previous note from Supabase:', error);
+            // Fall back to Prisma if Supabase query fails
+          } else if (data && data.length > 0) {
+            previousNote = { content: data[0].content };
+          }
+        }
+        
+        // Fall back to Prisma if Supabase is unavailable or query failed
+        if (!previousNote) {
+          console.log('Falling back to Prisma to get previous note');
+          const db = await connectWithFallback();
+          previousNote = await db.note.findFirst({
+            where: { 
+              patientId,
+              // Ensure we get a note from before the current request
+              createdAt: { lt: new Date() }
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { content: true }
+          });
+        }
+        
+        if (previousNote && previousNote.content) {
+          let previousContent = '';
+          try {
+            // Try to parse the content, which might be in JSON format
+            const parsedContent = JSON.parse(previousNote.content);
+            // If it has a content property, use that, otherwise use the whole parsed object
+            previousContent = typeof parsedContent.content === 'string' 
+              ? parsedContent.content 
+              : JSON.stringify(parsedContent.content) || previousNote.content;
+          } catch (e) {
+            // If parsing fails, use the content as is
+            previousContent = previousNote.content;
+          }
+          
+          // Add the previous note to the transcript with the specified format
+          enhancedTranscript = transcript + `\n\n ##( Here is the note from the patient's previous visit to be used for greater context: ${previousContent} )`;
+          console.log('Added previous note to transcript');
+        }
+      } catch (error) {
+        console.error('Error fetching previous note:', error);
+        // Continue with original transcript if there's an error
+      }
+    }
 
     console.log('Visit type:', isInitialVisit ? 'Initial' : 'Follow-up');
 
-    // Get current settings just for the model name
-    const settings = await prisma.appSettings.findUnique({
-      where: { id: 'default' },
-    });
+    // Get current settings for the model name
+    let settings = null;
+    
+    if (isSupabaseAvailable) {
+      console.log('Using Supabase to get app settings');
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('*')
+        .eq('id', 'default')
+        .single();
+        
+      if (error) {
+        console.error('Error fetching settings from Supabase:', error);
+        // Fall back to Prisma if Supabase query fails
+      } else {
+        settings = convertToPrismaFormat(data, 'settings');
+      }
+    }
+    
+    // Fall back to Prisma if Supabase is unavailable or query failed
+    if (!settings) {
+      console.log('Falling back to Prisma to get app settings');
+      const db = await connectWithFallback();
+      settings = await db.appSettings.findUnique({
+        where: { id: 'default' },
+      });
+    }
 
     if (!settings) {
       console.error('Settings not found');
@@ -396,128 +549,360 @@ export async function POST(request: NextRequest) {
     console.log('Using GPT model:', model);
 
     try {
-      // Determine chunk size based on transcript length
-      const maxChunkSize = transcript.length > 100000 ? 32000 : 16000;
-      const chunks = splitTranscriptIntoChunks(transcript, maxChunkSize);
+      let responseContent;
       
-      if (chunks.length === 0) {
-        throw new Error('Failed to split transcript into chunks');
-      }
+      // Check whether to use structured prompt approach or legacy chunking approach
+      if (useStructuredPrompt) {
+        console.log('======= USING NEW STRUCTURED PROMPT APPROACH =======');
+        console.log('Message format: Previous note and transcript as separate messages');
+        console.log('Temperature: 0.3 (more deterministic output)');
+        
+        // Process and get previous note content if this isn't an initial visit
+        let previousSoapNote = undefined;
+        if (!isInitialVisit) {
+          const previousNote = await prisma.note.findFirst({
+            where: { 
+              patientId,
+              createdAt: { lt: new Date() }
+            },
+            orderBy: { createdAt: 'desc' },
+            select: { content: true }
+          });
+          
+          if (previousNote && previousNote.content) {
+            try {
+              // Try to parse the content, which might be in JSON format
+              const parsedContent = JSON.parse(previousNote.content);
+              // If it has a content property, use that
+              previousSoapNote = typeof parsedContent.content === 'string' 
+                ? parsedContent.content 
+                : JSON.stringify(parsedContent.content) || previousNote.content;
+            } catch (e) {
+              // If parsing fails, use the content as is
+              previousSoapNote = previousNote.content;
+            }
+          }
+        }
+        
+        // Get the appropriate template
+        const rawSystemMessage = isInitialVisit 
+          ? systemMessages.initialVisit 
+          : systemMessages.followUpVisit;
+          
+        // Check if transcript exceeds token limits
+        const tokenEstimate = estimateTokenCount(transcript);
+        const isLongTranscript = tokenEstimate > 3000;
+        
+        if (isLongTranscript) {
+          console.log(`Long transcript detected (est. ${tokenEstimate} tokens), using chunking strategy`);
+          
+          // Fall back to chunking for very long transcripts
+          const maxChunkSize = transcript.length > 100000 ? 32000 : 16000;
+          const chunks = splitTranscriptIntoChunks(transcript, maxChunkSize);
+          
+          if (chunks.length === 0) {
+            throw new Error('Failed to split transcript into chunks');
+          }
 
-      console.log(`Processing transcript in ${chunks.length} chunks`);
+          console.log(`Processing transcript in ${chunks.length} chunks`);
+          
+          // Process chunks as before
+          const chunkSummaries = await Promise.all(chunks.map(async (chunk, index) => {
+            let attempts = 0;
+            const maxAttempts = 3;
+            let summary = '';
+            
+            while (attempts < maxAttempts) {
+              try {
+                const completion = await openai.chat.completions.create({
+                  model,
+                  messages: [
+                    createChunkSummaryPrompt(chunk, index, chunks.length, isInitialVisit, effectivePatientName),
+                    { role: "user", content: chunk }
+                  ],
+                  temperature: 0.3,
+                  max_tokens: 1000
+                });
 
-      // Step 1: Generate summaries for each chunk with retries
-      const chunkSummaries = await Promise.all(chunks.map(async (chunk, index) => {
+                summary = completion.choices[0]?.message?.content || '';
+                if (!summary) {
+                  throw new Error('Empty response from OpenAI API');
+                }
+                
+                console.log(`Successfully processed chunk ${index + 1}/${chunks.length}`);
+                return summary;
+              } catch (error) {
+                attempts++;
+                if (attempts === maxAttempts) {
+                  throw error;
+                }
+                console.log(`Retrying chunk ${index + 1} (attempt ${attempts + 1}/${maxAttempts})`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+              }
+            }
+            return summary;
+          }));
+          
+          // Filter out any undefined values
+          const validSummaries = chunkSummaries.filter((summary): summary is string => !!summary);
+          
+          console.log(`Generated ${validSummaries.length} valid chunk summaries`);
+          
+          // Create structured messages with the chunk summaries as the transcript
+          const finalContent = validSummaries.join("\n");
+          const structuredMessages = buildOpenAIMessages({
+            previousSoapNote,
+            currentTranscript: finalContent,
+            soapTemplate: rawSystemMessage,
+            patientName: effectivePatientName
+          });
+          
+          // Make the final API call with structured messages
+          let attempts = 0;
+          const maxAttempts = 3;
+          
+          while (attempts < maxAttempts) {
+            try {
+              const completion = await openai.chat.completions.create({
+                model,
+                messages: structuredMessages,
+                temperature: 0.3,
+                max_tokens: 4000,
+                response_format: { type: "text" }
+              });
+              
+              responseContent = completion.choices[0]?.message?.content;
+              if (!responseContent) {
+                throw new Error('Empty response from OpenAI API');
+              }
+              break;
+            } catch (error) {
+              attempts++;
+              if (attempts === maxAttempts) {
+                throw error;
+              }
+              console.log(`Retrying final synthesis (attempt ${attempts + 1}/${maxAttempts})`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+            }
+          }
+        } else {
+          // For shorter transcripts, use the structured approach directly
+          console.log('Using direct structured approach without chunking');
+          
+          const structuredMessages = buildOpenAIMessages({
+            previousSoapNote,
+            currentTranscript: transcript,
+            soapTemplate: rawSystemMessage,
+            patientName: effectivePatientName
+          });
+          
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: structuredMessages,
+            temperature: 0.3,
+            max_tokens: 4000,
+            response_format: { type: "text" }
+          });
+          
+          responseContent = completion.choices[0]?.message?.content;
+          if (!responseContent) {
+            throw new Error('Empty response from OpenAI API');
+          }
+        }
+      } else {
+        // Use the legacy approach
+        console.log('Using legacy chunking approach');
+        
+        const maxChunkSize = enhancedTranscript.length > 100000 ? 32000 : 16000;
+        const chunks = splitTranscriptIntoChunks(enhancedTranscript, maxChunkSize);
+        
+        if (chunks.length === 0) {
+          throw new Error('Failed to split transcript into chunks');
+        }
+
+        console.log(`Processing transcript in ${chunks.length} chunks`);
+
+        // Step 1: Generate summaries for each chunk with retries
+        const chunkSummaries = await Promise.all(chunks.map(async (chunk, index) => {
+          let attempts = 0;
+          const maxAttempts = 3;
+          let summary = '';
+          
+          while (attempts < maxAttempts) {
+            try {
+              const completion = await openai.chat.completions.create({
+                model,
+                messages: [
+                  createChunkSummaryPrompt(chunk, index, chunks.length, isInitialVisit, effectivePatientName),
+                  { role: "user", content: chunk }
+                ],
+                temperature: 0.3,
+                max_tokens: 1000
+              });
+
+              summary = completion.choices[0]?.message?.content || '';
+              if (!summary) {
+                throw new Error('Empty response from OpenAI API');
+              }
+              
+              console.log(`Successfully processed chunk ${index + 1}/${chunks.length}`);
+              return summary;
+            } catch (error) {
+              attempts++;
+              if (attempts === maxAttempts) {
+                throw error;
+              }
+              console.log(`Retrying chunk ${index + 1} (attempt ${attempts + 1}/${maxAttempts})`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+            }
+          }
+          return summary;
+        }));
+
+        // Filter out any undefined values
+        const validSummaries = chunkSummaries.filter((summary): summary is string => !!summary);
+
+        console.log(`Generated ${validSummaries.length} valid chunk summaries`);
+
+        // Step 2: Synthesize all summaries into final note with retries
         let attempts = 0;
         const maxAttempts = 3;
-        let summary = '';
         
         while (attempts < maxAttempts) {
           try {
-            const completion = await openai.chat.completions.create({
-              model,
-              messages: [
-                createChunkSummaryPrompt(chunk, index, chunks.length, isInitialVisit, patient.name),
-                { role: "user", content: chunk }
-              ],
-              temperature: 0.3,
-              max_tokens: 1000
-            });
+            const finalContent = validSummaries.length > 1 ? validSummaries.join("\n") : enhancedTranscript;
+            const completion = await openai.chat.completions.create(
+              await createFinalSynthesisPrompt(finalContent, isInitialVisit, effectivePatientName, model)
+            );
 
-            summary = completion.choices[0]?.message?.content || '';
-            if (!summary) {
+            responseContent = completion.choices[0]?.message?.content;
+            if (!responseContent) {
               throw new Error('Empty response from OpenAI API');
             }
-            
-            console.log(`Successfully processed chunk ${index + 1}/${chunks.length}`);
-            return summary;
+            break;
           } catch (error) {
             attempts++;
             if (attempts === maxAttempts) {
               throw error;
             }
-            console.log(`Retrying chunk ${index + 1} (attempt ${attempts + 1}/${maxAttempts})`);
+            console.log(`Retrying final synthesis (attempt ${attempts + 1}/${maxAttempts})`);
             await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
           }
         }
-        return summary;
-      }));
-
-      // Filter out any undefined values
-      const validSummaries = chunkSummaries.filter((summary): summary is string => !!summary);
-
-      console.log(`Generated ${validSummaries.length} valid chunk summaries`);
-
-      // Step 2: Synthesize all summaries into final note with retries
-      let attempts = 0;
-      const maxAttempts = 3;
+      }
       
-      while (attempts < maxAttempts) {
+      // Handle the response content
+      if (!responseContent) {
+        throw new Error('Failed to generate SOAP note content');
+      }
+
+      // Format the note content with HTML
+      const formattedContent = formatSoapNote(responseContent);
+      
+      // Create note in database with both raw and formatted content
+      let note;
+      
+      if (isSupabaseAvailable) {
+        console.log('Using Supabase to create note');
         try {
-          const finalContent = validSummaries.length > 1 ? validSummaries.join("\n") : transcript;
-          const completion = await openai.chat.completions.create(
-            await createFinalSynthesisPrompt(finalContent, isInitialVisit, patient.name, model)
-          );
-
-          const responseContent = completion.choices[0]?.message?.content;
-          if (!responseContent) {
-            throw new Error('Empty response from OpenAI API');
-          }
-
-          // Format the note content with HTML
-          const formattedContent = formatSoapNote(responseContent);
+          // Generate a new UUID for the note
+          const noteId = crypto.randomUUID();
+          const now = new Date().toISOString();
           
-          // Create note in database with both raw and formatted content
-          const note = await prisma.note.create({
-            data: {
-              patientId,
-              transcript,
-              audioFileUrl,
-              isInitialVisit,
+          // Insert note into Supabase
+          const { data, error } = await supabase
+            .from('notes')
+            .insert({
+              id: noteId,
+              patient_id: patientId,
+              transcript: transcript,
               content: JSON.stringify({ 
                 content: responseContent,
                 formattedContent 
               }),
-            },
-          });
-
-          // Generate a summary focusing on medication changes
-          try {
-            const summaryResponse = await fetch(new URL('/api/summary', request.url).toString(), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ content: responseContent }),
-            });
+              audio_file_url: audioFileUrl,
+              is_initial_visit: isInitialVisit,
+              created_at: now,
+              updated_at: now
+            })
+            .select()
+            .single();
             
-            if (summaryResponse.ok) {
-              const { summary } = await summaryResponse.json();
+          if (error) throw error;
+          
+          // Convert to Prisma format
+          note = convertToPrismaFormat(data, 'note');
+        } catch (error) {
+          console.error('Error creating note in Supabase:', error);
+          // Fall back to Prisma
+        }
+      }
+      
+      // Fall back to Prisma if Supabase is unavailable or operation failed
+      if (!note) {
+        console.log('Falling back to Prisma to create note');
+        const db = await connectWithFallback();
+        note = await db.note.create({
+          data: {
+            patientId,
+            transcript, // Store original transcript without the previous note
+            audioFileUrl,
+            isInitialVisit,
+            content: JSON.stringify({ 
+              content: responseContent,
+              formattedContent 
+            }),
+          },
+        });
+      }
+
+      // Generate a summary focusing on medication changes
+      try {
+        const summaryResponse = await fetch(new URL('/api/summary', request.url).toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ content: responseContent }),
+        });
+        
+        if (summaryResponse.ok) {
+          const { summary } = await summaryResponse.json();
+          
+          // Update the note with the generated summary
+          if (isSupabaseAvailable) {
+            console.log('Using Supabase to update note summary');
+            const { error } = await supabase
+              .from('notes')
+              .update({ summary, updated_at: new Date().toISOString() })
+              .eq('id', note.id);
               
-              // Update the note with the generated summary
-              await prisma.note.update({
+            if (error) {
+              console.error('Error updating note summary in Supabase:', error);
+              // Fall back to Prisma
+              const db = await connectWithFallback();
+              await db.note.update({
                 where: { id: note.id },
                 data: { summary }
               });
-              
-              note.summary = summary;
             }
-          } catch (summaryError) {
-            console.error('Error generating note summary:', summaryError);
-            // Continue without summary if there's an error
+          } else {
+            console.log('Using Prisma to update note summary');
+            await prisma.note.update({
+              where: { id: note.id },
+              data: { summary }
+            });
           }
-
-          console.log('Note created:', note.id);
-          return NextResponse.json(note);
-        } catch (error) {
-          attempts++;
-          if (attempts === maxAttempts) {
-            throw error;
-          }
-          console.log(`Retrying final synthesis (attempt ${attempts + 1}/${maxAttempts})`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+          
+          note.summary = summary;
         }
+      } catch (summaryError) {
+        console.error('Error generating note summary:', summaryError);
+        // Continue without summary if there's an error
       }
+
+      console.log('Note created:', note.id);
+      return NextResponse.json(note);
 
     } catch (error) {
       console.error('Error in OpenAI API call:', error);
@@ -545,16 +930,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Patient ID is required' }, { status: 400 })
     }
 
-    const notes = await prisma.note.findMany({
-      where: {
-        patientId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    })
+    // Check if Supabase is available
+    const isSupabaseAvailable = await checkSupabaseConnection();
+    
+    if (isSupabaseAvailable) {
+      console.log('Using Supabase to get notes');
+      // Get notes from Supabase
+      const supabaseNotes = await getSupabaseNotes(patientId);
+      
+      // Convert to Prisma format
+      const notes = supabaseNotes.map(note => 
+        convertToPrismaFormat(note, 'note')
+      ).filter(Boolean);
+      
+      return NextResponse.json(notes);
+    } else {
+      // Fall back to Prisma/SQLite
+      console.log('Falling back to Prisma to get notes');
+      const db = await connectWithFallback();
+      const notes = await db.note.findMany({
+        where: {
+          patientId,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
 
-    return NextResponse.json(notes)
+      return NextResponse.json(notes);
+    }
   } catch (error) {
     console.error('Error fetching notes:', error)
     return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 })

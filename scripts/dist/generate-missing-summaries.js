@@ -11,7 +11,7 @@ const openai = new openai_1.default({
 });
 async function generateSummary(content) {
     const summaryPrompt = {
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [
             {
                 role: 'system',

@@ -9,8 +9,10 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  relationMode = "prisma"
 }
 
 model Patient {
@@ -43,5 +45,6 @@ model AppSettings {
   initialVisitPrompt  String   @default("You are a medical scribe assistant. Your task is to generate a note for an INITIAL VISIT based on the provided medical visit transcript.")
   followUpVisitPrompt String   @default("You are a medical scribe assistant. Your task is to generate a note for a FOLLOW-UP VISIT based on the provided medical visit transcript.")
   autoSave            Boolean  @default(false)
+  lowEchoCancellation Boolean  @default(false)
   updatedAt           DateTime @updatedAt
 }

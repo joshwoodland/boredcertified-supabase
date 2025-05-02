@@ -76,46 +76,70 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
     setLocalValue(newValue);
     setIsDirty(true);
     
-    const { headings, cleanContent } = detectFormatting(newValue);
-    const formatGuide = Object.fromEntries(headings);
-    
-    // Only add format string if there are headings
-    const formattedContent = Object.keys(formatGuide).length > 0 
-      ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
-      : cleanContent;
-    
     // Debounce the onChange callback
     if (changeTimeoutRef.current) {
       clearTimeout(changeTimeoutRef.current);
     }
     
     changeTimeoutRef.current = setTimeout(() => {
-      onChange(formattedContent);
-    }, 300);
+      try {
+        const { headings, cleanContent } = detectFormatting(newValue);
+        const formatGuide = Object.fromEntries(headings);
+        
+        // Only add format string if there are headings
+        const formattedContent = Object.keys(formatGuide).length > 0 
+          ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
+          : cleanContent;
+        
+        onChange(formattedContent);
+      } catch (error) {
+        console.error('Error formatting content:', error);
+        // Still update with original text if formatting fails
+        onChange(newValue);
+      }
+    }, 1000); // Increased from 300ms to 1000ms
   };
 
   const handleSave = () => {
-    if (textareaRef.current) {
-      textareaRef.current.blur();
-      flushSync(() => {});
-      requestAnimationFrame(() => {
-        const finalValue = textareaRef.current ? textareaRef.current.value : localValue;
-        const { headings, cleanContent } = detectFormatting(finalValue);
+    try {
+      if (textareaRef.current) {
+        const finalValue = textareaRef.current.value;
+        
+        // Process in next tick to avoid UI freeze with large text
+        setTimeout(() => {
+          try {
+            const { headings, cleanContent } = detectFormatting(finalValue);
+            const formatGuide = Object.fromEntries(headings);
+            const formattedContent = Object.keys(formatGuide).length > 0 
+              ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
+              : cleanContent;
+            
+            onChange(formattedContent);
+            setIsDirty(false);
+            setIsExpanded(false);
+          } catch (error) {
+            console.error('Error saving content:', error);
+            // Still save the raw content if formatting fails
+            onChange(finalValue);
+            setIsDirty(false);
+            setIsExpanded(false);
+          }
+        }, 0);
+      } else {
+        const { headings, cleanContent } = detectFormatting(localValue);
         const formatGuide = Object.fromEntries(headings);
         const formattedContent = Object.keys(formatGuide).length > 0 
           ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
           : cleanContent;
+        
         onChange(formattedContent);
         setIsDirty(false);
         setIsExpanded(false);
-      });
-    } else {
-      const { headings, cleanContent } = detectFormatting(localValue);
-      const formatGuide = Object.fromEntries(headings);
-      const formattedContent = Object.keys(formatGuide).length > 0 
-        ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
-        : cleanContent;
-      onChange(formattedContent);
+      }
+    } catch (error) {
+      console.error('Error in handleSave:', error);
+      // Fallback to save raw text
+      onChange(localValue);
       setIsDirty(false);
       setIsExpanded(false);
     }
@@ -136,7 +160,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
             handleChange(e.target.value);
           }}
           className="w-full h-32 p-2 border rounded-md resize-none dark:bg-dark-accent dark:border-dark-border dark:text-dark-text focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:!bg-dark-accent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500/50 [&::-webkit-scrollbar-corner]:!bg-dark-accent"
-          placeholder={`Enter the system message for ${label.toLowerCase()}...`}
+          placeholder={`Enter the template for ${label.toLowerCase()}...`}
         />
         <button
           onClick={() => setIsExpanded(true)}
@@ -180,7 +204,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
                   value={localValue}
                   onChange={(e) => handleChange(e.target.value)}
                   className="w-full h-full p-6 border rounded-lg resize-none dark:bg-dark-accent dark:border-dark-border dark:text-dark-text focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:!bg-dark-accent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500/50 [&::-webkit-scrollbar-corner]:!bg-dark-accent"
-                  placeholder={`Enter the system message for ${label.toLowerCase()}...`}
+                  placeholder={`Enter the template for ${label.toLowerCase()}...`}
                   spellCheck={false}
                 />
               </div>
@@ -201,4 +225,4 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
       )}
     </div>
   );
-} 
+}

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FiSend } from 'react-icons/fi';
+import { formatSoapNote } from '../utils/formatSoapNote';
 
 interface SoapNoteGeneratorProps {
   patientId: string | undefined;
@@ -49,6 +50,38 @@ export default function SoapNoteGenerator({
     fetchSettings();
   }, [onError]);
 
+  // Function to deduplicate stacked phrases in a transcript
+  const deduplicateTranscript = (text: string): string => {
+    if (!text) return '';
+    
+    // First pass: remove exact adjacent duplicated phrases
+    let normalizedText = text;
+    let prevNormalizedText = '';
+
+    // Iteratively remove repeated adjacent patterns until no more changes
+    while (normalizedText !== prevNormalizedText) {
+      prevNormalizedText = normalizedText;
+      
+      // Remove repeating word sequences (2-8 words)
+      for (let n = 8; n >= 2; n--) {
+        const wordRegex = new RegExp(`((?:\\S+\\s+){${n-1}}\\S+)\\s+\\1`, 'gi');
+        normalizedText = normalizedText.replace(wordRegex, '$1');
+      }
+    }
+    
+    // Second pass: remove stacking patterns (like "A B C A B C D")
+    const stackingPattern = /((?:\S+\s+){2,6})\1+/g;
+    let prevText = '';
+    
+    // Iteratively remove stacking patterns until no more changes
+    while (prevText !== normalizedText) {
+      prevText = normalizedText;
+      normalizedText = normalizedText.replace(stackingPattern, '$1');
+    }
+    
+    return normalizedText;
+  };
+
   const generateSoapNote = async () => {
     if (!patientId || !transcript.trim()) {
       onError('Patient ID and transcript are required');
@@ -58,7 +91,38 @@ export default function SoapNoteGenerator({
     setIsLoading(true);
     
     try {
-      // Use the existing API endpoint that already handles visit type detection
+      // First check if this is an initial visit for the patient
+      // This will help determine which template to use
+      let isInitialVisit = false;
+      try {
+        const notesResponse = await fetch(`/api/notes?patientId=${patientId}`);
+        if (notesResponse.ok) {
+          const existingNotes = await notesResponse.json();
+          isInitialVisit = existingNotes.length === 0;
+          console.log('Visit type determined:', isInitialVisit ? 'Initial Visit' : 'Follow-up Visit');
+        }
+      } catch (error) {
+        console.warn('Error checking if this is an initial visit, defaulting to follow-up', error);
+      }
+      
+      // Get the patient's name for proper formatting in the note
+      let patientName = "Patient";
+      try {
+        const patientResponse = await fetch(`/api/patients?id=${patientId}`);
+        if (patientResponse.ok) {
+          const patientData = await patientResponse.json();
+          if (patientData && patientData.length > 0) {
+            patientName = patientData[0].name;
+          }
+        }
+      } catch (error) {
+        console.warn('Error fetching patient name', error);
+      }
+      
+      // Use the full transcript without deduplication
+      const fullTranscript = transcript;
+      
+      // Use the API endpoint with explicit visit type and patient name
       const response = await fetch('/api/notes', {
         method: 'POST',
         headers: {
@@ -66,7 +130,10 @@ export default function SoapNoteGenerator({
         },
         body: JSON.stringify({
           patientId,
-          transcript
+          transcript: fullTranscript,
+          useStructuredPrompt: true, // Always use the structured prompt approach
+          isInitialEvaluation: isInitialVisit, // Explicitly pass visit type
+          patientName: patientName // Pass patient name for proper formatting
         }),
       });
 
@@ -77,7 +144,32 @@ export default function SoapNoteGenerator({
         );
       }
 
+      // Process the generated note to ensure proper formatting
       const noteData = await response.json();
+      
+      // Ensure the note is formatted properly by formatting it explicitly if needed
+      if (noteData && typeof noteData.content === 'string') {
+        try {
+          // Parse the content to check if it's JSON
+          const contentObj = JSON.parse(noteData.content);
+          
+          // If content is in JSON format, ensure it's formatted properly
+          if (typeof contentObj === 'object' && contentObj !== null) {
+            // Format the note using formatSoapNote (which will be applied in the Note component)
+            const formattedContent = formatSoapNote(JSON.stringify(contentObj));
+            
+            // Update the note content to include both raw and formatted content
+            noteData.content = JSON.stringify({
+              content: JSON.stringify(contentObj), // Keep original content
+              formattedContent // Add formatted content
+            });
+          }
+        } catch (e) {
+          // If it's not JSON, just ensure it's a string
+          console.log("Note content is not in JSON format, keeping as is");
+        }
+      }
+      
       onNoteGenerated(noteData);
     } catch (error) {
       console.error('Error generating SOAP note:', error);
@@ -230,4 +322,4 @@ export default function SoapNoteGenerator({
       </button>
     </div>
   );
-} 
+}

@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
+import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
+import RecoveryPrompt from './RecoveryPrompt';
+// Audio storage imports removed
 
 const LiveTranscription = dynamic(
   () => import('./LiveTranscription'),
@@ -11,6 +14,9 @@ const LiveTranscription = dynamic(
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob, transcript: string) => void;
   isProcessing: boolean;
+  isRecordingFromModal?: boolean;
+  onTranscriptUpdate?: (transcript: string) => void;
+  lowEchoCancellation?: boolean;
 }
 
 interface CustomMediaRecorder {
@@ -73,7 +79,13 @@ const loadingMessages = [
   "Walter White from Breaking Bad is calculating medication dosages… let's double-check that. ⚗️"
 ];
 
-export default function AudioRecorder({ onRecordingComplete, isProcessing }: AudioRecorderProps) {
+export default function AudioRecorder({
+  onRecordingComplete,
+  isProcessing,
+  isRecordingFromModal = false,
+  onTranscriptUpdate,
+  lowEchoCancellation = false
+}: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [finalTranscript, setFinalTranscript] = useState('');
@@ -82,7 +94,22 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   const [error, setError] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editableTranscript, setEditableTranscript] = useState('');
-  
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
+
+  // Use the recording safeguard hook
+  const {
+    recoverySession,
+    lastBackupTime,
+    handleRecoverTranscript,
+    handleDiscardRecovery,
+    clearRecordingData
+  } = useRecordingSafeguard({
+    isRecording,
+    transcript,
+    finalTranscript,
+    sessionType: 'general'
+  });
+
   // Use refs for audio context and stream to prevent re-renders
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -94,13 +121,13 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
   const getRandomLoadingMessage = useCallback(() => {
     const unusedIndices = Array.from(Array(loadingMessages.length).keys())
       .filter(i => !usedMessageIndices.has(i));
-    
+
     if (unusedIndices.length === 0) {
       // Reset if all messages have been used
       const randomIndex = Math.floor(Math.random() * loadingMessages.length);
       return loadingMessages[randomIndex];
     }
-    
+
     const randomIndex = unusedIndices[Math.floor(Math.random() * unusedIndices.length)];
     return loadingMessages[randomIndex];
   }, [usedMessageIndices]);
@@ -111,7 +138,7 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
       // Get initial message without setting state directly
       const initialMessage = getRandomLoadingMessage();
       setCurrentLoadingMessage(initialMessage);
-      
+
       // Track used messages by updating the set
       const updateUsedMessages = (message: string) => {
         const index = loadingMessages.indexOf(message);
@@ -125,16 +152,16 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
           });
         }
       };
-      
+
       // Update the used messages set for the initial message
       updateUsedMessages(initialMessage);
-      
+
       const interval = setInterval(() => {
         const message = getRandomLoadingMessage();
         setCurrentLoadingMessage(message);
         updateUsedMessages(message);
       }, 3000);
-      
+
       return () => clearInterval(interval);
     }
   }, [isProcessing, getRandomLoadingMessage]);
@@ -165,7 +192,7 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
     try {
       // Clean up any existing recording
       cleanup();
-      
+
       // Reset any previous errors
       setError(null);
 
@@ -224,42 +251,53 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
     }
   }, [cleanup]);
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback(async () => {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      
-      // Use the final transcript that's been accumulated
-      const audioBlob = new Blob(chunksRef.current, { type: 'audio/wav' });
-      const transcriptToUse = finalTranscript || transcript;
-      
-      if (transcriptToUse.trim()) {
-        // Instead of immediately calling onRecordingComplete, set editable mode
-        setEditableTranscript(transcriptToUse);
-        setIsEditMode(true);
-      } else {
-        console.error('No transcript available');
+
+      try {
+        // Create a simple placeholder audio blob
+        // This is needed because the component still expects a Blob to be passed to onRecordingComplete
+        const placeholder = new Blob([], { type: 'audio/wav' });
+        audioBlobRef.current = placeholder;
+
+        // Use the final transcript that's been accumulated
+        const transcriptToUse = finalTranscript || transcript;
+
+        if (transcriptToUse.trim()) {
+          // Instead of immediately calling onRecordingComplete, set editable mode
+          setEditableTranscript(transcriptToUse);
+          setIsEditMode(true);
+        } else {
+          console.error('No transcript available');
+          setError('No transcript was generated. Please try recording again.');
+        }
+
+        // Reset for next recording
+        cleanup();
+        setTranscript('');
+        setFinalTranscript('');
+      } catch (error) {
+        console.error('Error processing recording:', error);
+        setError('Failed to process recording. Please try again.');
+        cleanup();
       }
-      
-      // Reset for next recording but keep audioBlob
-      cleanup();
-      setTranscript('');
-      setFinalTranscript('');
-      
-      // Store audioBlob in ref for later use
-      audioBlobRef.current = audioBlob;
     }
   }, [transcript, finalTranscript, cleanup]);
 
   // Add a function to submit the edited transcript
   const submitTranscript = useCallback(() => {
     if (audioBlobRef.current && editableTranscript.trim()) {
+      // Clear recording session data when successfully submitting
+      clearRecordingData();
+
       onRecordingComplete(audioBlobRef.current, editableTranscript);
       setIsEditMode(false);
       setEditableTranscript('');
       audioBlobRef.current = null;
     }
-  }, [editableTranscript, onRecordingComplete]);
+  }, [editableTranscript, onRecordingComplete, clearRecordingData]);
 
   // Add a function to cancel editing
   const cancelEditing = useCallback(() => {
@@ -276,10 +314,44 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
       });
     }
     setTranscript(newTranscript);
-  }, []);
+
+    // If this is being used with the modal, notify the parent component of the transcript update
+    if (onTranscriptUpdate) {
+      // Always use the most complete version of the transcript
+      const completeTranscript = finalTranscript || newTranscript;
+      onTranscriptUpdate(completeTranscript);
+    }
+  }, [onTranscriptUpdate, finalTranscript]);
+
+  // Start recording when triggered from the modal
+  useEffect(() => {
+    if (isRecordingFromModal && !isRecording && !isProcessing) {
+      startRecording();
+    }
+  }, [isRecordingFromModal, isRecording, isProcessing, startRecording]);
+
+  // Handle recovered transcript
+  const onRecoverTranscript = useCallback((recoveredText: string) => {
+    // Set up the recovered transcript for editing
+    setEditableTranscript(recoveredText);
+    setIsEditMode(true);
+
+    // Create a placeholder audio blob
+    audioBlobRef.current = new Blob([], { type: 'audio/wav' });
+
+    // Clear the recovery session after applying it
+    handleRecoverTranscript(recoveredText);
+  }, [handleRecoverTranscript]);
 
   return (
     <div className="flex flex-col items-center gap-6">
+      {recoverySession && (
+        <RecoveryPrompt
+          savedSession={recoverySession}
+          onRecover={onRecoverTranscript}
+          onDiscard={handleDiscardRecovery}
+        />
+      )}
       {error && (
         <div className="w-full max-w-md bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border border-red-200 dark:border-red-800 mb-2">
           <p className="text-red-800 dark:text-red-200">
@@ -287,17 +359,31 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
           </p>
         </div>
       )}
-      
+
       {!isEditMode && (
-        <div className="relative flex justify-center items-center">
+        <div className="w-full flex flex-col items-center gap-4">
+          <div className="flex justify-between w-full max-w-md">
+            <button
+              onClick={() => setShowAudioSettings(!showAudioSettings)}
+              className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+              aria-label="Toggle audio settings"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+              </svg>
+              {showAudioSettings ? 'Hide Audio Settings' : 'Audio Settings'}
+            </button>
+          </div>
+
+          <div className="relative flex justify-center items-center">
           <button
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isProcessing}
             className={`
               relative w-20 h-20 rounded-full transition-all duration-300 ease-in-out
               flex items-center justify-center
-              ${isRecording 
-                ? 'bg-red-500 hover:bg-red-600 scale-110' 
+              ${isRecording
+                ? 'bg-red-500 hover:bg-red-600 scale-110'
                 : 'bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 hover:scale-105'
               }
               disabled:opacity-50 disabled:cursor-not-allowed
@@ -307,18 +393,18 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
             aria-label={isRecording ? 'Stop Recording' : 'Start Recording'}
           >
             {/* Microphone icon */}
-            <svg 
-              className={`w-10 h-10 text-white transition-transform duration-200 ${isRecording ? 'scale-90' : 'scale-100'}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
+            <svg
+              className={`w-10 h-10 text-white transition-transform duration-200 ${isRecording ? 'scale-90' : 'scale-100'}`}
+              fill="none"
+              viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={2} 
-                d={isRecording 
-                  ? "M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" 
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d={isRecording
+                  ? "M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z"
                   : "M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
                 }
               />
@@ -342,18 +428,19 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
               </svg>
             )}
           </button>
-          
+
           {/* Status text */}
           <span className={`
             absolute -bottom-8 text-sm font-medium tracking-wide
             transition-all duration-300
-            ${isRecording 
-              ? 'text-red-500 dark:text-red-400' 
+            ${isRecording
+              ? 'text-red-500 dark:text-red-400'
               : 'text-gray-400 dark:text-gray-500'
             }
           `}>
             {isRecording ? 'Recording...' : 'Ready'}
           </span>
+          </div>
         </div>
       )}
 
@@ -367,7 +454,7 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
             className="w-full min-h-[300px] p-4 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={isProcessing}
           />
-          
+
           <div className="flex justify-end mt-4 gap-3">
             <button
               onClick={cancelEditing}
@@ -401,9 +488,11 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
               </div>
             </div>
           }>
-            <LiveTranscription 
-              isRecording={isRecording} 
+            <LiveTranscription
+              isRecording={isRecording}
               onTranscriptUpdate={handleTranscriptUpdate}
+              showAudioSettings={showAudioSettings}
+              lowEchoCancellation={lowEchoCancellation}
             />
           </Suspense>
         </div>
@@ -411,40 +500,3 @@ export default function AudioRecorder({ onRecordingComplete, isProcessing }: Aud
     </div>
   );
 }
-
-// Helper function to create WAV buffer
-function createWavBuffer(audioData: Float32Array, sampleRate: number): ArrayBuffer {
-  const buffer = new ArrayBuffer(44 + audioData.length * 2);
-  const view = new DataView(buffer);
-
-  // Write WAV header
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + audioData.length * 2, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, audioData.length * 2, true);
-
-  // Write audio data
-  const volume = 0.5;
-  let index = 44;
-  for (let i = 0; i < audioData.length; i++) {
-    view.setInt16(index, audioData[i] * 0x7FFF * volume, true);
-    index += 2;
-  }
-
-  return buffer;
-}
-
-function writeString(view: DataView, offset: number, string: string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
-} 

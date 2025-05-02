@@ -1,11 +1,62 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { FiChevronDown, FiChevronUp, FiEdit, FiCopy } from 'react-icons/fi';
+import { FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiZap, FiSend } from 'react-icons/fi';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
 import Toast from './Toast';
 import DiagnosisSection from './DiagnosisSection';
+
+// AIMagicModal component
+interface AIMagicModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (editRequest: string) => void;
+  isLoading: boolean;
+}
+
+function AIMagicModal({ isOpen, onClose, onSubmit, isLoading }: AIMagicModalProps) {
+  const [editRequest, setEditRequest] = useState('');
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-lg w-full">
+        <div className="p-6">
+          <h3 className="text-lg font-semibold mb-4 dark:text-white">AI Magic Edit</h3>
+          <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+            Describe the changes you want to make to this SOAP note:
+          </p>
+          <textarea
+            value={editRequest}
+            onChange={(e) => setEditRequest(e.target.value)}
+            className="w-full p-2 border rounded-md min-h-[100px] dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+            placeholder="E.g., Change the diagnosis from Depression to Undiagnosed mood disorder"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button 
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 border rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                onSubmit(editRequest);
+                setEditRequest('');
+              }}
+              disabled={isLoading || !editRequest.trim()}
+              className="px-4 py-2 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Processing...' : 'Apply Magic'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface Note {
   id: string;
@@ -31,10 +82,11 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
   const [editableContent, setEditableContent] = useState<string>('');
   const [summary, setSummary] = useState<string | null>(note.summary ?? null);
   const [isFetchingSummary, setIsFetchingSummary] = useState<boolean>(false);
-  const [showRawFormat, setShowRawFormat] = useState<boolean>(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [diagnoses, setDiagnoses] = useState<string[]>([]);
   const [ruleOuts, setRuleOuts] = useState<string[]>([]);
+  const [isAIMagicModalOpen, setIsAIMagicModalOpen] = useState(false);
+  const [isAIMagicLoading, setIsAIMagicLoading] = useState(false);
 
   // Fetch summary if not available
   useEffect(() => {
@@ -227,6 +279,103 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
     updateNoteContent(diagnoses, newRuleOuts);
   };
 
+  // Send note to webhook
+  const sendNoteWebhook = async () => {
+    try {
+      // Use the original parsedContent with markdown formatting instead of the HTML-formatted version
+      // This preserves the ## headers and other markdown formatting
+      const rawMarkdownNote = parsedContent;
+      
+      // Send webhook POST request
+      const response = await fetch('https://woodlandpsychiatry.app.n8n.cloud/webhook/boredcertified', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ soapNote: rawMarkdownNote }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to send note');
+      
+      // Show success toast
+      setToast({ message: 'Note shipped successfully!', type: 'success' });
+    } catch (error) {
+      console.error('Error sending note webhook:', error);
+      setToast({ message: 'Failed to ship note', type: 'error' });
+    }
+  };
+
+  // Handle AI Magic edits
+  const handleAIMagicSubmit = async (editRequest: string) => {
+    setIsAIMagicLoading(true);
+    try {
+      console.log('Sending AI Magic edit request:', editRequest);
+      
+      const response = await fetch(`/api/notes/${note.id}/edit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ editRequest }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('API error response:', errorData);
+        throw new Error(errorData.details || 'Failed to apply AI Magic edits');
+      }
+      
+      const editedNote = await response.json();
+      console.log('AI Magic edit response:', editedNote);
+      
+      // Force refresh from the server to get the latest note
+      const refreshResponse = await fetch(`/api/notes/${note.id}/edit`);
+      if (!refreshResponse.ok) {
+        throw new Error('Failed to refresh note after edits');
+      }
+      
+      const refreshedNote = await refreshResponse.json();
+      console.log('Refreshed note:', refreshedNote);
+      
+      // Update local state with the edited content
+      try {
+        // Update note reference with latest from server
+        note.content = refreshedNote.content;
+        
+        // Parse the refreshed content
+        const parsedContent = safeJsonParse<any>(refreshedNote.content);
+        if (parsedContent) {
+          if (parsedContent.content) {
+            setEditableContent(parsedContent.content);
+          } else {
+            setEditableContent(refreshedNote.content);
+          }
+        } else {
+          setEditableContent(refreshedNote.content);
+        }
+        
+        // Force a re-render by updating the note content reference
+        note.content = refreshedNote.content;
+        
+      } catch (e) {
+        console.error('Error parsing refreshed note:', e);
+        setEditableContent(refreshedNote.content);
+      }
+      
+      // Show success toast
+      setToast({ message: 'SOAP note updated with AI Magic!', type: 'success' });
+      
+      // Close the modal
+      setIsAIMagicModalOpen(false);
+    } catch (error) {
+      console.error('Error applying AI Magic edits:', error);
+      setToast({
+        message: error instanceof Error ? error.message : 'Failed to apply AI Magic edits',
+        type: 'error'
+      });
+    } finally {
+      setIsAIMagicLoading(false);
+    }
+  };
+
   // Function to update the note content with new diagnoses and rule outs
   const updateNoteContent = (newDiagnoses: string[], newRuleOuts: string[]) => {
     // Replace or add the diagnoses section in the editable content
@@ -301,34 +450,58 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
   };
 
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow transition-all duration-200 ${
-      isLatest || isExpanded ? 'p-8' : 'p-4'
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-md hover:shadow-lg transition-all duration-200 ${
+      isLatest || isExpanded ? 'p-5' : 'p-3'
     }`}>
+      <style jsx>{`
+        .prose h2, .prose h3, .prose h4 {
+          font-weight: 600;
+          color: #1a202c;
+          margin-top: 1.5em;
+          margin-bottom: 0.5em;
+        }
+        
+        .dark .prose h2, .dark .prose h3, .dark .prose h4 {
+          color: #e2e8f0;
+        }
+        
+        .prose h2::before, .prose h3::before, .prose h4::before {
+          content: "";
+          display: inline-block;
+          width: 3px;
+          height: 0.9em;
+          background-color: #3b82f6;
+          margin-right: 0.5em;
+          vertical-align: middle;
+        }
+      `}</style>
       {/* Header */}
-      <div className={`flex items-start justify-between ${!isLatest && 'cursor-pointer'}`}
+      <div className={`flex flex-col md:flex-row items-start md:items-center justify-between ${!isLatest && 'cursor-pointer'} py-2`}
         onClick={() => !isLatest && setIsExpanded(!isExpanded)}>
-        <div className="space-y-1 flex-1">
+        <div className="flex-1 flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
           <div className="flex items-center gap-2">
             <h3 className="text-lg font-semibold dark:text-white">
               {note.isInitialVisit ? 'Initial Evaluation' : 'Follow Up'}
             </h3>
-            <span className={`px-2 py-0.5 text-xs rounded-full ${
-              note.isInitialVisit
-                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-            }`}>
+            <span className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-full 
+              ${note.isInitialVisit 
+                ? 'bg-blue-200 text-blue-700 dark:bg-blue-800 dark:text-blue-300' 
+                : 'bg-green-200 text-green-700 dark:bg-green-800 dark:text-green-300'}`}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+              </svg>
               {formattedDate}
             </span>
           </div>
           {!isLatest && !isExpanded && (
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 line-clamp-1">
+            <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-1 md:border-l md:border-gray-300 md:dark:border-gray-600 md:pl-4">
               {summary || note.summary || (isFetchingSummary ? 'Loading summary...' : 'Follow-up visit')}
             </p>
           )}
         </div>
         {!isLatest && (
           <button
-            className="ml-4 p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+            className="mt-2 md:mt-0 p-1 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-all transform hover:scale-110 active:scale-95"
             aria-label={isExpanded ? 'Collapse note' : 'Expand note'}
           >
             {isExpanded ? <FiChevronUp /> : <FiChevronDown />}
@@ -340,56 +513,64 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
       {(isLatest || isExpanded) && (
         <div className="mt-8">
           {/* Action Buttons */}
-          <div className="mb-6 flex justify-between">
+          <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <div>
               {isLatest && (
                 <button
                   onClick={() => setIsEditing(!isEditing)}
-                  className="px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center"
+                  className="px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center transition transform hover:scale-105 active:scale-95"
                 >
                   <FiEdit className="mr-1" />
                   {isEditing ? 'Save Changes' : 'Edit Note'}
                 </button>
               )}
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 mt-3 sm:mt-0">
               <button
-                onClick={() => setShowRawFormat(!showRawFormat)}
-                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                onClick={() => setIsAIMagicModalOpen(true)}
+                className="px-4 py-2 text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] flex items-center transition transform hover:scale-105 active:scale-95"
               >
-                {showRawFormat ? 'Show Formatted' : 'Show Raw'}
+                <FiZap className="mr-1 text-purple-500" />
+                <span className="font-semibold">AI Magic</span>
               </button>
               <button
                 onClick={copyNoteToClipboard}
-                className="px-4 py-2 text-sm font-medium text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 flex items-center"
+                className="px-4 py-2 text-sm font-medium text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 flex items-center transition transform hover:scale-105 active:scale-95"
               >
                 <FiCopy className="mr-1" />
                 Copy Note
               </button>
+              <button
+                onClick={sendNoteWebhook}
+                className="px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center transition transform hover:scale-105 active:scale-95"
+              >
+                <FiSend className="mr-1" />
+                Ship it
+              </button>
             </div>
           </div>
 
-          {/* Editable Diagnosis Section - show when editing or in raw mode */}
-          {(isEditing || showRawFormat) && (
+          {/* Editable Diagnosis Section - show when editing */}
+          {isEditing && (
             <DiagnosisSection
               initialDiagnoses={diagnoses}
               initialRuleOuts={ruleOuts}
               onDiagnosesChange={handleDiagnosesChange}
               onRuleOutsChange={handleRuleOutsChange}
-              readOnly={showRawFormat}
+              readOnly={false}
             />
           )}
 
           {/* Note Content */}
-          <div className="prose dark:prose-invert max-w-none">
+          <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
+          
+          <div className="prose dark:prose-invert max-w-none leading-relaxed text-base">
             {isEditing ? (
               <textarea
                 value={editableContent}
                 onChange={(e) => handleContentChange(e.target.value)}
-                className="w-full min-h-[500px] p-4 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 font-mono text-sm"
+                className="w-full min-h-[450px] p-4 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 font-mono text-sm"
               />
-            ) : showRawFormat ? (
-              <div className="whitespace-pre-wrap">{parsedContent}</div>
             ) : (
               <div dangerouslySetInnerHTML={{ __html: formattedContent }} />
             )}
@@ -405,6 +586,14 @@ export default function Note({ note, isLatest = false, forceCollapse = false }: 
           onClose={() => setToast(null)}
         />
       )}
+      
+      {/* AI Magic Modal */}
+      <AIMagicModal
+        isOpen={isAIMagicModalOpen}
+        onClose={() => setIsAIMagicModalOpen(false)}
+        onSubmit={handleAIMagicSubmit}
+        isLoading={isAIMagicLoading}
+      />
     </div>
   );
-} 
+}
