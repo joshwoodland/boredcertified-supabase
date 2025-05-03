@@ -20,6 +20,7 @@ interface AppSettings {
   initialVisitPrompt: string;
   followUpVisitPrompt: string;
   lowEchoCancellation?: boolean;
+  email?: string | null;
 }
 
 type SaveButtonState = 'hidden' | 'unsaved' | 'saved' | 'saving' | 'error';
@@ -31,6 +32,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     initialVisitPrompt: '',
     followUpVisitPrompt: '',
     lowEchoCancellation: false,
+    email: null,
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -65,6 +67,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
           initialVisitPrompt: currentSettings.initialVisitPrompt,
           followUpVisitPrompt: currentSettings.followUpVisitPrompt,
           lowEchoCancellation: currentSettings.lowEchoCancellation,
+          email: currentSettings.email,
           initialVisitDescription: 'System message for initial psychiatric evaluation visits',
           followUpVisitDescription: 'System message for follow-up psychiatric visits',
         }),
@@ -244,6 +247,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
         initialVisitPrompt: data.initialVisitPrompt,
         followUpVisitPrompt: data.followUpVisitPrompt,
         lowEchoCancellation: data.lowEchoCancellation || false,
+        email: data.email || null,
       };
 
       setSettings(newSettings);

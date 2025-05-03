@@ -1,6 +1,7 @@
 import './styles/globals.css'
 import { Inter, Montserrat } from 'next/font/google'
 import ThemeProvider from './components/ThemeProvider'
+import { AppSettingsProvider } from './providers/AppSettingsProvider'
 
 const inter = Inter({ subsets: ['latin'] })
 const montserrat = Montserrat({ 
@@ -69,10 +70,12 @@ export default function RootLayout({
         `}} />
       </head>
       <body className={`${inter.className} ${montserrat.variable} min-h-screen dark:bg-dark-main bg-gray-50`}>
-        <ThemeProvider />
-        <main className="min-h-screen">
-          {children}
-        </main>
+        <AppSettingsProvider>
+          <ThemeProvider />
+          <main className="min-h-screen">
+            {children}
+          </main>
+        </AppSettingsProvider>
       </body>
     </html>
   )

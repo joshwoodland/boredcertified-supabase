@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createBrowserClient } from '@supabase/ssr';
+import { CookieOptions } from '@supabase/auth-helpers-shared';
 
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
@@ -9,17 +10,54 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Create Browser Client (with proper cookie handling)
+// Custom cookie parser to handle both JSON and base64 cookies
+export const customCookieParser = (str: string): unknown => {
+  try {
+    // First check if this is a base64-encoded cookie
+    if (str.startsWith('base64-')) {
+      try {
+        const base64Value = str.replace('base64-', '');
+        const jsonStr = Buffer.from(base64Value, 'base64').toString();
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        console.log('Failed to decode base64 cookie, trying normal JSON parse');
+      }
+    }
+    
+    // Normal JSON parsing
+    return JSON.parse(str);
+  } catch (e) {
+    console.error('Custom cookie parser error:', e);
+    // Return null instead of throwing to prevent crashes
+    return null;
+  }
+};
+
+/**
+ * Creates a Supabase client for browser usage with cookie handling.
+ * This should be used in client components.
+ */
 export const createBrowserSupabaseClient = () => 
   createBrowserClient(supabaseUrl, supabaseAnonKey);
 
-// Create client-side instance with cookie support
+/**
+ * Singleton browser client (with cookie handling)
+ * Only used in client components or when isomorphic behavior is required
+ */
 export const supabase = isClient
   ? createBrowserSupabaseClient()
-  : createClient(supabaseUrl, supabaseServiceKey);
+  : createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+      }
+    });
 
-// Export a server-side client creation function
-export const createServerSupabaseClient = () => 
+/**
+ * Creates a Supabase admin client using the service role key.
+ * This bypasses RLS policies and should only be used in trusted server contexts.
+ * CAUTION: Never expose this client to the browser.
+ */
+export const createAdminSupabaseClient = () => 
   createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       persistSession: false,
@@ -42,78 +80,6 @@ export async function checkSupabaseConnection(): Promise<boolean> {
     console.error('Failed to connect to Supabase:', error);
     return false;
   }
-}
-
-/**
- * Fetches patients from Supabase
- * @param filterByCurrentUser Whether to filter patients by the current user's email (true by default)
- * @returns Array of patients
- */
-export async function getSupabasePatients(filterByCurrentUser = true) {
-  // Get current user's session to access their email
-  const { data: { session } } = await supabase.auth.getSession();
-  const userEmail = session?.user?.email;
-  
-  // Build query
-  let query = supabase
-    .from('patients')
-    .select('*')
-    .order('created_at', { ascending: false });
-  
-  // Filter by provider email if requested
-  if (filterByCurrentUser && userEmail) {
-    // First get patients assigned to the current user
-    query = query.eq('provider_email', userEmail);
-    console.log(`Filtering patients for provider email: ${userEmail}`);
-  }
-  
-  const { data, error } = await query;
-  
-  if (error) {
-    console.error('Error fetching patients from Supabase:', error);
-    return [];
-  }
-  
-  return data || [];
-}
-
-/**
- * Fetches notes for a specific patient from Supabase
- * @param patientId The patient's ID
- * @returns Array of notes
- */
-export async function getSupabaseNotes(patientId: string) {
-  const { data, error } = await supabase
-    .from('notes')
-    .select('*')
-    .eq('patient_id', patientId)
-    .order('created_at', { ascending: false });
-  
-  if (error) {
-    console.error(`Error fetching notes for patient ${patientId} from Supabase:`, error);
-    return [];
-  }
-  
-  return data || [];
-}
-
-/**
- * Fetches app settings from Supabase
- * @returns App settings object or null if not found
- */
-export async function getSupabaseAppSettings() {
-  const { data, error } = await supabase
-    .from('app_settings')
-    .select('*')
-    .eq('id', 'default')
-    .single();
-  
-  if (error) {
-    console.error('Error fetching app settings from Supabase:', error);
-    return null;
-  }
-  
-  return data;
 }
 
 /**
@@ -151,6 +117,8 @@ interface SupabaseAppSettings {
   follow_up_visit_prompt: string;
   auto_save: boolean;
   low_echo_cancellation: boolean;
+  email: string | null;
+  user_id: string | null;
   updated_at: string;
 }
 
@@ -186,6 +154,8 @@ interface PrismaAppSettings {
   followUpVisitPrompt: string;
   autoSave: boolean;
   lowEchoCancellation: boolean;
+  email: string | null;
+  userId: string | null;
   updatedAt: Date;
 }
 
@@ -231,6 +201,8 @@ export function convertToPrismaFormat(record: SupabaseRecord, type: 'patient' | 
         followUpVisitPrompt: settingsRecord.follow_up_visit_prompt,
         autoSave: settingsRecord.auto_save,
         lowEchoCancellation: settingsRecord.low_echo_cancellation,
+        email: settingsRecord.email,
+        userId: settingsRecord.user_id,
         updatedAt: new Date(settingsRecord.updated_at),
       };
     }
@@ -284,6 +256,8 @@ export function convertToSupabaseFormat(record: PrismaRecord, type: 'patient' | 
         follow_up_visit_prompt: settingsRecord.followUpVisitPrompt,
         auto_save: settingsRecord.autoSave,
         low_echo_cancellation: settingsRecord.lowEchoCancellation,
+        email: settingsRecord.email,
+        user_id: settingsRecord.userId,
         updated_at: new Date(settingsRecord.updatedAt).toISOString(),
       };
     }

@@ -58,6 +58,31 @@ export default function SupabasePatientList({
     setFilteredPatients(filtered);
   }, [searchQuery, patients]);
 
+  // Group patients by date (ignoring time)
+  const groupPatientsByDate = (patientList: Patient[]) => {
+    const groups: {[key: string]: {date: Date, patients: Patient[]}} = {};
+    
+    patientList.forEach(patient => {
+      // Extract just the date part (ignoring time)
+      const dateObj = new Date(patient.createdAt);
+      const dateString = dateObj.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      if (!groups[dateString]) {
+        groups[dateString] = {
+          date: dateObj,
+          patients: []
+        };
+      }
+      
+      groups[dateString].patients.push(patient);
+    });
+    
+    // Convert to array and sort by date (newest first)
+    return Object.values(groups).sort((a, b) => 
+      b.date.getTime() - a.date.getTime()
+    );
+  };
+
   useEffect(() => {
     async function loadPatients() {
       setLoading(true);
@@ -443,7 +468,7 @@ export default function SupabasePatientList({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-white"
+              className="w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-0 dark:text-white"
               placeholder="Search patients..."
             />
             {searchQuery && (
@@ -461,7 +486,7 @@ export default function SupabasePatientList({
         </div>
       </div>
 
-      <div className="divide-y dark:divide-gray-700">
+      <div>
         {patients.length === 0 ? (
           <div className="p-4 text-center text-gray-500 dark:text-gray-400">
             {showTrash ? 'Trash is empty' : 'No patients found'}
@@ -471,113 +496,129 @@ export default function SupabasePatientList({
             No patients found matching "{searchQuery}"
           </div>
         ) : (
-          // Use filteredPatients when there's a search query, otherwise use all patients
-          (searchQuery ? filteredPatients : patients).map(patient => (
-            <div
-              key={patient.id}
-              className={`p-4 cursor-pointer transition-all group ${
-                selectedPatientId === patient.id
-                  ? 'gradient-border-left bg-gray-100 dark:bg-gray-800 shadow-inner shadow-black/30 dark:shadow-black/60 font-medium'
-                  : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
-              }`}
-              onClick={() => {
-                if (isEditing === patient.id) return;
-                onSelectPatient(patient.id);
-              }}
-            >
-              {isEditing === patient.id ? (
-                // Editing mode
-                <div onClick={(e) => e.stopPropagation()} className="flex items-center">
-                  <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
-                    <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                  </div>
-                  <form 
-                    onSubmit={(e) => handleEditSubmit(patient.id, e)}
-                    className="flex-1"
+          // Group patients by date and display with date headers
+          groupPatientsByDate(searchQuery ? filteredPatients : patients).map(group => (
+            <div key={group.date.toISOString()}>
+              {/* Date header */}
+              <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 sticky top-0 z-10 border-t border-b border-gray-200 dark:border-gray-600">
+                <p className="font-medium text-gray-700 dark:text-gray-300">
+                  {group.date.toLocaleDateString(undefined, { 
+                    weekday: 'long',
+                    month: 'long', 
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </p>
+              </div>
+              
+              {/* Patients for this date */}
+              <div className="divide-y dark:divide-gray-700">
+                {group.patients.map(patient => (
+                  <div
+                    key={patient.id}
+                    className={`p-4 cursor-pointer transition-all group ${
+                      selectedPatientId === patient.id
+                        ? 'gradient-border-left bg-gray-100 dark:bg-gray-800 shadow-inner shadow-black/30 dark:shadow-black/60 font-medium'
+                        : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => {
+                      if (isEditing === patient.id) return;
+                      onSelectPatient(patient.id);
+                    }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <label htmlFor="patientName" className="sr-only">Patient Name</label>
-                        <input
-                          id="patientName"
-                          type="text"
-                          value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
-                          className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:border-blue-600 dark:focus:border-blue-500 dark:text-white"
-                          placeholder="Enter patient name"
-                        />
+                    {isEditing === patient.id ? (
+                      // Editing mode
+                      <div onClick={(e) => e.stopPropagation()} className="flex items-center">
+                        <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
+                          <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                        </div>
+                        <form 
+                          onSubmit={(e) => handleEditSubmit(patient.id, e)}
+                          className="flex-1"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1">
+                              <label htmlFor="patientName" className="sr-only">Patient Name</label>
+                              <input
+                                id="patientName"
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:border-blue-600 dark:focus:border-blue-500 dark:text-white"
+                                placeholder="Enter patient name"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsEditing(null);
+                                  setEditName('');
+                                }}
+                                className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={isProcessing === patient.id}
+                                className="p-1.5 text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50"
+                              >
+                                {isProcessing === patient.id ? (
+                                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </form>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsEditing(null);
-                            setEditName('');
-                          }}
-                          className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isProcessing === patient.id}
-                          className="p-1.5 text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50"
-                        >
-                          {isProcessing === patient.id ? (
-                            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
+                    ) : (
+                      // Display mode
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3 flex-1 min-w-0">
+                          <div className="p-2 bg-gray-100 dark:bg-gray-600 rounded-full flex-shrink-0">
+                            <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-medium dark:text-white truncate">
+                              {patient.name}
+                            </h3>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5 ml-1 flex-shrink-0 pr-0.5">
+                          {!showTrash && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleEditClick(patient.id, e, patient.name)}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded-full transition-all duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600"
+                              title="Edit patient name"
+                            >
+                              <FiEdit2 className="w-4 h-4" />
+                            </button>
                           )}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={(e) => showTrash ? handleRestorePatient(patient.id, e) : handleMoveToTrash(patient.id, e)}
+                            className={`opacity-0 group-hover:opacity-100 p-1 rounded-full transition-all duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600 ${
+                              isProcessing === patient.id ? 'animate-spin' : ''
+                            }`}
+                            title={showTrash ? 'Restore patient' : 'Move to trash'}
+                            disabled={isProcessing === patient.id}
+                          >
+                            {showTrash ? <FiRefreshCw className="w-4 h-4" /> : <FiTrash2 className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </form>
-                </div>
-              ) : (
-                // Display mode
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3 flex-1 min-w-0">
-                    <div className="p-2 bg-gray-100 dark:bg-gray-600 rounded-full flex-shrink-0">
-                      <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-medium dark:text-white truncate">
-                        {patient.name}
-                      </h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                        Created: {new Date(patient.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-0.5 ml-1 flex-shrink-0 pr-0.5">
-                    {!showTrash && (
-                      <button
-                        type="button"
-                        onClick={(e) => handleEditClick(patient.id, e, patient.name)}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded-full transition-all duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600"
-                        title="Edit patient name"
-                      >
-                        <FiEdit2 className="w-4 h-4" />
-                      </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={(e) => showTrash ? handleRestorePatient(patient.id, e) : handleMoveToTrash(patient.id, e)}
-                      className={`opacity-0 group-hover:opacity-100 p-1 rounded-full transition-all duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600 ${
-                        isProcessing === patient.id ? 'animate-spin' : ''
-                      }`}
-                      title={showTrash ? 'Restore patient' : 'Move to trash'}
-                      disabled={isProcessing === patient.id}
-                    >
-                      {showTrash ? <FiRefreshCw className="w-4 h-4" /> : <FiTrash2 className="w-4 h-4" />}
-                    </button>
                   </div>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           ))
         )}

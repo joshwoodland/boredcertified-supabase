@@ -4,11 +4,8 @@ import {
   checkSupabaseConnection, 
   convertToPrismaFormat 
 } from '@/app/lib/supabase'
-import { 
-  getSupabaseAppSettings
-} from '@/app/lib/server-supabase'
+import { createClient } from '@/app/utils/supabase/server'
 import { cookies } from 'next/headers'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 
 // Debug logging with prefix for easier identification
 const debugLog = (message: string, data?: unknown) => {
@@ -19,14 +16,73 @@ const debugLog = (message: string, data?: unknown) => {
   }
 };
 
+// Get app settings from Supabase
+async function getSupabaseAppSettings(userId?: string | null) {
+  const supabase = createClient();
+  
+  try {
+    // Get current user's session to access their ID if not provided
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUserId = userId || session?.user?.id;
+    
+    console.log('[SETTINGS DEBUG] Auth session details:', {
+      hasSession: !!session,
+      userId: session?.user?.id,
+      userEmail: session?.user?.email,
+      cookiesPresent: true,
+      authCookiePresent: true
+    });
+    
+    const query = supabase.from('app_settings').select('*');
+    
+    // First priority: Try to get settings by user ID if available
+    if (currentUserId) {
+      const { data: userIdSettings, error: userIdError } = await query
+        .eq('user_id', currentUserId)
+        .single();
+      
+      if (!userIdError && userIdSettings) {
+        console.log(`Found settings for user ID: ${currentUserId}`);
+        return convertToPrismaFormat(userIdSettings, 'settings');
+      }
+      
+      // If there was an error or no user ID settings found, log and fall back to default
+      if (userIdError && userIdError.code !== 'PGRST116') { // PGRST116 is "no rows returned" error
+        console.error(`Error fetching user settings for user ID ${currentUserId}:`, userIdError);
+      } else {
+        console.log(`No settings found for user ID: ${currentUserId}, falling back to default`);
+      }
+    } else {
+      console.log('[SETTINGS DEBUG] No user found, using default settings');
+    }
+    
+    // Fall back to default settings
+    const { data: defaultSettings, error: defaultError } = await query
+      .eq('id', 'default')
+      .single();
+    
+    if (defaultError) {
+      console.error('Error fetching default app settings from Supabase:', defaultError);
+      console.log('[SETTINGS DEBUG] Using default settings');
+      return null;
+    }
+    
+    return convertToPrismaFormat(defaultSettings, 'settings');
+  } catch (error) {
+    console.error('Error in getSupabaseAppSettings:', error);
+    console.log('[SETTINGS DEBUG] Using default settings');
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest) {
   debugLog('Starting GET request for settings');
   
   try {
-    // Create a Supabase client using the official route handler client
-    const supabase = createRouteHandlerClient({ cookies });
+    // Create a Supabase client
+    const supabase = createClient();
     
-    // Check for auth cookies and debug them
+    // Check for auth cookies
     const cookieStore = cookies();
     const authCookie = cookieStore.getAll().find(c => c.name.includes('supabase-auth-token'));
     if (authCookie) {
@@ -46,11 +102,7 @@ export async function GET(request: NextRequest) {
       
       try {
         // Get current user with server-side auth
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error || !session) {
-          debugLog('Auth session error or no session:', error);
-        }
-        
+        const { data: { session } } = await supabase.auth.getSession();
         const userId = session?.user?.id;
         
         // IMPORTANT: Log auth session details for debugging
@@ -115,10 +167,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     debugLog('Request body:', body);
     
-    // Create a Supabase client using the official route handler client
-    const supabase = createRouteHandlerClient({ cookies });
+    // Create a Supabase client
+    const supabase = createClient();
     
-    // Check for auth cookies and debug them
+    // Check for auth cookies
     const cookieStore = cookies();
     const authCookie = cookieStore.getAll().find(c => c.name.includes('supabase-auth-token'));
     if (authCookie) {
@@ -138,10 +190,7 @@ export async function POST(request: NextRequest) {
       
       try {
         // Get current user with server-side auth
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) {
-          debugLog('Auth session error:', error);
-        }
+        const { data: { session } } = await supabase.auth.getSession();
         
         // IMPORTANT: Log auth session details for debugging
         debugLog('Auth session details:', { 

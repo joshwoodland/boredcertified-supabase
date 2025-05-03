@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { FiLogOut, FiUser, FiChevronDown } from 'react-icons/fi';
-import { createBrowserSupabaseClient } from '../lib/supabase';
+import { createClient } from '../utils/supabase/client';
 
 export default function UserProfile() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -13,7 +13,7 @@ export default function UserProfile() {
     email: null,
     avatarUrl: null,
   });
-  const [supabase] = useState(() => createBrowserSupabaseClient());
+  const supabase = createClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,7 +91,7 @@ export default function UserProfile() {
       authListener.subscription.unsubscribe();
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [supabase]);
+  }, []);
 
   const handleLogout = async () => {
     try {

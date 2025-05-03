@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createServerComponentSupabaseClient } from '@/app/lib/server-supabase';
 import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
   try {
-    // Create a Supabase client using the official route handler client
-    const supabase = createRouteHandlerClient({ cookies });
+    // Create a Supabase client using the cookies from the request
+    const cookieStore = cookies();
+    const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
     
     // Get current user session with server-side auth
-    const { data: { session }, error } = await supabase.auth.getSession();
+    const { data: { session }, error } = await supabaseServer.auth.getSession();
     
     if (error) {
       console.error('Error getting session:', error);
@@ -22,8 +23,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ 
         authenticated: false,
         message: 'No active session found',
-        cookiesPresent: cookies().getAll().length > 0,
-        authCookiePresent: cookies().getAll().some(c => c.name.includes('-auth-token'))
+        cookiesPresent: cookieStore.getAll().length > 0,
+        authCookiePresent: cookieStore.getAll().some(c => c.name.includes('-auth-token'))
       }, { status: 401 });
     }
     
@@ -32,8 +33,8 @@ export async function GET(request: NextRequest) {
       authenticated: true,
       userId: session.user.id,
       userEmail: session.user.email,
-      cookiesPresent: cookies().getAll().length,
-      authCookieNames: cookies().getAll()
+      cookiesPresent: cookieStore.getAll().length,
+      authCookieNames: cookieStore.getAll()
         .filter(c => c.name.includes('-auth-'))
         .map(c => c.name)
     });

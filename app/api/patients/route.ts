@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma, connectWithFallback } from '@/app/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { convertToPrismaFormat } from '@/app/lib/supabase';
-import { getSupabasePatients } from '@/app/lib/server-supabase';
+import { 
+  createServerComponentSupabaseClient,
+  getSupabasePatients 
+} from '@/app/lib/server-supabase';
 import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,10 +19,11 @@ export async function GET(request: NextRequest) {
     
     // First try to get patients from Supabase
     try {
-      const supabase = createRouteHandlerClient({ cookies });
+      const cookieStore = cookies();
+      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
       
       // First get the user's session
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabaseServer.auth.getSession();
       const userEmail = session?.user?.email;
       
       console.log('Providers API - auth session:', { 
@@ -85,10 +88,11 @@ export async function POST(request: NextRequest) {
 
     // Try with Supabase first
     try {
-      const supabase = createRouteHandlerClient({ cookies });
+      const cookieStore = cookies();
+      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
       
       // Get the user's email from their session
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabaseServer.auth.getSession();
       const userEmail = session?.user?.email;
       
       if (!userEmail) {
@@ -99,7 +103,7 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       
       // Create the patient in Supabase
-      const { data, error } = await supabase.from('patients').insert({
+      const { data, error } = await supabaseServer.from('patients').insert({
         id: patientId,
         name: body.name,
         provider_email: userEmail || body.providerEmail || null,
@@ -152,7 +156,8 @@ export async function PATCH(request: NextRequest) {
 
     // Try with Supabase first
     try {
-      const supabase = createRouteHandlerClient({ cookies });
+      const cookieStore = cookies();
+      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
       
       const updateData: Record<string, unknown> = {
         updated_at: new Date().toISOString()
@@ -166,7 +171,7 @@ export async function PATCH(request: NextRequest) {
       if (body.providerEmail !== undefined) updateData.provider_email = body.providerEmail;
       
       // Update the patient in Supabase
-      const { data, error } = await supabase
+      const { data, error } = await supabaseServer
         .from('patients')
         .update(updateData)
         .eq('id', body.id)
@@ -225,11 +230,12 @@ export async function DELETE(request: NextRequest) {
     
     // Try with Supabase first - we'll do a soft delete
     try {
-      const supabase = createRouteHandlerClient({ cookies });
+      const cookieStore = cookies();
+      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
       
       // Soft delete the patient in Supabase
       const now = new Date().toISOString();
-      const { error } = await supabase
+      const { error } = await supabaseServer
         .from('patients')
         .update({
           is_deleted: true,

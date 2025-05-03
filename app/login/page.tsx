@@ -1,35 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createBrowserSupabaseClient } from '../lib/supabase';
+import { createClient } from '../utils/supabase/client';
+import { loginWithGoogle } from './actions';
 
 export default function LoginPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [supabase, setSupabase] = useState(() => createBrowserSupabaseClient());
+  const [isLoading, setIsLoading] = useState(false);
+  const supabase = createClient();
 
   const handleLogin = async () => {
     try {
-      // Generate the redirect URL dynamically
-      const redirectUrl = `${window.location.protocol}//${window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}`;
+      setIsLoading(true);
+      const result = await loginWithGoogle();
       
-      console.log('Login initiated, redirect URL:', redirectUrl);
-      
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-          // Ensure cookies are properly set
-          skipBrowserRedirect: false,
-        },
-      });
-      
-      if (error) {
-        console.error('Login error:', error.message);
-        alert(`Login failed: ${error.message}`);
+      if (result.error) {
+        console.error('Login error:', result.error);
+        alert(`Login failed: ${result.error}`);
+      } else if (result.url) {
+        window.location.href = result.url;
       }
     } catch (err) {
       console.error('Unexpected login error:', err);
       alert('An unexpected error occurred during login');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -65,7 +60,7 @@ export default function LoginPage() {
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#1B2025]">
@@ -90,9 +85,10 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={handleLogin}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white py-2 px-4 rounded transition transform hover:scale-105 active:scale-95 shadow-md"
+              disabled={isLoading}
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white py-2 px-4 rounded transition transform hover:scale-105 active:scale-95 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Login with Google
+              {isLoading ? 'Loading...' : 'Login with Google'}
             </button>
           </>
         )}

@@ -54,6 +54,7 @@ export default function Home() {
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
   const [showPatientSearch, setShowPatientSearch] = useState(false);
   const [isAudioRecordingsOpen, setIsAudioRecordingsOpen] = useState(false);
+  const [notesRefreshTrigger, setNotesRefreshTrigger] = useState(0); // Add refresh trigger state
   const searchRef = useRef<HTMLDivElement>(null);
 
   // Handle clicks outside of the search dropdown
@@ -357,6 +358,7 @@ export default function Home() {
       setIsManualInput(false);
       setForceCollapse(prev => !prev);
       setIsActiveRecordingSession(false);
+      setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
       await fetchPatientNotes(selectedPatientId);
     } catch (error: any) {
@@ -418,6 +420,7 @@ export default function Home() {
       setIsManualInput(false);
       setForceCollapse(prev => !prev);
       setIsActiveRecordingSession(false);
+      setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
       await fetchPatientNotes(selectedPatientId);
     } catch (error: any) {
@@ -510,6 +513,7 @@ export default function Home() {
       setCurrentNote(responseData);
       setLiveTranscript('');
       setIsActiveRecordingSession(false);
+      setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
       await fetchPatientNotes(selectedPatientId);
     } catch (error: any) {
@@ -724,6 +728,7 @@ export default function Home() {
                             setManualTranscript('');
                             setIsManualInput(false);
                             setForceCollapse(prev => !prev);
+                            setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
                             fetchPatientNotes(selectedPatientId!);
                           }}
                           onError={(errorMessage) => setError(errorMessage)}
@@ -803,6 +808,7 @@ export default function Home() {
                 });
               }}
                 forceCollapse={forceCollapse}
+                refreshTrigger={notesRefreshTrigger} // Pass the refresh trigger
               />
             )}
           </div>
