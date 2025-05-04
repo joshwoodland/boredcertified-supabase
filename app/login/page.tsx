@@ -102,7 +102,7 @@ export default function LoginPage() {
           loop
           muted
           playsInline
-          poster="/video-poster.jpg" // Optional: Add a poster image while video loads
+          poster="/video-poster.png"
         >
           <source src="/background.mp4" type="video/mp4" />
           Your browser does not support the video tag.
