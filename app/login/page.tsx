@@ -139,7 +139,7 @@ export default function LoginPage() {
         <img 
           src="/logo.png" 
           alt="Bored Certified Logo" 
-          className="h-96 w-auto mb-8"
+          className="h-96 w-auto mb-4"
         />
 
         {isCheckingSession ? (
