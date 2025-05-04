@@ -218,144 +218,206 @@ export async function POST(request: NextRequest) {
         if (userId) {
           debugLog(`Updating settings for user ID: ${userId}`);
           
-          // Check if user settings exist
-          const { data: existingSettings, error: checkError } = await supabase
-            .from('app_settings')
-            .select('id')
-            .eq('user_id', userId)
-            .single();
+          try {
+            // Check if user settings exist
+            const { data: existingSettings, error: checkError } = await supabase
+              .from('app_settings')
+              .select('id')
+              .eq('user_id', userId)
+              .single();
+              
+            if (checkError && checkError.code === 'PGRST116') {
+              debugLog('No user settings found, creating new settings first');
+              
+              // Get default settings to use as base
+              const { data: defaultSettings, error: defaultError } = await supabase
+                .from('app_settings')
+                .select('*')
+                .eq('id', 'default')
+                .single();
+                
+              if (defaultError) {
+                debugLog('Error fetching default settings:', defaultError);
+                // Create base settings instead of throwing
+                const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                debugLog(`Creating base user settings with ID: ${userSettingsId}`);
+                
+                const { data: newSettings, error: insertError } = await supabase
+                  .from('app_settings')
+                  .insert({
+                    id: userSettingsId,
+                    user_id: userId,
+                    email: session?.user?.email || null,
+                    dark_mode: typeof body.darkMode !== 'undefined' ? body.darkMode : true,
+                    gpt_model: body.gptModel || 'gpt-4o',
+                    initial_visit_prompt: body.initialVisitPrompt || '',
+                    follow_up_visit_prompt: body.followUpVisitPrompt || '',
+                    low_echo_cancellation: typeof body.lowEchoCancellation !== 'undefined' ? body.lowEchoCancellation : false,
+                    auto_save: typeof body.autoSave !== 'undefined' ? body.autoSave : false,
+                    updated_at: updateData.updated_at as string
+                  })
+                  .select()
+                  .single();
+                  
+                if (insertError) {
+                  debugLog('Error creating base user settings:', insertError);
+                  throw insertError;
+                }
+                
+                // Return the newly created settings
+                updatedSettings = convertToPrismaFormat(newSettings, 'settings');
+                debugLog('Successfully created user settings');
+                
+                // Load system messages from files
+                const initialVisitPrompt = await import('@/app/config/initialVisitPrompt');
+                const followUpVisitPrompt = await import('@/app/config/followUpVisitPrompt');
+    
+                // Return the updated settings
+                return NextResponse.json({
+                  ...updatedSettings,
+                  initialVisitPrompt: body.initialVisitPrompt || initialVisitPrompt.systemMessage.content,
+                  followUpVisitPrompt: body.followUpVisitPrompt || followUpVisitPrompt.systemMessage.content,
+                });
+              } else {
+                // Use default settings as template
+                debugLog('Using default settings as template for new user settings');
+                
+                // Create user settings
+                const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                const { data: newSettings, error: insertError } = await supabase
+                  .from('app_settings')
+                  .insert({
+                    id: userSettingsId,
+                    user_id: userId,
+                    email: session?.user?.email || null,
+                    dark_mode: typeof body.darkMode !== 'undefined' ? body.darkMode : (defaultSettings?.dark_mode ?? true),
+                    gpt_model: body.gptModel || defaultSettings?.gpt_model || 'gpt-4o',
+                    initial_visit_prompt: body.initialVisitPrompt || defaultSettings?.initial_visit_prompt || '',
+                    follow_up_visit_prompt: body.followUpVisitPrompt || defaultSettings?.follow_up_visit_prompt || '',
+                    low_echo_cancellation: typeof body.lowEchoCancellation !== 'undefined' ? body.lowEchoCancellation : (defaultSettings?.low_echo_cancellation ?? false),
+                    auto_save: typeof body.autoSave !== 'undefined' ? body.autoSave : (defaultSettings?.auto_save ?? false),
+                    updated_at: updateData.updated_at as string
+                  })
+                  .select()
+                  .single();
+                  
+                if (insertError) {
+                  debugLog('Error creating user settings:', insertError);
+                  throw insertError;
+                }
+                
+                debugLog('Successfully created user settings');
+                
+                // Return the newly created settings
+                updatedSettings = convertToPrismaFormat(newSettings, 'settings');
+                
+                // Load system messages from files
+                const initialVisitPrompt = await import('@/app/config/initialVisitPrompt');
+                const followUpVisitPrompt = await import('@/app/config/followUpVisitPrompt');
+    
+                // Return the updated settings
+                return NextResponse.json({
+                  ...updatedSettings,
+                  initialVisitPrompt: body.initialVisitPrompt || initialVisitPrompt.systemMessage.content,
+                  followUpVisitPrompt: body.followUpVisitPrompt || followUpVisitPrompt.systemMessage.content,
+                });
+              }
+            } else {
+              // User settings exist, update them
+              debugLog('User settings exist, updating them');
+              
+              // Update user settings
+              const { error: updateError } = await supabase
+                .from('app_settings')
+                .update(updateData)
+                .eq('user_id', userId);
+                
+              if (updateError) {
+                debugLog('Error updating user settings:', updateError);
+                throw updateError;
+              }
+              
+              debugLog('Successfully updated user settings');
+              
+              // Get updated settings
+              const { data: fetchedSettings, error: fetchError } = await supabase
+                .from('app_settings')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+                
+              if (fetchError) {
+                debugLog('Error fetching updated settings:', fetchError);
+                throw fetchError;
+              }
+              
+              updatedSettings = convertToPrismaFormat(fetchedSettings, 'settings');
+              
+              // Load system messages from files
+              const initialVisitPrompt = await import('@/app/config/initialVisitPrompt');
+              const followUpVisitPrompt = await import('@/app/config/followUpVisitPrompt');
+  
+              // Return the updated settings
+              return NextResponse.json({
+                ...updatedSettings,
+                initialVisitPrompt: body.initialVisitPrompt || initialVisitPrompt.systemMessage.content,
+                followUpVisitPrompt: body.followUpVisitPrompt || followUpVisitPrompt.systemMessage.content,
+              });
+            }
+          } catch (error) {
+            debugLog('Error in user settings update:', error);
+            throw error;
+          }
+        } else {
+          // No user ID: update default settings
+          debugLog('No user logged in, updating default settings');
+          
+          try {
+            // Update default settings
+            const { error: updateError } = await supabase
+              .from('app_settings')
+              .update(updateData)
+              .eq('id', 'default');
+              
+            if (updateError) {
+              debugLog('Error updating default settings:', updateError);
+              throw updateError;
+            }
             
-          if (checkError && checkError.code === 'PGRST116') {
-            debugLog('No user settings found, creating new settings first');
+            debugLog('Updated default settings');
             
-            // Get default settings to use as base
-            const { data: defaultSettings, error: defaultError } = await supabase
+            // Get updated settings
+            const { data: fetchedSettings, error: fetchError } = await supabase
               .from('app_settings')
               .select('*')
               .eq('id', 'default')
               .single();
               
-            if (defaultError) {
-              debugLog('Error fetching default settings:', defaultError);
-              // Create base settings instead of throwing
-              const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-              debugLog(`Creating base user settings with ID: ${userSettingsId}`);
-              
-              const { data: newSettings, error: insertError } = await supabase
-                .from('app_settings')
-                .insert({
-                  id: userSettingsId,
-                  user_id: userId,
-                  email: session?.user?.email || null,
-                  dark_mode: true,
-                  gpt_model: 'gpt-4o',
-                  initial_visit_prompt: '',
-                  follow_up_visit_prompt: '',
-                  low_echo_cancellation: false,
-                  auto_save: false,
-                  updated_at: updateData.updated_at as string
-                })
-                .select()
-                .single();
-                
-              if (insertError) {
-                debugLog('Error creating base user settings:', insertError);
-                throw insertError;
-              }
-            } else {
-              // Use default settings as template
-              debugLog('Using default settings as template for new user settings');
-              
-              // Create user settings
-              const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-              const { data: newSettings, error: insertError } = await supabase
-                .from('app_settings')
-                .insert({
-                  id: userSettingsId,
-                  user_id: userId,
-                  email: session?.user?.email || null,
-                  dark_mode: defaultSettings?.dark_mode ?? true,
-                  gpt_model: defaultSettings?.gpt_model ?? 'gpt-4o',
-                  initial_visit_prompt: defaultSettings?.initial_visit_prompt ?? '',
-                  follow_up_visit_prompt: defaultSettings?.follow_up_visit_prompt ?? '',
-                  low_echo_cancellation: defaultSettings?.low_echo_cancellation ?? false,
-                  auto_save: defaultSettings?.auto_save ?? false,
-                  updated_at: updateData.updated_at as string
-                })
-                .select()
-                .single();
-                
-              if (insertError) {
-                debugLog('Error creating user settings:', insertError);
-                throw insertError;
-              }
-              
-              debugLog('Successfully created user settings, now updating with new values');
+            if (fetchError) {
+              debugLog('Error fetching updated settings:', fetchError);
+              throw fetchError;
             }
-          }
-          
-          // Update user settings
-          const { error: updateError } = await supabase
-            .from('app_settings')
-            .update(updateData)
-            .eq('user_id', userId);
             
-          if (updateError) {
-            debugLog('Error updating user settings:', updateError);
-            throw updateError;
-          }
-          
-          debugLog('Successfully updated user settings');
-          
-          // Get updated settings
-          const { data: fetchedSettings, error: fetchError } = await supabase
-            .from('app_settings')
-            .select('*')
-            .eq('user_id', userId)
-            .single();
+            updatedSettings = convertToPrismaFormat(fetchedSettings, 'settings');
             
-          if (fetchError) {
-            debugLog('Error fetching updated settings:', fetchError);
-            throw fetchError;
+            // Load system messages from files
+            const initialVisitPrompt = await import('@/app/config/initialVisitPrompt');
+            const followUpVisitPrompt = await import('@/app/config/followUpVisitPrompt');
+
+            // Return the updated settings
+            return NextResponse.json({
+              ...updatedSettings,
+              initialVisitPrompt: body.initialVisitPrompt || initialVisitPrompt.systemMessage.content,
+              followUpVisitPrompt: body.followUpVisitPrompt || followUpVisitPrompt.systemMessage.content,
+            });
+          } catch (error) {
+            debugLog('Error in default settings update:', error);
+            throw error;
           }
-          
-          updatedSettings = convertToPrismaFormat(fetchedSettings, 'settings');
-          return NextResponse.json(updatedSettings);
         }
-        
-        // No user ID: update default settings
-        debugLog('No user logged in, updating default settings');
-        
-        // Update default settings
-        const { error: updateError } = await supabase
-          .from('app_settings')
-          .update(updateData)
-          .eq('id', 'default');
-          
-        if (updateError) {
-          debugLog('Error updating default settings:', updateError);
-          throw updateError;
-        }
-        
-        debugLog('Updated default settings');
-        
-        // Get updated settings
-        const { data: fetchedSettings, error: fetchError } = await supabase
-          .from('app_settings')
-          .select('*')
-          .eq('id', 'default')
-          .single();
-          
-        if (fetchError) {
-          debugLog('Error fetching updated settings:', fetchError);
-          throw fetchError;
-        }
-        
-        updatedSettings = convertToPrismaFormat(fetchedSettings, 'settings');
-        return NextResponse.json(updatedSettings);
       } catch (error) {
         debugLog('Error accessing Supabase settings:', error);
-        // Fall through to Prisma fallback
+        throw error; // Let the outer try/catch handle this
       }
     }
     

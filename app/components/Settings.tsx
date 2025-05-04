@@ -54,49 +54,86 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   const handleSave = async () => {
     setSaveButtonState('saving');
+    
+    // Clear any pending save timeout
+    if (saveTimeoutId.current) {
+      clearTimeout(saveTimeoutId.current);
+      saveTimeoutId.current = undefined;
+    }
+    
     try {
-      const currentSettings = settingsRef.current;
-      const response = await fetch('/api/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          darkMode: currentSettings.darkMode,
-          gptModel: currentSettings.gptModel,
-          initialVisitPrompt: currentSettings.initialVisitPrompt,
-          followUpVisitPrompt: currentSettings.followUpVisitPrompt,
-          lowEchoCancellation: currentSettings.lowEchoCancellation,
-          email: currentSettings.email,
-          initialVisitDescription: 'System message for initial psychiatric evaluation visits',
-          followUpVisitDescription: 'System message for follow-up psychiatric visits',
-        }),
-      });
+      // Store the save operation in the ref so we can track it
+      const savePromise = (async () => {
+        const currentSettings = settingsRef.current;
+        
+        debugLog('Saving settings:', currentSettings);
+        
+        const response = await fetch('/api/settings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            darkMode: currentSettings.darkMode,
+            gptModel: currentSettings.gptModel,
+            initialVisitPrompt: currentSettings.initialVisitPrompt,
+            followUpVisitPrompt: currentSettings.followUpVisitPrompt,
+            lowEchoCancellation: currentSettings.lowEchoCancellation,
+            email: currentSettings.email,
+            initialVisitDescription: 'System message for initial psychiatric evaluation visits',
+            followUpVisitDescription: 'System message for follow-up psychiatric visits',
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error('Failed to save settings');
-      }
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Server responded with error:', response.status, errorData);
+          throw new Error(errorData.details || 'Failed to save settings');
+        }
 
-      const data = await response.json();
+        const data = await response.json();
+        debugLog('Settings saved successfully:', data);
 
-      // Only update the initialSettings reference, don't change current settings
-      initialSettings.current = { ...currentSettings };
+        // Only update the initialSettings reference, don't change current settings
+        initialSettings.current = { ...currentSettings };
 
-      // Invalidate the model cache to ensure we use the new settings
-      invalidateModelCache();
+        // Invalidate the model cache to ensure we use the new settings
+        invalidateModelCache();
 
-      setIsDirty(false);
-      setSaveButtonState('saved');
-      setToast({ message: 'Settings saved successfully', type: 'success' });
+        setIsDirty(false);
+        setSaveButtonState('saved');
+        setToast({ message: 'Settings saved successfully', type: 'success' });
 
-      // Reset save button state after a delay
-      setTimeout(() => {
-        setSaveButtonState('hidden');
-      }, 2000);
+        // Reset save button state after a delay
+        setTimeout(() => {
+          setSaveButtonState('hidden');
+        }, 2000);
+      })();
+      
+      savePromiseRef.current = savePromise;
+      
+      // Wait for the save to complete
+      await savePromise;
+      
+      // Clear the promise ref when done
+      savePromiseRef.current = null;
     } catch (error) {
       console.error('Error saving settings:', error);
       setSaveButtonState('error');
-      setToast({ message: 'Failed to save settings', type: 'error' });
+      setToast({ 
+        message: error instanceof Error ? error.message : 'Failed to save settings', 
+        type: 'error' 
+      });
+      
+      // Clear the promise ref on error
+      savePromiseRef.current = null;
+    }
+  };
+  
+  // Helper function for logging
+  const debugLog = (message: string, data?: any) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[Settings] ${message}`, data);
     }
   };
 
@@ -120,10 +157,11 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   };
 
   const handleChange = useCallback((changes: Partial<AppSettings>) => {
-    console.log('handleChange called with:', changes);
+    debugLog('handleChange called with:', changes);
 
+    // Clear any pending save timeout
     if (saveTimeoutId.current) {
-      console.log('Clearing existing save timeout');
+      debugLog('Clearing existing save timeout');
       clearTimeout(saveTimeoutId.current);
       saveTimeoutId.current = undefined;
     }
@@ -132,27 +170,29 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     setSettings(currentSettings => {
       const newSettings = { ...currentSettings, ...changes };
       settingsRef.current = newSettings; // Update the ref immediately
-      console.log('Updating settings:', {
-        currentSettings,
-        changes,
-        newSettings
-      });
+      debugLog('Updated settings:', newSettings);
       return newSettings;
     });
 
     setIsDirty(true);
     setSaveButtonState('unsaved');
 
-    // Schedule save if no save is in progress
-    if (!savePromiseRef.current) {
-      console.log('Scheduling new save operation');
-      saveTimeoutId.current = setTimeout(() => {
-        console.log('Save timeout triggered, current settings:', settingsRef.current);
-        handleSave();
-      }, 1000);
-    } else {
-      console.log('Save already in progress, skipping new save schedule');
+    // If there's an ongoing save operation, don't schedule a new one
+    if (savePromiseRef.current) {
+      debugLog('Skipping save schedule - save operation in progress');
+      return;
     }
+
+    // Schedule a new save operation
+    debugLog('Scheduling new save operation');
+    saveTimeoutId.current = setTimeout(() => {
+      if (!savePromiseRef.current) {
+        debugLog('Auto-save triggered');
+        handleSave();
+      } else {
+        debugLog('Skipping auto-save - save already in progress');
+      }
+    }, 2000); // Increased debounce time for better UX
   }, []);
 
   useEffect(() => {
