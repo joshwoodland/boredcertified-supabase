@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 
 import { createClient } from '@/app/utils/supabase/server';
 
@@ -54,9 +55,13 @@ export async function loginWithGoogle() {
   if (process.env.NEXT_PUBLIC_APP_URL) {
     redirectUrl = process.env.NEXT_PUBLIC_APP_URL;
   } else {
+    // Get the host from request headers to determine the correct port
+    const headersList = headers();
+    const host = headersList.get('host') || 'localhost:3000';
+    
     // This is a fallback if the env var is not available
     redirectUrl = process.env.NODE_ENV === 'development' 
-      ? 'http://localhost:3000'
+      ? `http://${host}`
       : 'https://yourdomain.com'; // Replace with your production domain
   }
 
