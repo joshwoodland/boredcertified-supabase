@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [videoLoaded, setVideoLoaded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const supabase = createClient();
 
@@ -79,15 +80,38 @@ export default function LoginPage() {
       }
     });
 
-    // Play video background silently and loop
+    // Preload and play video background
     if (videoRef.current) {
-      videoRef.current.play().catch(err => {
-        console.log('Video autoplay prevented by browser:', err);
+      // Add event listeners to track video loading
+      videoRef.current.addEventListener('loadeddata', () => {
+        console.log('[VIDEO] Video data loaded');
+        setVideoLoaded(true);
       });
+      
+      videoRef.current.addEventListener('canplaythrough', () => {
+        console.log('[VIDEO] Video can play through');
+        // Start playing once it can play through
+        videoRef.current?.play().catch(err => {
+          console.log('[VIDEO] Video autoplay prevented by browser:', err);
+        });
+      });
+      
+      videoRef.current.addEventListener('error', (e) => {
+        console.error('[VIDEO] Error loading video:', e);
+      });
+      
+      // Force load the video
+      videoRef.current.load();
     }
 
     return () => {
       listener.subscription.unsubscribe();
+      // Clean up event listeners
+      if (videoRef.current) {
+        videoRef.current.removeEventListener('loadeddata', () => setVideoLoaded(true));
+        videoRef.current.removeEventListener('canplaythrough', () => {});
+        videoRef.current.removeEventListener('error', () => {});
+      }
     };
   }, []);
 
@@ -98,6 +122,7 @@ export default function LoginPage() {
         <video 
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover opacity-30"
+          preload="auto"
           autoPlay
           loop
           muted
@@ -110,16 +135,13 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-[#1B2025] via-transparent to-transparent opacity-70"></div>
       </div>
       
-      <div className="flex flex-col items-center mb-8 relative z-10">
+      <div className="flex flex-col items-center relative z-10">
         <img 
           src="/logo.png" 
           alt="Bored Certified Logo" 
-          className="h-96 w-auto"
+          className="h-96 w-auto mb-12"
         />
-      </div>
-      <div className="bg-[#242A32]/80 backdrop-blur-md shadow-lg rounded-xl p-8 max-w-md w-full relative z-10">
-        <h1 className="text-2xl font-bold mb-6 text-center text-white">Login</h1>
-        
+
         {isCheckingSession ? (
           <div className="text-center text-white">
             <div className="inline-block w-6 h-6 border-2 border-t-blue-500 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin mb-2"></div>
@@ -142,7 +164,7 @@ export default function LoginPage() {
               type="button"
               onClick={handleLogin}
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white py-2 px-4 rounded transition transform hover:scale-105 active:scale-95 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-64 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white py-3 px-6 rounded-lg transition transform hover:scale-105 active:scale-95 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <span className="flex items-center justify-center">
