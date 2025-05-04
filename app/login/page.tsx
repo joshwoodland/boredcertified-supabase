@@ -84,15 +84,31 @@ export default function LoginPage() {
   }, []);
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#1B2025]">
-      <div className="flex flex-col items-center mb-8">
+    <main className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#1B2025] relative overflow-hidden">
+      {/* Lava wave animation background */}
+      <div className="wave-container absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
+        <svg width="0" height="0" className="absolute">
+          <defs>
+            <linearGradient id="wave-gradient" x1="0%" y1="0%" x2="100%" y2="0%" gradientTransform="rotate(45)">
+              <stop offset="0%" stopColor="#3b82f6" className="animate-gradient-shift-1" />
+              <stop offset="50%" stopColor="#6366f1" className="animate-gradient-shift-2" />
+              <stop offset="100%" stopColor="#8b5cf6" className="animate-gradient-shift-3" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <div className="wave wave1"></div>
+        <div className="wave wave2"></div>
+        <div className="wave wave3"></div>
+      </div>
+      
+      <div className="flex flex-col items-center mb-8 relative z-10">
         <img 
           src="/logo.png" 
           alt="Bored Certified Logo" 
           className="h-96 w-auto"
         />
       </div>
-      <div className="bg-[#242A32] shadow-lg rounded-xl p-8 max-w-md w-full">
+      <div className="bg-[#242A32]/90 backdrop-blur-sm shadow-lg rounded-xl p-8 max-w-md w-full relative z-10">
         <h1 className="text-2xl font-bold mb-6 text-center text-white">Login</h1>
         
         {isCheckingSession ? (

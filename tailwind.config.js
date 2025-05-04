@@ -39,6 +39,10 @@ module.exports = {
         'slide-up': 'slideUp 0.3s ease-out',
         'slide-down': 'slideDown 0.3s ease-out',
         'bounce-in': 'bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+        'wave': 'wave 20s linear infinite',
+        'wave-slow': 'wave 30s linear infinite',
+        'wave-reverse': 'wave 25s linear reverse infinite',
+        'gradient-shift': 'gradient-shift 8s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
@@ -62,6 +66,15 @@ module.exports = {
           '50%': { transform: 'scale(1.05)' },
           '70%': { transform: 'scale(0.9)' },
           '100%': { transform: 'scale(1)', opacity: '1' },
+        },
+        wave: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
+        'gradient-shift': {
+          '0%': { 'stop-color': '#3b82f6' },
+          '50%': { 'stop-color': '#6366f1' },
+          '100%': { 'stop-color': '#8b5cf6' },
         },
       },
     },
