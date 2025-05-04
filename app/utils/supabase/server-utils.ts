@@ -21,6 +21,26 @@ export async function createAdminClient() {
 }
 
 /**
+ * Checks if the Supabase connection is available (server-side only)
+ * @returns True if connection is successful, false otherwise
+ */
+export async function checkServerSupabaseConnection(): Promise<boolean> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.from('patients').select('id').limit(1);
+    
+    if (error && error.code !== '42P01') { // 42P01 means table doesn't exist, which is fine
+      console.error('Supabase connection error (server):', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Failed to connect to Supabase (server):', error);
+    return false;
+  }
+}
+
+/**
  * Fetches patients from Supabase (server-side only)
  * @param filterByUserEmail Email to filter patients by
  * @returns Array of patients

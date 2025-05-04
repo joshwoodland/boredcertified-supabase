@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, connectWithFallback } from '@/app/lib/db'
 import { 
-  checkSupabaseConnection, 
   convertToPrismaFormat 
 } from '@/app/lib/supabase'
 import { createClient } from '@/app/utils/supabase/server'
+import { checkServerSupabaseConnection } from '@/app/utils/supabase/server-utils'
 import { cookies } from 'next/headers'
 
 // Debug logging with prefix for easier identification
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Check if Supabase is available
-    const isSupabaseAvailable = await checkSupabaseConnection();
+    const isSupabaseAvailable = await checkServerSupabaseConnection();
     debugLog(`Supabase connection available: ${isSupabaseAvailable}`);
     
     let settings = null;
@@ -180,7 +180,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Check if Supabase is available
-    const isSupabaseAvailable = await checkSupabaseConnection();
+    const isSupabaseAvailable = await checkServerSupabaseConnection();
     debugLog(`Supabase connection available: ${isSupabaseAvailable}`);
     
     let updatedSettings = null; 
