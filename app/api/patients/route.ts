@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     
     // First try to get patients from Supabase
     try {
-      const supabaseServer = createClient();
+      const supabaseServer = await createClient();
       
       // First get the user's session
       const { data: { session } } = await supabaseServer.auth.getSession();
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
 
     // Try with Supabase first
     try {
-      const supabaseServer = createClient();
+      const supabaseServer = await createClient();
       
       // Get the user's email from their session
       const { data: { session } } = await supabaseServer.auth.getSession();
@@ -150,7 +150,7 @@ export async function PATCH(request: NextRequest) {
 
     // Try with Supabase first
     try {
-      const supabaseServer = createClient();
+      const supabaseServer = await createClient();
       
       const updateData: Record<string, unknown> = {
         updated_at: new Date().toISOString()
@@ -223,7 +223,7 @@ export async function DELETE(request: NextRequest) {
     
     // Try with Supabase first - we'll do a soft delete
     try {
-      const supabaseServer = createClient();
+      const supabaseServer = await createClient();
       
       // Soft delete the patient in Supabase
       const now = new Date().toISOString();

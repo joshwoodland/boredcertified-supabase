@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/app/utils/supabase/server';
 
 export async function login(formData: FormData) {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   // type-casting here for convenience
   // in practice, you should validate your inputs
@@ -26,7 +26,7 @@ export async function login(formData: FormData) {
 }
 
 export async function signup(formData: FormData) {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   // type-casting here for convenience
   // in practice, you should validate your inputs
@@ -46,7 +46,7 @@ export async function signup(formData: FormData) {
 }
 
 export async function loginWithGoogle() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   // Determine the redirect URL dynamically
   // Use environment variable if available, otherwise construct from request

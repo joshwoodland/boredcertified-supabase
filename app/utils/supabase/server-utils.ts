@@ -12,12 +12,13 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
  * Creates a Supabase admin client using the service role key.
  * This bypasses RLS policies and should only be used in trusted server contexts.
  */
-export const createAdminClient = () => 
-  createSupabaseClient(supabaseUrl, supabaseServiceKey, {
+export async function createAdminClient() {
+  return createSupabaseClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       persistSession: false,
     }
   });
+}
 
 /**
  * Fetches patients from Supabase (server-side only)
@@ -26,7 +27,7 @@ export const createAdminClient = () =>
  */
 export async function getServerPatients(filterByUserEmail?: string) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     
     // Build query
     let query = supabase
@@ -60,7 +61,7 @@ export async function getServerPatients(filterByUserEmail?: string) {
  */
 export async function getServerNotes(patientId: string) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     
     const { data, error } = await supabase
       .from('notes')

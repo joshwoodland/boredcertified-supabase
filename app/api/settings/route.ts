@@ -18,7 +18,7 @@ const debugLog = (message: string, data?: unknown) => {
 
 // Get app settings from Supabase
 async function getSupabaseAppSettings(userId?: string | null) {
-  const supabase = createClient();
+  const supabase = await createClient();
   
   try {
     // Get current user's session to access their ID if not provided
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
   
   try {
     // Create a Supabase client
-    const supabase = createClient();
+    const supabase = await createClient();
     
     // Check for auth cookies
     const cookieStore = cookies();
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
     debugLog('Request body:', body);
     
     // Create a Supabase client
-    const supabase = createClient();
+    const supabase = await createClient();
     
     // Check for auth cookies
     const cookieStore = cookies();
