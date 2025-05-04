@@ -349,7 +349,17 @@ export async function POST(request: NextRequest) {
     
     let patient;
     if (isSupabaseAvailable) {
-      console.log('Using Supabase to get patient');
+      console.log('Using Supabase to get patient with ID:', patientId, 'Type:', typeof patientId);
+      
+      // Validate the patientId format
+      if (!patientId) {
+        console.error('Patient ID is missing or undefined');
+        return NextResponse.json({
+          error: 'Patient not found',
+          details: 'Missing patient ID'
+        }, { status: 404 });
+      }
+      
       // Get patient from Supabase
       const { data, error } = await supabase
         .from('patients')
@@ -358,14 +368,16 @@ export async function POST(request: NextRequest) {
         .single();
         
       if (error) {
-        console.error('Error fetching patient from Supabase:', error);
+        console.error('Error fetching patient from Supabase:', error, 'Patient ID:', patientId);
         // Fall back to Prisma if Supabase query fails
       } else if (!data) {
+        console.error('Patient not found in Supabase with ID:', patientId);
         return NextResponse.json({
           error: 'Patient not found',
           details: 'Invalid patient ID'
         }, { status: 404 });
       } else {
+        console.log('Patient found in Supabase:', data.name, 'ID:', data.id);
         patient = convertToPrismaFormat(data, 'patient');
       }
     }
@@ -547,7 +559,9 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    const model = settings.gptModel;
+    // Make sure we have a valid model
+    const model = settings.gptModel || 'gpt-4o'; // Use a default if undefined
+    
     if (!isValidModel(model)) {
       console.error('Invalid model specified:', model);
       return NextResponse.json({

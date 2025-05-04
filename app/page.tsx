@@ -687,18 +687,26 @@ export default function Home() {
 
                     <button
                       onClick={() => {
+                        // First check if patient is selected
+                        if (!selectedPatientId) {
+                          setError('Please select a patient before pasting in transcript');
+                          return;
+                        }
+                        
                         // Check if there's at least one previous note
                         if (patientNotes.length === 0) {
+                          console.log('Opening manual transcript modal for first visit with patientId:', selectedPatientId);
                           // Show the manual transcript modal for visit type selection
                           setShowManualTranscriptModal(true);
                         } else {
+                          console.log('Opening manual input form for existing patient with patientId:', selectedPatientId);
                           // For patients with existing notes, show the manual input directly
                           setIsManualInput(true);
                           setIsActiveRecordingSession(true);
                         }
                       }}
                       className="flex items-center gap-2 px-4 py-1.5 text-sm border border-gray-300 dark:border-white bg-white dark:bg-transparent text-gray-800 dark:text-white rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 transition transform hover:scale-105 active:scale-95"
-                      disabled={isProcessing}
+                      disabled={isProcessing || !selectedPatientId}
                     >
                       <span>Paste in Transcript</span>
                     </button>
