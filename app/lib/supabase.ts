@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import { createBrowserClient } from '@supabase/ssr';
-import { CookieOptions } from '@supabase/auth-helpers-shared';
 
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
@@ -10,38 +9,15 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-// Custom cookie parser to handle both JSON and base64 cookies
-export const customCookieParser = (str: string): unknown => {
-  try {
-    // First check if this is a base64-encoded cookie
-    if (str.startsWith('base64-')) {
-      try {
-        const base64Value = str.replace('base64-', '');
-        const jsonStr = Buffer.from(base64Value, 'base64').toString();
-        return JSON.parse(jsonStr);
-      } catch (e) {
-        console.log('Failed to decode base64 cookie, trying normal JSON parse');
-      }
-    }
-    
-    // Normal JSON parsing
-    return JSON.parse(str);
-  } catch (e) {
-    console.error('Custom cookie parser error:', e);
-    // Return null instead of throwing to prevent crashes
-    return null;
-  }
-};
-
 /**
- * Creates a Supabase client for browser usage with cookie handling.
+ * Creates a Supabase client for browser usage.
  * This should be used in client components.
  */
 export const createBrowserSupabaseClient = () => 
   createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Singleton browser client (with cookie handling)
+ * Singleton browser client
  * Only used in client components or when isomorphic behavior is required
  */
 export const supabase = isClient

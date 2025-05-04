@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/app/utils/supabase/client';
 
 interface AppSettings {
   darkMode: boolean;
@@ -38,7 +38,7 @@ const debugCookies = () => {
 };
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
-  const supabase = createClientComponentClient();
+  const supabase = createClient();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
