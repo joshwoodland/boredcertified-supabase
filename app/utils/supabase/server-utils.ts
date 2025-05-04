@@ -41,6 +41,56 @@ export async function checkServerSupabaseConnection(): Promise<boolean> {
 }
 
 /**
+ * Converts Supabase record format to Prisma format (server-side version)
+ */
+export function convertServerRecordToPrisma(record: any, type: 'patient' | 'note' | 'settings'): any {
+  if (!record) return null;
+  
+  switch (type) {
+    case 'patient': {
+      return {
+        id: record.id,
+        createdAt: new Date(record.created_at),
+        updatedAt: new Date(record.updated_at),
+        name: record.name,
+        isDeleted: record.is_deleted,
+        deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+        providerEmail: record.provider_email,
+      };
+    }
+    case 'note': {
+      return {
+        id: record.id,
+        createdAt: new Date(record.created_at),
+        updatedAt: new Date(record.updated_at),
+        patientId: record.patient_id,
+        transcript: record.transcript,
+        content: record.content,
+        summary: record.summary,
+        audioFileUrl: record.audio_file_url,
+        isInitialVisit: record.is_initial_visit,
+      };
+    }
+    case 'settings': {
+      return {
+        id: record.id,
+        darkMode: record.dark_mode,
+        gptModel: record.gpt_model,
+        initialVisitPrompt: record.initial_visit_prompt,
+        followUpVisitPrompt: record.follow_up_visit_prompt,
+        autoSave: record.auto_save,
+        lowEchoCancellation: record.low_echo_cancellation,
+        email: record.email,
+        userId: record.user_id,
+        updatedAt: new Date(record.updated_at),
+      };
+    }
+    default:
+      return record;
+  }
+}
+
+/**
  * Fetches patients from Supabase (server-side only)
  * @param filterByUserEmail Email to filter patients by
  * @returns Array of patients
