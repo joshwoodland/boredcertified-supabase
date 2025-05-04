@@ -1,6 +1,8 @@
+'use client';
+
 import { createClient } from '@supabase/supabase-js';
 import { createBrowserClient } from '@supabase/ssr';
-import { createClient as createServerClient } from '@/app/utils/supabase/server';
+import { createClient as createClientSideClient } from '@/app/utils/supabase/client';
 
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
@@ -21,13 +23,7 @@ export const createBrowserSupabaseClient = () =>
  * Singleton browser client
  * Only used in client components or when isomorphic behavior is required
  */
-export const supabase = isClient
-  ? createBrowserSupabaseClient()
-  : createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false,
-      }
-    });
+export const supabase = createBrowserSupabaseClient();
 
 /**
  * Creates a Supabase admin client using the service role key.
@@ -66,23 +62,15 @@ export async function checkSupabaseConnection(): Promise<boolean> {
  */
 export async function getSupabasePatients(filterByCurrentUser = true) {
   try {
-    // Use our server-side client
-    let serverSupabase;
-    
-    if (typeof window === 'undefined') {
-      // Server-side context
-      serverSupabase = createServerClient();
-    } else {
-      // Client-side context
-      serverSupabase = supabase;
-    }
+    // Always use client-side Supabase in this client component
+    const clientSupabase = supabase;
     
     // Get current user with auth
-    const { data: { session } } = await serverSupabase.auth.getSession();
+    const { data: { session } } = await clientSupabase.auth.getSession();
     const userEmail = session?.user?.email;
     
     // Build query
-    let query = serverSupabase
+    let query = clientSupabase
       .from('patients')
       .select('*')
       .order('created_at', { ascending: false });
@@ -114,18 +102,10 @@ export async function getSupabasePatients(filterByCurrentUser = true) {
  */
 export async function getSupabaseNotes(patientId: string) {
   try {
-    // Use our server-side client
-    let serverSupabase;
+    // Always use client-side Supabase in this client component
+    const clientSupabase = supabase;
     
-    if (typeof window === 'undefined') {
-      // Server-side context
-      serverSupabase = createServerClient();
-    } else {
-      // Client-side context
-      serverSupabase = supabase;
-    }
-    
-    const { data, error } = await serverSupabase
+    const { data, error } = await clientSupabase
       .from('notes')
       .select('*')
       .eq('patient_id', patientId)

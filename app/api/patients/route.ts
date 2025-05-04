@@ -3,7 +3,6 @@ import { prisma, connectWithFallback } from '@/app/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { convertToPrismaFormat, getSupabasePatients } from '@/app/lib/supabase';
 import { createClient } from '@/app/utils/supabase/server';
-import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
   try {
