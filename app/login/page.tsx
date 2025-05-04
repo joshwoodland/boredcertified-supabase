@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { createClient } from '../utils/supabase/client';
 import { loginWithGoogle } from './actions';
+import DynamicLogo from '../components/DynamicLogo';
 
 export default function LoginPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -136,9 +137,7 @@ export default function LoginPage() {
       </div>
       
       <div className="flex flex-col items-center relative z-10">
-        <img 
-          src="/logo.png" 
-          alt="Bored Certified Logo" 
+        <DynamicLogo 
           className="h-96 w-auto mb-4"
         />
 

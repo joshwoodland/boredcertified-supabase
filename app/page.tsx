@@ -14,6 +14,7 @@ import ManualTranscriptModal from './components/ManualTranscriptModal';
 import { FiSettings, FiTrash2, FiPlayCircle, FiSearch, FiUser } from 'react-icons/fi';
 import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
+import DynamicLogo from './components/DynamicLogo';
 
 interface Patient {
   id: string;
@@ -545,9 +546,7 @@ export default function Home() {
         <div className="flex justify-between items-center mb-0">
           <div className="flex items-center space-x-3">
             <div className="h-72 flex items-center">
-              <img
-                src="/logo.png"
-                alt="Bored Certified Logo"
+              <DynamicLogo
                 style={{
                   height: '100%',
                   width: 'auto',
