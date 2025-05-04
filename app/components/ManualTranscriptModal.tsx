@@ -5,11 +5,13 @@ import React, { useState } from "react";
 interface ManualTranscriptModalProps {
   onTranscriptSubmit: (transcript: string, isInitialEvaluation: boolean) => void;
   onClose: () => void;
+  selectedPatientId?: string;
 }
 
 export default function ManualTranscriptModal({ 
   onTranscriptSubmit,
-  onClose
+  onClose,
+  selectedPatientId
 }: ManualTranscriptModalProps) {
   const [visitType, setVisitType] = useState<'initial' | 'followup' | null>(null);
   const [showTextArea, setShowTextArea] = useState(false);
@@ -22,6 +24,11 @@ export default function ManualTranscriptModal({
   };
 
   const handleSubmit = () => {
+    if (!selectedPatientId) {
+      setError('Please select a patient first');
+      return;
+    }
+    
     if (!transcript.trim()) {
       setError('Transcript cannot be empty');
       return;
@@ -53,6 +60,14 @@ export default function ManualTranscriptModal({
           </button>
         </div>
 
+        {!selectedPatientId && (
+          <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+            <p className="text-yellow-600 dark:text-yellow-400 font-medium">
+              No patient is selected. Please select a patient before continuing.
+            </p>
+          </div>
+        )}
+
         {!showTextArea ? (
           // Visit type selection
           <div className="py-4">
@@ -63,6 +78,7 @@ export default function ManualTranscriptModal({
               <button
                 onClick={() => handleVisitTypeSelect('initial')}
                 className="flex flex-col items-center justify-center p-6 border-2 border-blue-400 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                disabled={!selectedPatientId}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-blue-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -76,6 +92,7 @@ export default function ManualTranscriptModal({
               <button
                 onClick={() => handleVisitTypeSelect('followup')}
                 className="flex flex-col items-center justify-center p-6 border-2 border-purple-400 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                disabled={!selectedPatientId}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-purple-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
@@ -98,6 +115,7 @@ export default function ManualTranscriptModal({
               onChange={(e) => setTranscript(e.target.value)}
               className="w-full h-64 p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
               placeholder="Paste or type the visit transcript here..."
+              disabled={!selectedPatientId}
             />
           </div>
         )}
@@ -120,7 +138,7 @@ export default function ManualTranscriptModal({
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!transcript.trim()}
+                disabled={!transcript.trim() || !selectedPatientId}
                 className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

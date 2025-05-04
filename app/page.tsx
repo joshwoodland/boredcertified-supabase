@@ -377,8 +377,20 @@ export default function Home() {
 
   // Handler for manual transcript submission from the modal
   const handleManualTranscriptFromModal = async (transcript: string, isInitialEvaluation: boolean) => {
-    if (!selectedPatientId || !transcript.trim()) {
-      setError('Please select a patient and enter a transcript');
+    console.log('Manual transcript submission initiated with:', { 
+      selectedPatientId, 
+      transcriptLength: transcript?.length, 
+      isInitialEvaluation 
+    });
+    
+    if (!selectedPatientId) {
+      console.error('Missing patient ID when submitting transcript');
+      setError('Please select a patient before generating a note');
+      return;
+    }
+
+    if (!transcript.trim()) {
+      setError('Please enter a transcript');
       return;
     }
 
@@ -389,6 +401,7 @@ export default function Home() {
 
     try {
       // Generate SOAP note
+      console.log('Sending request to /api/notes with patientId:', selectedPatientId);
       const soapResponse = await fetch('/api/notes', {
         method: 'POST',
         headers: {
@@ -875,6 +888,7 @@ export default function Home() {
           onClose={() => {
             setShowManualTranscriptModal(false);
           }}
+          selectedPatientId={selectedPatientId}
         />
       )}
     </>
