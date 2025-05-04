@@ -37,7 +37,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
 
   useEffect(() => {
     // Remove format string from display value
-    const displayValue = value.replace(/^format:\{[^}]*\}\n/gm, '');
+    const displayValue = value ? value.replace(/^format:\{[^}]*\}\n/gm, '') : '';
     setLocalValue(displayValue);
   }, [value]);
 
@@ -59,7 +59,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
     if (!isDirty || confirm('You have unsaved changes. Are you sure you want to close?')) {
       setIsExpanded(false);
       // Remove format string from display value
-      const displayValue = value.replace(/^format:\{[^}]*\}\n/gm, '');
+      const displayValue = value ? value.replace(/^format:\{[^}]*\}\n/gm, '') : '';
       setLocalValue(displayValue);
       setIsDirty(false);
     }
