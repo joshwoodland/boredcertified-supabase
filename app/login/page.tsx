@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createClient } from '../utils/supabase/client';
 import { loginWithGoogle } from './actions';
 
@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const supabase = createClient();
 
   const handleLogin = async () => {
@@ -78,6 +79,13 @@ export default function LoginPage() {
       }
     });
 
+    // Play video background silently and loop
+    if (videoRef.current) {
+      videoRef.current.play().catch(err => {
+        console.log('Video autoplay prevented by browser:', err);
+      });
+    }
+
     return () => {
       listener.subscription.unsubscribe();
     };
@@ -85,20 +93,21 @@ export default function LoginPage() {
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#1B2025] relative overflow-hidden">
-      {/* Lava wave animation background */}
-      <div className="wave-container absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
-        <svg width="0" height="0" className="absolute">
-          <defs>
-            <linearGradient id="wave-gradient" x1="0%" y1="0%" x2="100%" y2="0%" gradientTransform="rotate(45)">
-              <stop offset="0%" stopColor="#3b82f6" className="animate-gradient-shift-1" />
-              <stop offset="50%" stopColor="#6366f1" className="animate-gradient-shift-2" />
-              <stop offset="100%" stopColor="#8b5cf6" className="animate-gradient-shift-3" />
-            </linearGradient>
-          </defs>
-        </svg>
-        <div className="wave wave1"></div>
-        <div className="wave wave2"></div>
-        <div className="wave wave3"></div>
+      {/* Video Background */}
+      <div className="video-background absolute inset-0 w-full h-full z-0">
+        <video 
+          ref={videoRef}
+          className="absolute inset-0 w-full h-full object-cover opacity-30"
+          autoPlay
+          loop
+          muted
+          playsInline
+          poster="/video-poster.jpg" // Optional: Add a poster image while video loads
+        >
+          <source src="/background.mp4" type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+        <div className="absolute inset-0 bg-gradient-to-t from-[#1B2025] via-transparent to-transparent opacity-70"></div>
       </div>
       
       <div className="flex flex-col items-center mb-8 relative z-10">
@@ -108,7 +117,7 @@ export default function LoginPage() {
           className="h-96 w-auto"
         />
       </div>
-      <div className="bg-[#242A32]/90 backdrop-blur-sm shadow-lg rounded-xl p-8 max-w-md w-full relative z-10">
+      <div className="bg-[#242A32]/80 backdrop-blur-md shadow-lg rounded-xl p-8 max-w-md w-full relative z-10">
         <h1 className="text-2xl font-bold mb-6 text-center text-white">Login</h1>
         
         {isCheckingSession ? (
