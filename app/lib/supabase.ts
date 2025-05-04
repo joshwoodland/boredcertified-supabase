@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { createBrowserClient } from '@supabase/ssr';
+import { createClient as createServerClient } from '@/app/utils/supabase/server';
 
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
@@ -55,6 +56,90 @@ export async function checkSupabaseConnection(): Promise<boolean> {
   } catch (error) {
     console.error('Failed to connect to Supabase:', error);
     return false;
+  }
+}
+
+/**
+ * Fetches patients from Supabase
+ * @param filterByCurrentUser Whether to filter patients by the current user's email (true by default)
+ * @returns Array of patients
+ */
+export async function getSupabasePatients(filterByCurrentUser = true) {
+  try {
+    // Use our server-side client
+    let serverSupabase;
+    
+    if (typeof window === 'undefined') {
+      // Server-side context
+      serverSupabase = createServerClient();
+    } else {
+      // Client-side context
+      serverSupabase = supabase;
+    }
+    
+    // Get current user with auth
+    const { data: { session } } = await serverSupabase.auth.getSession();
+    const userEmail = session?.user?.email;
+    
+    // Build query
+    let query = serverSupabase
+      .from('patients')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    // Filter by provider email if requested
+    if (filterByCurrentUser && userEmail) {
+      query = query.eq('provider_email', userEmail);
+      console.log(`Filtering patients for provider email: ${userEmail}`);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('Error fetching patients from Supabase:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Error in getSupabasePatients:', error);
+    return [];
+  }
+}
+
+/**
+ * Fetches notes for a specific patient from Supabase
+ * @param patientId The patient's ID
+ * @returns Array of notes
+ */
+export async function getSupabaseNotes(patientId: string) {
+  try {
+    // Use our server-side client
+    let serverSupabase;
+    
+    if (typeof window === 'undefined') {
+      // Server-side context
+      serverSupabase = createServerClient();
+    } else {
+      // Client-side context
+      serverSupabase = supabase;
+    }
+    
+    const { data, error } = await serverSupabase
+      .from('notes')
+      .select('*')
+      .eq('patient_id', patientId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error(`Error fetching notes for patient ${patientId} from Supabase:`, error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Error in getSupabaseNotes:', error);
+    return [];
   }
 }
 

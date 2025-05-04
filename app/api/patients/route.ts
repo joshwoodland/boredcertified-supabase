@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma, connectWithFallback } from '@/app/lib/db';
 import { v4 as uuidv4 } from 'uuid';
-import { convertToPrismaFormat } from '@/app/lib/supabase';
-import { 
-  createServerComponentSupabaseClient,
-  getSupabasePatients 
-} from '@/app/lib/server-supabase';
+import { convertToPrismaFormat, getSupabasePatients } from '@/app/lib/supabase';
+import { createClient } from '@/app/utils/supabase/server';
 import { cookies } from 'next/headers';
 
 export async function GET(request: NextRequest) {
@@ -19,8 +16,7 @@ export async function GET(request: NextRequest) {
     
     // First try to get patients from Supabase
     try {
-      const cookieStore = cookies();
-      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
+      const supabaseServer = createClient();
       
       // First get the user's session
       const { data: { session } } = await supabaseServer.auth.getSession();
@@ -88,8 +84,7 @@ export async function POST(request: NextRequest) {
 
     // Try with Supabase first
     try {
-      const cookieStore = cookies();
-      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
+      const supabaseServer = createClient();
       
       // Get the user's email from their session
       const { data: { session } } = await supabaseServer.auth.getSession();
@@ -156,8 +151,7 @@ export async function PATCH(request: NextRequest) {
 
     // Try with Supabase first
     try {
-      const cookieStore = cookies();
-      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
+      const supabaseServer = createClient();
       
       const updateData: Record<string, unknown> = {
         updated_at: new Date().toISOString()
@@ -230,8 +224,7 @@ export async function DELETE(request: NextRequest) {
     
     // Try with Supabase first - we'll do a soft delete
     try {
-      const cookieStore = cookies();
-      const supabaseServer = createServerComponentSupabaseClient(() => cookieStore);
+      const supabaseServer = createClient();
       
       // Soft delete the patient in Supabase
       const now = new Date().toISOString();
