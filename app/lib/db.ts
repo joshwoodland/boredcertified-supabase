@@ -27,30 +27,11 @@ export const prisma =
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
 
-// Create a fallback function to SQLite if Postgres connection fails
+// For compatibility with existing code, provide a function that only returns the Prisma client
+// This replaces the previous connectWithFallback function which had SQLite fallback
 export const connectWithFallback = async () => {
-  try {
-    // Test connection to PostgreSQL
-    await prisma.$queryRaw`SELECT 1`
-    console.log('Connected to PostgreSQL database')
-    return prisma
-  } catch (error) {
-    console.error('Failed to connect to PostgreSQL, falling back to SQLite', error)
-    
-    // If we have a SQLite connection string, use it as fallback
-    if (process.env.SQLITE_DATABASE_URL) {
-      const sqlitePrisma = new PrismaClient({
-        datasources: {
-          db: {
-            url: process.env.SQLITE_DATABASE_URL,
-          },
-        },
-      })
-      
-      return sqlitePrisma
-    }
-    
-    // If no fallback is available, rethrow the error
-    throw error
-  }
+  // Test connection to PostgreSQL
+  await prisma.$queryRaw`SELECT 1`
+  console.log('Connected to PostgreSQL database')
+  return prisma
 }

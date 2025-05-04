@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "vercel-build": "PRISMA_SKIP_GENERATE=true next build",
     "supabase:setup": "echo 'Run this SQL script in your Supabase SQL Editor: scripts/supabase-setup.sql'",
     "supabase:backup": "node scripts/backup-to-supabase.js",
     "supabase:test-data": "node scripts/create-test-data.js",

@@ -383,34 +383,12 @@ export default function SupabasePatientNotes({
           setNotes(formattedNotes);
           setDataSource('supabase');
         } else {
-          // Fall back to SQLite
-          const db = await connectWithFallback();
-          const sqliteNotes = await db.note.findMany({
-            where: { patientId },
-            orderBy: { createdAt: 'desc' },
-          });
-          
-          setNotes(sqliteNotes as Note[]);
-          setDataSource('sqlite');
+          // No fallback to SQLite anymore - just show an error
+          throw new Error('Supabase connection unavailable');
         }
       } catch (err) {
         console.error('Error loading notes:', err);
-        setError('Failed to load notes. Please try again.');
-        
-        // Attempt SQLite fallback if there was an error with Supabase
-        try {
-          const db = await connectWithFallback();
-          const sqliteNotes = await db.note.findMany({
-            where: { patientId },
-            orderBy: { createdAt: 'desc' },
-          });
-          
-          setNotes(sqliteNotes as Note[]);
-          setDataSource('sqlite');
-        } catch (fallbackErr) {
-          console.error('Both data sources failed:', fallbackErr);
-          setError('All data sources unavailable. Please check your connection.');
-        }
+        setError('Unable to load notes. Please check your connection and try again.');
       } finally {
         setLoading(false);
       }
@@ -432,7 +410,7 @@ export default function SupabasePatientNotes({
     setError(null);
     
     try {
-      // First try Supabase
+      // Check Supabase connection
       const isSupabaseAvailable = await checkSupabaseConnection();
       
       if (isSupabaseAvailable) {
@@ -450,34 +428,12 @@ export default function SupabasePatientNotes({
         setNotes(formattedNotes);
         setDataSource('supabase');
       } else {
-        // Fall back to SQLite
-        const db = await connectWithFallback();
-        const sqliteNotes = await db.note.findMany({
-          where: { patientId },
-          orderBy: { createdAt: 'desc' },
-        });
-        
-        setNotes(sqliteNotes as Note[]);
-        setDataSource('sqlite');
+        // No fallback to SQLite anymore - just show an error
+        throw new Error('Supabase connection unavailable');
       }
     } catch (err) {
       console.error('Error loading notes:', err);
-      setError('Failed to load notes. Please try again.');
-      
-      // Attempt SQLite fallback if there was an error with Supabase
-      try {
-        const db = await connectWithFallback();
-        const sqliteNotes = await db.note.findMany({
-          where: { patientId },
-          orderBy: { createdAt: 'desc' },
-        });
-        
-        setNotes(sqliteNotes as Note[]);
-        setDataSource('sqlite');
-      } catch (fallbackErr) {
-        console.error('Both data sources failed:', fallbackErr);
-        setError('All data sources unavailable. Please check your connection.');
-      }
+      setError('Unable to load notes. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }

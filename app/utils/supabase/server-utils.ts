@@ -43,7 +43,7 @@ export async function checkServerSupabaseConnection(): Promise<boolean> {
 /**
  * Converts Supabase record format to Prisma format (server-side version)
  */
-export function convertServerRecordToPrisma(record: any, type: 'patient' | 'note' | 'settings'): any {
+export async function convertServerRecordToPrisma(record: any, type: 'patient' | 'note' | 'settings'): Promise<any> {
   if (!record) return null;
   
   switch (type) {

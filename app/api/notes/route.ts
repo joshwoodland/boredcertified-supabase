@@ -360,23 +360,7 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // Fall back to Prisma if Supabase is unavailable or query failed
-    if (!patient) {
-      console.log('Falling back to Prisma to get patient');
-      const db = await connectWithFallback();
-      patient = await db.patient.findUnique({
-        where: { id: patientId },
-      });
-
-      if (!patient) {
-        return NextResponse.json({
-          error: 'Patient not found',
-          details: 'Invalid patient ID'
-        }, { status: 404 });
-      }
-    }
-    
-    // Use provided patient name if available, otherwise fallback to the name from the database
+    // Use the provided patient name if available, otherwise fallback to the name from the database
     const effectivePatientName = patientName || patient.name;
 
     console.log('Processing note request:', { 
@@ -415,15 +399,6 @@ export async function POST(request: NextRequest) {
       } else {
         existingNotes = count || 0;
       }
-    }
-    
-    // Fall back to Prisma if Supabase is unavailable or query failed
-    if (existingNotes === 0 && !isSupabaseAvailable) {
-      console.log('Falling back to Prisma to count existing notes');
-      const db = await connectWithFallback();
-      existingNotes = await db.note.count({
-        where: { patientId },
-      });
     }
     
     // Use the provided isInitialEvaluation parameter if available, otherwise fall back to checking for existing notes
@@ -538,11 +513,11 @@ export async function POST(request: NextRequest) {
     }
 
     const model = settings.gptModel;
-    if (!isValidModel(model)) {
+    if (!model || !isValidModel(model)) {
       console.error('Invalid model specified:', model);
       return NextResponse.json({
         error: 'Invalid model configuration',
-        details: `Model ${model} is not supported`
+        details: `Model ${model || 'undefined'} is not supported`
       }, { status: 500 });
     }
 
@@ -838,23 +813,21 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // Fall back to Prisma if Supabase is unavailable or operation failed
-      if (!note) {
-        console.log('Falling back to Prisma to create note');
-        const db = await connectWithFallback();
-        note = await db.note.create({
-          data: {
-            patientId,
-            transcript, // Store original transcript without the previous note
-            audioFileUrl,
-            isInitialVisit,
-            content: JSON.stringify({ 
-              content: responseContent,
-              formattedContent 
-            }),
-          },
-        });
-      }
+      // Use Prisma PostgreSQL to create note
+      console.log('Using Prisma PostgreSQL to create note');
+      const db = await connectWithFallback();
+      note = await db.note.create({
+        data: {
+          patientId,
+          transcript, // Store original transcript without the previous note
+          audioFileUrl,
+          isInitialVisit,
+          content: JSON.stringify({ 
+            content: responseContent,
+            formattedContent 
+          }),
+        },
+      });
 
       // Generate a summary focusing on medication changes
       try {
@@ -880,8 +853,7 @@ export async function POST(request: NextRequest) {
             if (error) {
               console.error('Error updating note summary in Supabase:', error);
               // Fall back to Prisma
-              const db = await connectWithFallback();
-              await db.note.update({
+              await prisma.note.update({
                 where: { id: note.id },
                 data: { summary }
               });

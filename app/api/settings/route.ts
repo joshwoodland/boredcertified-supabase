@@ -5,6 +5,8 @@ import { prisma, connectWithFallback } from '@/app/lib/db';
 import { createClient } from '@/app/utils/supabase/server';
 import { checkServerSupabaseConnection, convertServerRecordToPrisma } from '@/app/utils/supabase/server-utils';
 import { cookies } from 'next/headers';
+import { DefaultSettings } from '@/app/lib/defaultSettings';
+import { v4 as uuidv4 } from 'uuid';
 
 // Debug logging helper
 const debugLog = (message: string, data?: unknown) => {
@@ -17,137 +19,134 @@ const debugLog = (message: string, data?: unknown) => {
   }
 };
 
+// Convert from Supabase's snake_case to Prisma's camelCase
+const convertToPrismaFormat = (data: any, type: string) => {
+  if (!data) return null;
+  
+  if (type === 'settings') {
+    return {
+      id: data.id,
+      deepgramApiKey: data.deepgram_api_key,
+      openaiApiKey: data.openai_api_key,
+      gptModel: data.gpt_model,
+      lowEchoCancellation: data.low_echo_cancellation,
+      createdAt: new Date(data.created_at),
+      updatedAt: new Date(data.updated_at),
+    };
+  }
+  
+  return null;
+};
+
 /**
  * GET handler for settings
  */
 export async function GET(request: NextRequest) {
-  debugLog('Starting GET request for settings');
-  
   try {
-    // Create a Supabase client
-    const supabase = await createClient();
+    debugLog('GET settings request received');
     
-    // Check for auth cookies
-    const cookieStore = cookies();
-    const authCookie = cookieStore.getAll().find(c => c.name.includes('supabase-auth-token'));
-    if (authCookie) {
-      debugLog(`Found auth cookie: ${authCookie.name}`);
-    } else {
-      debugLog('No Supabase auth cookie found!');
-    }
-    
-    // Check if Supabase is available
-    const isSupabaseAvailable = await checkServerSupabaseConnection();
-    debugLog(`Supabase connection available: ${isSupabaseAvailable}`);
-    
+    // Try to get settings from Supabase first
     let settings = null;
+    let memorySettings = null;
+    let responseSource = '';
     
-    if (isSupabaseAvailable) {
-      debugLog('Using Supabase to get app settings');
-      
-      try {
-        // Get current user with server-side auth
-        const { data: { session } } = await supabase.auth.getSession();
-        const userId = session?.user?.id;
-        
-        // IMPORTANT: Log auth session details for debugging
-        debugLog('Auth session details:', { 
-          hasSession: !!session, 
-          userId, 
-          userEmail: session?.user?.email,
-          cookiesPresent: cookieStore.getAll().length > 0,
-          authCookiePresent: cookieStore.getAll().some(c => c.name.includes('-auth-token'))
-        });
-        
-        // If user is logged in, try to get their settings
-        if (userId) {
-          const { data: userSettings, error: userSettingsError } = await supabase
-            .from('app_settings')
-            .select('*')
-            .eq('user_id', userId)
-            .single();
-            
-          if (!userSettingsError && userSettings) {
-            debugLog(`Found settings for user ID: ${userId}`);
-            settings = convertServerRecordToPrisma(userSettings, 'settings');
-          } else {
-            debugLog(`No settings found for user ID: ${userId}, falling back to default`);
-          }
-        }
-        
-        // If no user settings found, get default settings
-        if (!settings) {
-          const { data: defaultSettings, error: defaultError } = await supabase
-            .from('app_settings')
-            .select('*')
-            .eq('id', 'default')
-            .single();
-            
-          if (!defaultError && defaultSettings) {
-            debugLog('Using default settings');
-            settings = convertServerRecordToPrisma(defaultSettings, 'settings');
-          } else {
-            debugLog('No default settings found in Supabase, falling back to in-memory defaults');
-          }
-        }
-      } catch (error) {
-        debugLog('Error accessing Supabase settings:', error);
-        // Fall through to fallback
+    try {
+      // Check if we're in a Vercel environment with environment variables
+      if (process.env.OPENAI_API_KEY) {
+        debugLog('Using environment variables for settings');
+        memorySettings = {
+          id: 'default',
+          deepgramApiKey: process.env.DEEPGRAM_API_KEY || '',
+          openaiApiKey: process.env.OPENAI_API_KEY || '',
+          gptModel: process.env.GPT_MODEL || 'gpt-4o',
+          lowEchoCancellation: process.env.LOW_ECHO_CANCELLATION === 'true',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        responseSource = 'env';
       }
-    }
-    
-    // Create default settings if none were found
-    if (!settings) {
-      debugLog('Falling back to Prisma/default settings');
       
-      try {
-        const db = await connectWithFallback();
-        settings = await db.appSettings.findUnique({
-          where: { id: 'default' },
-        });
-
-        if (!settings) {
-          settings = await db.appSettings.create({
-            data: {
-              id: 'default',
-              darkMode: true,
-              gptModel: 'gpt-4o',
-              initialVisitPrompt: '',
-              followUpVisitPrompt: '',
-              autoSave: false,
-              lowEchoCancellation: false
-            },
+      // If this is from the /api/settings/force-memory route, always use memory settings
+      const url = new URL(request.url);
+      if (url.pathname === '/api/settings/force-memory') {
+        debugLog('Forcing memory settings due to route');
+        if (memorySettings) {
+          return NextResponse.json({
+            data: memorySettings,
+            source: responseSource
           });
         }
-      } catch (error) {
-        debugLog('Error with Prisma fallback, using memory defaults:', error);
-        
-        // If everything fails, return in-memory defaults
-        settings = {
-          id: 'default',
-          darkMode: true,
-          gptModel: 'gpt-4o',
-          initialVisitPrompt: '',
-          followUpVisitPrompt: '',
-          autoSave: false,
-          lowEchoCancellation: false,
-          updatedAt: new Date()
-        };
       }
+      
+      // Try to get settings from Supabase
+      const { data, error } = await prisma.appSettings.findUnique({
+        where: { id: 'default' },
+      });
+      
+      if (!error && data) {
+        debugLog('Got settings from Prisma/PostgreSQL');
+        settings = convertToPrismaFormat(data, 'settings');
+        responseSource = 'postgresql';
+      } else {
+        debugLog('Error getting settings from Prisma/PostgreSQL:', error);
+        
+        // If we have memory settings, use those
+        if (memorySettings) {
+          debugLog('Using memory settings as fallback');
+          settings = memorySettings;
+          responseSource = 'env';
+        } else {
+          // Try to get settings from Prisma/PostgreSQL directly
+          debugLog('Trying to get settings from Prisma/PostgreSQL');
+          const prismaSettings = await prisma.appSettings.findUnique({
+            where: { id: 'default' },
+          });
+          
+          if (prismaSettings) {
+            debugLog('Got settings from Prisma/PostgreSQL');
+            settings = prismaSettings;
+            responseSource = 'postgresql';
+          }
+        }
+      }
+      
+      // If we still don't have settings, use default settings
+      if (!settings) {
+        debugLog('No settings found, using defaults');
+        settings = DefaultSettings;
+        responseSource = 'defaults';
+      }
+      
+      return NextResponse.json({
+        data: settings,
+        source: responseSource
+      });
+    } catch (error) {
+      debugLog('Error in main settings flow:', error);
+      
+      // Last resort fallback to default settings
+      if (!settings && memorySettings) {
+        debugLog('Using memory defaults as last resort');
+        settings = memorySettings;
+        responseSource = 'env';
+      } else if (!settings) {
+        debugLog('Using hard-coded defaults as last resort');
+        settings = DefaultSettings;
+        responseSource = 'defaults';
+      }
+      
+      return NextResponse.json({
+        data: settings,
+        source: responseSource
+      });
     }
-
-    // Load system messages from files
-    const initialVisitPrompt = await import('@/app/config/initialVisitPrompt');
-    const followUpVisitPrompt = await import('@/app/config/followUpVisitPrompt');
-
-    // Update settings with system messages from files
-    settings.initialVisitPrompt = initialVisitPrompt.systemMessage.content;
-    settings.followUpVisitPrompt = followUpVisitPrompt.systemMessage.content;
-
-    return NextResponse.json(settings);
   } catch (error) {
-    console.error('Error fetching settings:', error);
-    return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
+    debugLog('Catastrophic error in GET handler:', error);
+    return NextResponse.json({
+      data: DefaultSettings,
+      source: 'defaults',
+      error: 'Error retrieving settings'
+    }, { status: 500 });
   }
 }
 
@@ -155,246 +154,126 @@ export async function GET(request: NextRequest) {
  * POST handler for settings
  */
 export async function POST(request: NextRequest) {
-  debugLog('Starting POST request for settings');
-  
   try {
-    const body = await request.json();
-    debugLog('Request body:', body);
+    const requestData = await request.json();
+    debugLog('POST settings request received:', requestData);
     
-    // Create a Supabase client
-    const supabase = await createClient();
+    // Initialize settings from request
+    const settingsData = {
+      id: 'default',
+      deepgramApiKey: requestData.deepgramApiKey,
+      openaiApiKey: requestData.openaiApiKey,
+      gptModel: requestData.gptModel || 'gpt-4o',
+      lowEchoCancellation: requestData.lowEchoCancellation === true,
+      updatedAt: new Date(),
+    };
     
-    // Check for auth cookies
-    const cookieStore = cookies();
-    const authCookie = cookieStore.getAll().find(c => c.name.includes('supabase-auth-token'));
-    if (authCookie) {
-      debugLog(`Found auth cookie: ${authCookie.name}`);
-    } else {
-      debugLog('No Supabase auth cookie found!');
-    }
+    let settings = null;
+    let updateSource = '';
+    let created = false;
     
-    // Check if Supabase is available
-    const isSupabaseAvailable = await checkServerSupabaseConnection();
-    debugLog(`Supabase connection available: ${isSupabaseAvailable}`);
-    
-    // Prepare the return value
-    let updatedSettings = null;
-    
-    // Only proceed with Supabase if it's available
-    if (isSupabaseAvailable) {
-      debugLog('Using Supabase to update app settings');
+    // First try Supabase
+    try {
+      debugLog('Trying to update settings in Supabase');
       
-      try {
-        // Get current user with server-side auth
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        // IMPORTANT: Log auth session details for debugging
-        debugLog('Auth session details:', { 
-          hasSession: !!session, 
-          userId: session?.user?.id, 
-          userEmail: session?.user?.email,
-          cookiesPresent: cookieStore.getAll().length > 0,
-          authCookiePresent: cookieStore.getAll().some(c => c.name.includes('-auth-token'))
-        });
-        
-        const userId = session?.user?.id;
-        
-        // Convert camelCase to snake_case for Supabase
-        const updateData: Record<string, unknown> = {};
-        if (body.darkMode !== undefined) updateData.dark_mode = body.darkMode;
-        if (body.gptModel !== undefined) updateData.gpt_model = body.gptModel;
-        
-        // Only include prompts if they exist in the body to avoid sending large amounts of data
-        if (body.initialVisitPrompt) updateData.initial_visit_prompt = body.initialVisitPrompt;
-        if (body.followUpVisitPrompt) updateData.follow_up_visit_prompt = body.followUpVisitPrompt;
-        
-        if (body.lowEchoCancellation !== undefined) updateData.low_echo_cancellation = body.lowEchoCancellation;
-        if (body.autoSave !== undefined) updateData.auto_save = body.autoSave;
-        updateData.updated_at = new Date().toISOString();
-        
-        debugLog('Update data prepared:', updateData);
-        
-        // If user is logged in, update/create their settings
-        if (userId) {
-          debugLog(`Operating on settings for user ID: ${userId}`);
-          
-          try {
-            // Check if user settings exist
-            const { data: existingSettings, error: checkError } = await supabase
-              .from('app_settings')
-              .select('id')
-              .eq('user_id', userId)
-              .single();
-              
-            if (checkError && checkError.code === 'PGRST116') {
-              // User settings don't exist yet, create them
-              debugLog('No user settings found, creating new settings');
-              
-              // Generate a unique ID for the user settings
-              const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-              
-              try {
-                // Simplified insert with only essential fields
-                const { data: newSettings, error: insertError } = await supabase
-                  .from('app_settings')
-                  .insert({
-                    id: userSettingsId,
-                    user_id: userId,
-                    dark_mode: body.darkMode !== undefined ? body.darkMode : true,
-                    gpt_model: body.gptModel || 'gpt-4o',
-                    low_echo_cancellation: body.lowEchoCancellation !== undefined ? body.lowEchoCancellation : false
-                  })
-                  .select()
-                  .single();
-                  
-                if (insertError) {
-                  debugLog('Error creating user settings:', insertError);
-                  throw insertError;
-                }
-                
-                debugLog('Successfully created user settings');
-                updatedSettings = convertServerRecordToPrisma(newSettings, 'settings');
-              } catch (error) {
-                debugLog('All attempts to create settings failed:', error);
-                throw new Error('Failed to create user settings');
-              }
-            } else {
-              // User settings exist, update them
-              debugLog('User settings exist, updating them');
-              
-              // Update user settings
-              const { error: updateError } = await supabase
-                .from('app_settings')
-                .update(updateData)
-                .eq('user_id', userId);
-                
-              if (updateError) {
-                debugLog('Error updating user settings:', updateError);
-                throw updateError;
-              }
-              
-              debugLog('Successfully updated user settings');
-              
-              // Get updated settings
-              const { data: fetchedSettings, error: fetchError } = await supabase
-                .from('app_settings')
-                .select('*')
-                .eq('user_id', userId)
-                .single();
-                
-              if (fetchError) {
-                debugLog('Error fetching updated settings:', fetchError);
-                throw fetchError;
-              }
-              
-              updatedSettings = convertServerRecordToPrisma(fetchedSettings, 'settings');
-            }
-          } catch (error) {
-            debugLog('Error in user settings operation:', error);
-            throw error;
-          }
-        } else {
-          // No user logged in, update default settings
-          debugLog('No user logged in, updating default settings');
-          
-          try {
-            // Update default settings
-            const { error: updateError } = await supabase
-              .from('app_settings')
-              .update(updateData)
-              .eq('id', 'default');
-              
-            if (updateError) {
-              debugLog('Error updating default settings:', updateError);
-              throw updateError;
-            }
-            
-            debugLog('Successfully updated default settings');
-            
-            // Get updated default settings
-            const { data: fetchedSettings, error: fetchError } = await supabase
-              .from('app_settings')
-              .select('*')
-              .eq('id', 'default')
-              .single();
-              
-            if (fetchError) {
-              debugLog('Error fetching updated settings:', fetchError);
-              throw fetchError;
-            }
-            
-            updatedSettings = convertServerRecordToPrisma(fetchedSettings, 'settings');
-          } catch (error) {
-            debugLog('Error updating default settings:', error);
-            throw error;
-          }
-        }
-      } catch (error) {
-        debugLog('Error with Supabase operations:', error);
-        // Fall through to Prisma fallback
-      }
-    }
-    
-    // If we couldn't update settings with Supabase, use Prisma as fallback
-    if (!updatedSettings) {
-      debugLog('Falling back to Prisma to update app settings');
+      // First check if settings already exist
+      const { data: existingData, error: existingError } = await prisma.appSettings.findUnique({
+        where: { id: 'default' },
+      });
       
-      try {
-        const db = await connectWithFallback();
-        updatedSettings = await db.appSettings.upsert({
+      let result;
+      
+      if (!existingError && existingData) {
+        // Update existing settings
+        debugLog('Updating existing settings in Supabase');
+        const { data, error } = await prisma.appSettings.update({
           where: { id: 'default' },
-          update: {
-            darkMode: body.darkMode !== undefined ? body.darkMode : undefined,
-            gptModel: body.gptModel !== undefined ? body.gptModel : undefined,
-            initialVisitPrompt: body.initialVisitPrompt ? body.initialVisitPrompt : undefined,
-            followUpVisitPrompt: body.followUpVisitPrompt ? body.followUpVisitPrompt : undefined,
-            lowEchoCancellation: body.lowEchoCancellation !== undefined ? body.lowEchoCancellation : undefined,
-            autoSave: body.autoSave !== undefined ? body.autoSave : undefined,
-            updatedAt: new Date(),
-          },
-          create: {
-            id: 'default',
-            darkMode: body.darkMode ?? true,
-            gptModel: body.gptModel ?? 'gpt-4o',
-            initialVisitPrompt: body.initialVisitPrompt ?? '',
-            followUpVisitPrompt: body.followUpVisitPrompt ?? '',
-            lowEchoCancellation: body.lowEchoCancellation ?? false,
-            autoSave: body.autoSave ?? false,
+          data: {
+            deepgramApiKey: settingsData.deepgramApiKey,
+            openaiApiKey: settingsData.openaiApiKey,
+            gptModel: settingsData.gptModel,
+            lowEchoCancellation: settingsData.lowEchoCancellation,
             updatedAt: new Date(),
           },
         });
-      } catch (error) {
-        debugLog('Prisma fallback failed:', error);
         
-        // If all else fails, return a mock result with the requested changes
-        updatedSettings = {
-          id: 'default',
-          darkMode: body.darkMode ?? true,
-          gptModel: body.gptModel ?? 'gpt-4o',
-          initialVisitPrompt: body.initialVisitPrompt ?? '',
-          followUpVisitPrompt: body.followUpVisitPrompt ?? '',
-          lowEchoCancellation: body.lowEchoCancellation ?? false,
-          autoSave: body.autoSave ?? false,
-          updatedAt: new Date()
-        };
+        result = { data, error };
+      } else {
+        // Insert new settings
+        debugLog('Inserting new settings in Supabase');
+        const { data, error } = await prisma.appSettings.create({
+          data: {
+            id: 'default',
+            deepgramApiKey: settingsData.deepgramApiKey,
+            openaiApiKey: settingsData.openaiApiKey,
+            gptModel: settingsData.gptModel,
+            lowEchoCancellation: settingsData.lowEchoCancellation,
+            updatedAt: new Date(),
+          },
+        });
+        
+        created = true;
+        result = { data, error };
       }
+      
+      if (!result.error) {
+        debugLog('Successfully updated settings in Supabase');
+        settings = convertToPrismaFormat(result.data, 'settings');
+        updateSource = 'supabase';
+      } else {
+        debugLog('Error updating settings in Supabase:', result.error);
+        
+        // Try to update settings in Prisma/PostgreSQL directly
+        try {
+          debugLog('Trying to update settings in Prisma/PostgreSQL');
+          
+          const prismaSettings = await prisma.appSettings.upsert({
+            where: { id: 'default' },
+            update: {
+              deepgramApiKey: settingsData.deepgramApiKey,
+              openaiApiKey: settingsData.openaiApiKey,
+              gptModel: settingsData.gptModel,
+              lowEchoCancellation: settingsData.lowEchoCancellation,
+              updatedAt: new Date(),
+            },
+            create: {
+              id: 'default',
+              deepgramApiKey: settingsData.deepgramApiKey,
+              openaiApiKey: settingsData.openaiApiKey,
+              gptModel: settingsData.gptModel,
+              lowEchoCancellation: settingsData.lowEchoCancellation,
+              updatedAt: new Date(),
+            },
+          });
+          
+          debugLog('Successfully updated settings in Prisma/PostgreSQL');
+          settings = prismaSettings;
+          updateSource = 'postgresql';
+          created = !prismaSettings.createdAt || 
+                    prismaSettings.createdAt.getTime() === prismaSettings.updatedAt.getTime();
+        } catch (prismaError) {
+          debugLog('Error updating settings in Prisma/PostgreSQL:', prismaError);
+          throw prismaError;
+        }
+      }
+      
+      return NextResponse.json({
+        data: settings,
+        source: updateSource,
+        created
+      });
+    } catch (error) {
+      debugLog('Error in POST handler:', error);
+      return NextResponse.json({
+        error: 'Failed to update settings',
+        details: error instanceof Error ? error.message : String(error)
+      }, { status: 500 });
     }
-
-    // Load system messages from files for the response
-    const initialVisitPrompt = await import('@/app/config/initialVisitPrompt');
-    const followUpVisitPrompt = await import('@/app/config/followUpVisitPrompt');
-
-    // Return the updated settings
-    return NextResponse.json({
-      ...updatedSettings,
-      initialVisitPrompt: body.initialVisitPrompt || initialVisitPrompt.systemMessage.content,
-      followUpVisitPrompt: body.followUpVisitPrompt || followUpVisitPrompt.systemMessage.content,
-    });
   } catch (error) {
-    console.error('Settings update failed:', error);
+    debugLog('Error parsing request data:', error);
     return NextResponse.json({
-      error: 'Failed to update settings',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+      error: 'Invalid request data',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 400 });
   }
 } 
