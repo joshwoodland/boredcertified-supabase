@@ -447,17 +447,11 @@ export async function POST(request: NextRequest) {
       }, { status: 503 });
     }
 
-      if (!patient) {
-        return NextResponse.json({
-          error: 'Patient not found',
-          details: 'Invalid patient ID'
-        }, { status: 404 });
-      }
-    } else if (!patient && isSupabaseAvailable) {
-        // This case means Supabase is available, service role query ran, but failed for a reason other than not finding the user.
-        // Or if the logic above didn't set the patient variable correctly.
-         console.error('Supabase query failed unexpectedly or patient variable not set. Cannot proceed.');
-         return NextResponse.json({ error: 'Database query failed', details: 'Failed to retrieve patient information.' }, { status: 500 });
+    if (!patient && isSupabaseAvailable) {
+      // This case means Supabase is available, service role query ran, but failed for a reason other than not finding the user.
+      // Or if the logic above didn't set the patient variable correctly.
+      console.error('Supabase query failed unexpectedly or patient variable not set. Cannot proceed.');
+      return NextResponse.json({ error: 'Database query failed', details: 'Failed to retrieve patient information.' }, { status: 500 });
     }
 
     // If patient is still not found after checks/fallbacks, something is wrong.
@@ -507,13 +501,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Fall back to Prisma if Supabase is unavailable or query failed
+    // No fallback if Supabase is unavailable
     if (existingNotes === 0 && !isSupabaseAvailable) {
-      console.log('Falling back to Prisma to count existing notes');
-      const db = await connectWithFallback();
-      existingNotes = await db.note.count({
-        where: { patientId: normalizedPatientId },
-      });
+      console.log('Supabase is unavailable, cannot count existing notes');
+      // Keep existingNotes as 0
     }
 
     // Use the provided isInitialEvaluation parameter if available, otherwise fall back to checking for existing notes
@@ -549,19 +540,10 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Fall back to Prisma if Supabase is unavailable or query failed
+        // If no previous note found in Supabase, return an error
         if (!previousNote) {
-          console.log('Falling back to Prisma to get previous note');
-          const db = await connectWithFallback();
-          previousNote = await db.note.findFirst({
-            where: {
-              patientId: normalizedPatientId,
-              // Ensure we get a note from before the current request
-              createdAt: { lt: new Date() }
-            },
-            orderBy: { createdAt: 'desc' },
-            select: { content: true }
-          });
+          console.log('No previous note found and no fallback available');
+          previousNote = null;
         }
 
         if (previousNote && previousNote.content) {
@@ -609,13 +591,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Fall back to Prisma if Supabase is unavailable or query failed
+    // Use default settings if Supabase is unavailable
     if (!settings) {
-      console.log('Falling back to Prisma to get app settings');
-      const db = await connectWithFallback();
-      settings = await db.appSettings.findUnique({
-        where: { id: 'default' },
-      });
+      console.log('Supabase is unavailable, using default settings');
+      settings = {
+        id: 'default',
+        darkMode: true,
+        gptModel: 'gpt-4o',
+        initialVisitPrompt: '',
+        followUpVisitPrompt: '',
+        autoSave: false,
+        lowEchoCancellation: false,
+        updatedAt: new Date()
+      };
     }
 
     if (!settings) {
@@ -929,22 +917,13 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Fall back to Prisma if Supabase is unavailable or operation failed
+      // No fallback if Supabase is unavailable
       if (!note) {
-        console.log('Falling back to Prisma to create note');
-        const db = await connectWithFallback();
-        note = await db.note.create({
-          data: {
-            patientId: normalizedPatientId,
-            transcript, // Store original transcript without the previous note
-            audioFileUrl,
-            isInitialVisit,
-            content: JSON.stringify({
-              content: responseContent,
-              formattedContent
-            }),
-          },
-        });
+        console.error('Supabase is unavailable and no fallback is configured');
+        return NextResponse.json({
+          error: 'Database connection unavailable',
+          details: 'Please check your database connection settings.'
+        }, { status: 503 });
       }
 
       // Generate a summary focusing on medication changes
@@ -970,12 +949,9 @@ export async function POST(request: NextRequest) {
 
             if (error) {
               console.error('Error updating note summary in Supabase:', error);
-              // Fall back to Prisma
-              const db = await connectWithFallback();
-              await db.note.update({
-                where: { id: note.id },
-                data: { summary }
-              });
+              // No fallback available, but we can continue since the note was created
+              // The summary update is not critical
+              console.log('Could not update summary, but note was created successfully');
             }
           } else {
             console.log('Using Prisma to update note summary');
