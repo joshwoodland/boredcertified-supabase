@@ -446,9 +446,9 @@ export default function FollowUpModal({
 
     setIsRecording(false);
 
-    // Create a simple audio blob and store it in the ref
-    const blob = new Blob([], { type: 'audio/mp3' });
-    audioBlob.current = blob;
+    // Create a minimal empty audio blob - we don't need to store audio
+    const emptyBlob = new Blob([], { type: 'audio/wav' });
+    audioBlob.current = emptyBlob;
 
     // Set the editable transcript and enter edit mode
     setEditableTranscript(finalTranscript || transcript);

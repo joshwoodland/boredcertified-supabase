@@ -36,20 +36,20 @@ interface Patient {
 // Helper function to normalize patient IDs across the application
 function normalizePatientId(id: any): string {
   if (!id) return '';
-  
+
   // Convert to string and trim
   const strId = String(id).trim();
-  
+
   // Validate UUID format with regex
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  
+
   // Check if this is Sarah Bauman's ID, and normalize if needed
   const sarahBaumanId = 'e53c37eb-c698-4e36-bc23-d63b32968d46';
   if (strId === sarahBaumanId || strId.toLowerCase() === sarahBaumanId.toLowerCase()) {
     console.log(`Normalizing Sarah Bauman's ID: ${strId} -> ${sarahBaumanId}`);
     return sarahBaumanId;
   }
-  
+
   return uuidRegex.test(strId) ? strId : '';
 }
 
@@ -191,7 +191,7 @@ export default function Home() {
         console.error('Invalid patient ID format:', patientId);
         throw new Error('Invalid patient ID format');
       }
-      
+
       console.log('Fetching notes for normalized patient ID:', normalizedId);
       const response = await fetch(`/api/notes?patientId=${normalizedId}`);
       if (!response.ok) {
@@ -418,17 +418,17 @@ export default function Home() {
       stringified: JSON.stringify(selectedPatientId),
       length: selectedPatientId?.length
     });
-    
+
     // Normalize patient ID with strict UUID format checking
     const patientId = normalizePatientId(selectedPatientId);
-    
-    console.log('DEBUG - Normalized patientId:', { 
+
+    console.log('DEBUG - Normalized patientId:', {
       value: patientId,
       isValid: !!patientId,
       patientIdBytes: patientId?.split('').map(c => c.charCodeAt(0)),
       selectedPatientBytes: selectedPatientId ? String(selectedPatientId).split('').map(c => c.charCodeAt(0)) : null
     });
-    
+
     if (!patientId) {
       console.error('Missing patient ID when submitting transcript');
       setError('Please select a patient before generating a note');
@@ -439,7 +439,7 @@ export default function Home() {
       setError('Please enter a transcript');
       return;
     }
-    
+
     // Validate patient existence directly with Supabase before proceeding
     try {
       console.log('Validating patient ID with Supabase:', patientId);
@@ -448,13 +448,13 @@ export default function Home() {
         .select('id, name')
         .eq('id', patientId)
         .single();
-      
+
       if (patientError || !patientData) {
         console.error('Supabase validation error:', patientError || 'Patient not found');
         setError(`Patient validation failed: ${patientError?.message || 'Patient not found'}`);
         return;
       }
-      
+
       console.log('Patient validated successfully with Supabase:', patientData);
     } catch (validationError) {
       console.error('Error during Supabase patient validation:', validationError);
@@ -474,9 +474,9 @@ export default function Home() {
         transcript,
         isInitialEvaluation,
       };
-      
+
       console.log('DEBUG - Request body to be sent:', JSON.stringify(requestBody));
-      
+
       // Generate SOAP note
       console.log('Sending request to /api/notes with patientId:', patientId);
       const soapResponse = await fetch('/api/notes', {
@@ -494,7 +494,7 @@ export default function Home() {
         contentType: soapResponse.headers.get('content-type'),
         statusText: soapResponse.statusText
       });
-      
+
       const responseData = await soapResponse.json();
       console.log('SOAP API response data:', responseData);
 
@@ -551,32 +551,8 @@ export default function Home() {
       // Use the complete transcript without additional processing
       const fullTranscript = transcript;
 
-      // Upload audio file with JWood test audio file name
-      const formData = new FormData();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      formData.append('file', audioBlob, `JWood test audio file ${timestamp}.wav`);
-      formData.append('transcript', fullTranscript);
-
-      const uploadResponse = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal
-      });
-
-      const uploadData = await uploadResponse.json();
-
-      if (!uploadResponse.ok) {
-        const errorMessage = typeof uploadData === 'object' && uploadData !== null
-          ? uploadData.error || 'Failed to upload audio file'
-          : 'Failed to upload audio file';
-        throw new Error(errorMessage);
-      }
-
-      if (!uploadData || typeof uploadData !== 'object' || !uploadData.url) {
-        throw new Error('Invalid upload response format');
-      }
-
-      const { url: audioFileUrl } = uploadData;
+      // Audio file storage is disabled, use a placeholder URL
+      const audioFileUrl = null;
 
       // Generate SOAP note
       const soapResponse = await fetch('/api/notes', {
@@ -743,7 +719,7 @@ export default function Home() {
         <div className="grid md:grid-cols-12 gap-6 -mt-6">
           {/* Patient List - Using Supabase integration */}
           <div className="md:col-span-3">
-            <SupabasePatientList 
+            <SupabasePatientList
               selectedPatientId={selectedPatientId}
               onSelectPatient={setSelectedPatientId}
               onMoveToTrash={handleMoveToTrash}
@@ -775,7 +751,7 @@ export default function Home() {
                           setError('Please select a patient before pasting in transcript');
                           return;
                         }
-                        
+
                         // Check if there's at least one previous note
                         if (patientNotes.length === 0) {
                           console.log('Opening manual transcript modal for first visit with patientId:', selectedPatientId);

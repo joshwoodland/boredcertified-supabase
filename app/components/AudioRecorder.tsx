@@ -257,8 +257,7 @@ export default function AudioRecorder({
       setIsRecording(false);
 
       try {
-        // Create a simple placeholder audio blob
-        // This is needed because the component still expects a Blob to be passed to onRecordingComplete
+        // Create a minimal empty audio blob - we don't need to store audio
         const placeholder = new Blob([], { type: 'audio/wav' });
         audioBlobRef.current = placeholder;
 
