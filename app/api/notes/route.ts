@@ -888,8 +888,8 @@ export async function POST(request: NextRequest) {
           const noteId = crypto.randomUUID();
           const now = new Date().toISOString();
 
-          // Insert note into Supabase
-          const { data, error } = await supabase
+          // Insert note into Supabase using service role client to bypass RLS
+          const { data, error } = await serverSupabase
             .from('notes')
             .insert({
               id: noteId,
@@ -941,8 +941,8 @@ export async function POST(request: NextRequest) {
 
           // Update the note with the generated summary
           if (isSupabaseAvailable) {
-            console.log('Using Supabase to update note summary');
-            const { error } = await supabase
+            console.log('Using Supabase (Service Role) to update note summary');
+            const { error } = await serverSupabase
               .from('notes')
               .update({ summary, updated_at: new Date().toISOString() })
               .eq('id', note.id);
