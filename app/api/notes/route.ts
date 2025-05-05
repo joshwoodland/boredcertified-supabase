@@ -329,11 +329,93 @@ function convertMarkdownToStructured(markdown: string): any {
   };
 }
 
+// Helper function to ensure patient ID is properly formatted for Supabase
+function normalizePatientId(id: any): string {
+  if (!id) return '';
+  
+  // Convert to string and trim
+  const strId = String(id).trim();
+  
+  // Validate UUID format with regex
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  
+  // Return the normalized ID if it matches UUID format
+  return uuidRegex.test(strId) ? strId : '';
+}
+
+// Helper function to validate patient exists in Supabase
+async function validatePatientExists(patientId: string): Promise<boolean> {
+  if (!patientId) return false;
+  
+  try {
+    console.log('API validating patient ID with Supabase:', patientId);
+    const { data, error } = await supabase
+      .from('patients')
+      .select('id')
+      .eq('id', patientId)
+      .single();
+    
+    if (error || !data) {
+      console.error('API Supabase patient validation error:', error || 'Patient not found');
+      return false;
+    }
+    
+    console.log('API Patient validated successfully with Supabase:', data);
+    return true;
+  } catch (error) {
+    console.error('API Error during Supabase patient validation:', error);
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const json = await request.json();
+    // Log the raw request structure
+    const rawText = await request.text();
+    console.log('DEBUG - Raw request body:', rawText);
+    
+    // Parse the JSON manually to avoid errors
+    let json;
+    try {
+      json = JSON.parse(rawText);
+    } catch (parseError) {
+      console.error('DEBUG - Failed to parse request JSON:', parseError);
+      return NextResponse.json({
+        error: 'Invalid request format',
+        details: 'Could not parse request body as JSON'
+      }, { status: 400 });
+    }
+    
     const { patientId, transcript, audioFileUrl, useStructuredPrompt = false, isInitialEvaluation, patientName } = json;
 
+    // Log received patient ID information with more details
+    console.log('DEBUG - API received patientId:', {
+      value: patientId,
+      type: typeof patientId,
+      length: patientId?.length,
+      bytes: patientId ? Array.from(String(patientId)).map(c => c.charCodeAt(0)) : null
+    });
+
+    // Normalize and validate the patient ID
+    const normalizedPatientId = normalizePatientId(patientId);
+    if (!normalizedPatientId) {
+      console.error('Invalid patient ID format:', patientId);
+      return NextResponse.json({
+        error: 'Patient not found',
+        details: 'Invalid patient ID'
+      }, { status: 404 });
+    }
+    
+    // Validate patient exists in Supabase
+    const patientExists = await validatePatientExists(normalizedPatientId);
+    if (!patientExists) {
+      console.error('Patient not found in Supabase:', normalizedPatientId);
+      return NextResponse.json({
+        error: 'Patient not found',
+        details: 'Patient ID not found in database'
+      }, { status: 404 });
+    }
+    
     // Check if Supabase is available (inline implementation)
     let isSupabaseAvailable = false;
     try {
@@ -347,31 +429,42 @@ export async function POST(request: NextRequest) {
       console.error('Failed to connect to Supabase:', error);
     }
     
+    console.log('DEBUG - Supabase is available:', isSupabaseAvailable);
+    
     let patient;
     if (isSupabaseAvailable) {
-      console.log('Using Supabase to get patient with ID:', patientId, 'Type:', typeof patientId);
-      
-      // Validate the patientId format
-      if (!patientId) {
-        console.error('Patient ID is missing or undefined');
-        return NextResponse.json({
-          error: 'Patient not found',
-          details: 'Missing patient ID'
-        }, { status: 404 });
-      }
+      console.log('Using Supabase to get patient with ID:', normalizedPatientId, 'Type:', typeof normalizedPatientId);
       
       // Get patient from Supabase
+      console.log('Querying Supabase for patient with normalized ID:', normalizedPatientId);
       const { data, error } = await supabase
         .from('patients')
         .select('*')
-        .eq('id', patientId)
+        .eq('id', normalizedPatientId)
         .single();
+      
+      // Log the Supabase query result
+      console.log('DEBUG - Supabase query result:', {
+        hasData: !!data,
+        hasError: !!error,
+        errorCode: error?.code,
+        errorMessage: error?.message,
+        dataKeys: data ? Object.keys(data) : null
+      });
         
       if (error) {
-        console.error('Error fetching patient from Supabase:', error, 'Patient ID:', patientId);
-        // Fall back to Prisma if Supabase query fails
+        console.error('Error fetching patient from Supabase:', error, 'Patient ID:', normalizedPatientId);
+        // Don't fall back to Prisma yet - handle specific Supabase errors
+        if (error.code === 'PGRST116') {
+          // No rows returned - patient not found
+          return NextResponse.json({
+            error: 'Patient not found',
+            details: 'No patient found with the provided ID'
+          }, { status: 404 });
+        }
+        // Fall back to Prisma for other errors
       } else if (!data) {
-        console.error('Patient not found in Supabase with ID:', patientId);
+        console.error('Patient not found in Supabase with ID:', normalizedPatientId);
         return NextResponse.json({
           error: 'Patient not found',
           details: 'Invalid patient ID'
@@ -379,6 +472,7 @@ export async function POST(request: NextRequest) {
       } else {
         console.log('Patient found in Supabase:', data.name, 'ID:', data.id);
         patient = convertToPrismaFormat(data, 'patient');
+        console.log('DEBUG - Converted patient data:', patient);
       }
     }
     
@@ -387,7 +481,7 @@ export async function POST(request: NextRequest) {
       console.log('Falling back to Prisma to get patient');
       const db = await connectWithFallback();
       patient = await db.patient.findUnique({
-        where: { id: patientId },
+        where: { id: normalizedPatientId },
       });
 
       if (!patient) {
@@ -407,7 +501,7 @@ export async function POST(request: NextRequest) {
       hasAudioUrl: !!audioFileUrl 
     });
 
-    if (!patientId || !transcript) {
+    if (!normalizedPatientId || !transcript) {
       return NextResponse.json({ 
         error: 'Missing required fields',
         details: 'Both patientId and transcript are required'
@@ -429,7 +523,7 @@ export async function POST(request: NextRequest) {
       const { count, error } = await supabase
         .from('notes')
         .select('id', { count: 'exact', head: true })
-        .eq('patient_id', patientId);
+        .eq('patient_id', normalizedPatientId);
         
       if (error) {
         console.error('Error counting notes in Supabase:', error);
@@ -444,7 +538,7 @@ export async function POST(request: NextRequest) {
       console.log('Falling back to Prisma to count existing notes');
       const db = await connectWithFallback();
       existingNotes = await db.note.count({
-        where: { patientId },
+        where: { patientId: normalizedPatientId },
       });
     }
     
@@ -470,7 +564,7 @@ export async function POST(request: NextRequest) {
           const { data, error } = await supabase
             .from('notes')
             .select('content')
-            .eq('patient_id', patientId)
+            .eq('patient_id', normalizedPatientId)
             .order('created_at', { ascending: false })
             .limit(1);
             
@@ -488,7 +582,7 @@ export async function POST(request: NextRequest) {
           const db = await connectWithFallback();
           previousNote = await db.note.findFirst({
             where: { 
-              patientId,
+              patientId: normalizedPatientId,
               // Ensure we get a note from before the current request
               createdAt: { lt: new Date() }
             },
@@ -586,7 +680,7 @@ export async function POST(request: NextRequest) {
         if (!isInitialVisit) {
           const previousNote = await prisma.note.findFirst({
             where: { 
-              patientId,
+              patientId: normalizedPatientId,
               createdAt: { lt: new Date() }
             },
             orderBy: { createdAt: 'desc' },
@@ -838,7 +932,7 @@ export async function POST(request: NextRequest) {
             .from('notes')
             .insert({
               id: noteId,
-              patient_id: patientId,
+              patient_id: normalizedPatientId,
               transcript: transcript,
               content: JSON.stringify({ 
                 content: responseContent,
@@ -868,7 +962,7 @@ export async function POST(request: NextRequest) {
         const db = await connectWithFallback();
         note = await db.note.create({
           data: {
-            patientId,
+            patientId: normalizedPatientId,
             transcript, // Store original transcript without the previous note
             audioFileUrl,
             isInitialVisit,
@@ -948,10 +1042,26 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const patientId = searchParams.get('patientId')
+    const rawPatientId = searchParams.get('patientId')
+
+    // Normalize the patient ID
+    const patientId = normalizePatientId(rawPatientId);
 
     if (!patientId) {
-      return NextResponse.json({ error: 'Patient ID is required' }, { status: 400 })
+      console.error('Invalid patient ID in GET request:', rawPatientId);
+      return NextResponse.json({ error: 'Valid patient ID is required' }, { status: 400 })
+    }
+
+    console.log('GET notes for patient ID:', patientId);
+    
+    // Validate patient existence in Supabase
+    const patientExists = await validatePatientExists(patientId);
+    if (!patientExists) {
+      console.error('Patient not found in Supabase for GET request:', patientId);
+      return NextResponse.json({
+        error: 'Patient not found',
+        details: 'Patient ID not found in database'
+      }, { status: 404 });
     }
 
     // Check if Supabase is available (inline implementation)

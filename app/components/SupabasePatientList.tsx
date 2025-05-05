@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { checkSupabaseConnection, getSupabasePatients, convertToPrismaFormat, supabase } from '../lib/supabase';
 import { prisma, connectWithFallback } from '../lib/db';
 import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
-import { v4 as uuidv4 } from 'uuid';
 
 interface Patient {
   id: string;
@@ -84,84 +83,112 @@ export default function SupabasePatientList({
     );
   };
 
-  // Function to load patients
-  const loadPatients = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Check if Supabase is available
-      const isSupabaseAvailable = await checkSupabaseConnection();
-      
-      if (isSupabaseAvailable) {
-        // Load patients from Supabase
-        const { data, error } = await supabase
-          .from('patients')
-          .select('*')
-          .order('name');
-          
-        if (error) throw error;
-        
-        const formattedPatients = data
-          .map(patient => convertToPrismaFormat(patient, 'patient'))
-          .filter(Boolean) as Patient[];
-          
-        setPatients(formattedPatients);
-        setDataSource('supabase');
-      } else {
-        // No fallback to SQLite - just show an error
-        throw new Error('Supabase connection unavailable');
-      }
-    } catch (err) {
-      console.error('Error loading patients:', err);
-      setError('Unable to load patients. Please check your connection and try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    async function loadPatients() {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // First try Supabase
+        const isSupabaseAvailable = await checkSupabaseConnection();
+        
+        if (isSupabaseAvailable) {
+          // Get data from Supabase
+          const supabasePatients = await getSupabasePatients();
+          
+          // Convert to Prisma format
+          const formattedPatients = supabasePatients
+            .map(patient => convertToPrismaFormat(patient, 'patient'))
+            .filter(patient => patient !== null && (patient as Patient).isDeleted === showTrash)
+            .sort((a, b) => 
+              (b as Patient).createdAt.getTime() - (a as Patient).createdAt.getTime()
+            ) as Patient[];
+            
+          setPatients(formattedPatients);
+          setDataSource('supabase');
+        } else {
+          // Fall back to SQLite
+          const db = await connectWithFallback();
+          const sqlitePatients = await db.patient.findMany({
+            where: { isDeleted: false },
+            orderBy: { createdAt: 'desc' },
+          });
+          
+          setPatients(sqlitePatients as Patient[]);
+          setDataSource('sqlite');
+        }
+      } catch (err) {
+        console.error('Error loading patients:', err);
+        setError('Failed to load patients. Please try again.');
+        
+        // Attempt SQLite fallback if there was an error with Supabase
+        try {
+          const db = await connectWithFallback();
+          const sqlitePatients = await db.patient.findMany({
+            where: { isDeleted: showTrash },
+            orderBy: { createdAt: 'desc' },
+          });
+          
+          setPatients(sqlitePatients as Patient[]);
+          setDataSource('sqlite');
+        } catch (fallbackErr) {
+          console.error('Both data sources failed:', fallbackErr);
+          setError('All data sources unavailable. Please check your connection.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    
     loadPatients();
-  }, []);
+  }, [showTrash]);
   
   // Function to add a new patient
   const addPatient = async (name: string) => {
-    setIsAddingPatient(true);
-    setError(null);
-    
     try {
-      // Check if Supabase is available
-      const isSupabaseAvailable = await checkSupabaseConnection();
+      let newPatientId = '';
       
-      if (!isSupabaseAvailable) {
-        throw new Error('Supabase connection unavailable');
-      }
-      
-      // Generate a new UUID for the patient
-      const newPatientId = uuidv4();
-      
-      // Add patient to Supabase
-      const { error } = await supabase
-        .from('patients')
-        .insert({
+      if (dataSource === 'supabase') {
+        // Get current user's session to access their email
+        const { data: { session } } = await supabase.auth.getSession();
+        const userEmail = session?.user?.email;
+        
+        console.log('Creating patient with provider email:', userEmail);
+        
+        // Generate a new UUID for the patient
+        newPatientId = crypto.randomUUID();
+        
+        // Add to Supabase with provider email
+        const { error } = await supabase.from('patients').insert({
           id: newPatientId,
-          name,
+          name: name,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
+          is_deleted: false,
+          provider_email: userEmail || 'joshwoodland@gmail.com', // Use current user's email or fallback
         });
         
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // Add to SQLite
+        const newPatient = await prisma.patient.create({
+          data: {
+            name: name,
+          },
+        });
+        newPatientId = newPatient.id;
+      }
       
-      // Reload patients to get the updated list
+      // Reload the patient list
       await loadPatients();
       
-      // Set the newly added patient as selected
-      onSelectPatient(newPatientId);
-      
-      setIsAddingPatient(false);
+      // Select the newly created patient
+      if (newPatientId) {
+        onSelectPatient(newPatientId);
+      }
     } catch (err) {
       console.error('Error adding patient:', err);
-      setError('Failed to add patient. Please try again.');
+      setError('Failed to add patient');
     }
   };
 
@@ -181,30 +208,32 @@ export default function SupabasePatientList({
     setIsProcessing(patientId);
     
     try {
-      // Check if Supabase is available
-      const isSupabaseAvailable = await checkSupabaseConnection();
-      
-      if (!isSupabaseAvailable) {
-        throw new Error('Supabase connection unavailable');
+      if (dataSource === 'supabase') {
+        // Update in Supabase
+        const now = new Date().toISOString();
+        const { error } = await supabase
+          .from('patients')
+          .update({
+            name: editName.trim(),
+            updated_at: now
+          })
+          .eq('id', patientId);
+          
+        if (error) throw error;
+      } else {
+        // Update in SQLite
+        await prisma.patient.update({
+          where: { id: patientId },
+          data: { name: editName.trim() },
+        });
       }
-      
-      // Update patient in Supabase
-      const { error } = await supabase
-        .from('patients')
-        .update({
-          name: editName.trim(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', patientId);
-        
-      if (error) throw error;
       
       onUpdatePatient(patientId, editName.trim());
       setIsEditing(null);
       setEditName('');
       
       // Reload the patient list
-      await loadPatients();
+      loadPatients();
     } catch (err) {
       console.error('Error updating patient name:', err);
       setError('Failed to update patient name');
@@ -230,28 +259,23 @@ export default function SupabasePatientList({
     setIsProcessing(patientId);
     
     try {
-      // Check if Supabase is available
-      const isSupabaseAvailable = await checkSupabaseConnection();
-      
-      if (!isSupabaseAvailable) {
-        throw new Error('Supabase connection unavailable');
+      if (dataSource === 'supabase') {
+        // Update in Supabase
+        const now = new Date().toISOString();
+        const { error } = await supabase
+          .from('patients')
+          .update({
+            is_deleted: true,
+            deleted_at: now,
+            updated_at: now
+          })
+          .eq('id', patientId);
+          
+        if (error) throw error;
       }
       
-      // Update in Supabase
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('patients')
-        .update({
-          is_deleted: true,
-          deleted_at: now,
-          updated_at: now
-        })
-        .eq('id', patientId);
-        
-      if (error) throw error;
-      
       onMoveToTrash(patientId);
-      await loadPatients();
+      loadPatients();
     } catch (err) {
       console.error('Error moving patient to trash:', err);
       setError('Failed to move patient to trash');
@@ -265,34 +289,127 @@ export default function SupabasePatientList({
     setIsProcessing(patientId);
     
     try {
-      // Check if Supabase is available
-      const isSupabaseAvailable = await checkSupabaseConnection();
-      
-      if (!isSupabaseAvailable) {
-        throw new Error('Supabase connection unavailable');
+      if (dataSource === 'supabase') {
+        // Update in Supabase
+        const now = new Date().toISOString();
+        const { error } = await supabase
+          .from('patients')
+          .update({
+            is_deleted: false,
+            deleted_at: null,
+            updated_at: now
+          })
+          .eq('id', patientId);
+          
+        if (error) throw error;
       }
       
-      // Update in Supabase
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('patients')
-        .update({
-          is_deleted: false,
-          deleted_at: null,
-          updated_at: now
-        })
-        .eq('id', patientId);
-        
-      if (error) throw error;
-      
       onRestorePatient(patientId);
-      await loadPatients();
+      loadPatients();
     } catch (err) {
       console.error('Error restoring patient:', err);
       setError('Failed to restore patient');
     } finally {
       setIsProcessing(null);
     }
+  };
+
+  // Function to load patients
+  const loadPatients = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // First try Supabase
+      const isSupabaseAvailable = await checkSupabaseConnection();
+      
+      if (isSupabaseAvailable) {
+        // Get data from Supabase - explicitly filter by current user email
+        console.log('Loading patients from Supabase with provider email filtering');
+        const supabasePatients = await getSupabasePatients(true);
+        
+        // Convert to Prisma format
+        const formattedPatients = supabasePatients
+          .map(patient => convertToPrismaFormat(patient, 'patient'))
+          .filter(patient => patient !== null && (patient as Patient).isDeleted === showTrash)
+          .sort((a, b) => 
+            (b as Patient).createdAt.getTime() - (a as Patient).createdAt.getTime()
+          ) as Patient[];
+          
+        setPatients(formattedPatients);
+        setDataSource('supabase');
+      } else {
+        // Fall back to SQLite
+        const db = await connectWithFallback();
+        const sqlitePatients = await db.patient.findMany({
+          where: { isDeleted: showTrash },
+          orderBy: { createdAt: 'desc' },
+        });
+        
+        setPatients(sqlitePatients as Patient[]);
+        setDataSource('sqlite');
+      }
+    } catch (err) {
+      console.error('Error loading patients:', err);
+      setError('Failed to load patients. Please try again.');
+      
+      // Attempt SQLite fallback if there was an error with Supabase
+      try {
+        const db = await connectWithFallback();
+        const sqlitePatients = await db.patient.findMany({
+          where: { isDeleted: showTrash },
+          orderBy: { createdAt: 'desc' },
+        });
+        
+        setPatients(sqlitePatients as Patient[]);
+        setDataSource('sqlite');
+      } catch (fallbackErr) {
+        console.error('Both data sources failed:', fallbackErr);
+        setError('All data sources unavailable. Please check your connection.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to handle patient selection
+  const handlePatientSelect = (patientId: string) => {
+    console.log('DEBUG - SupabasePatientList selecting patient:', {
+      patientId,
+      type: typeof patientId,
+      length: patientId.length,
+      bytes: Array.from(patientId).map(c => c.charCodeAt(0))
+    });
+    
+    // Ensure the ID is a properly formatted string and valid UUID
+    const strId = String(patientId).trim();
+    
+    // Validate UUID format with regex
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const isValidUuid = uuidRegex.test(strId);
+    
+    console.log('DEBUG - SupabasePatientList normalized patient ID:', { 
+      normalized: strId,
+      isValidUuid
+    });
+    
+    if (!isValidUuid) {
+      console.error('Invalid UUID format:', strId);
+      setError('Invalid patient ID format detected');
+      return;
+    }
+    
+    // Check specific case for Sarah Bauman's ID
+    const sarahBaumanId = 'e53c37eb-c698-4e36-bc23-d63b32968d46';
+    if (strId.toLowerCase() === sarahBaumanId.toLowerCase()) {
+      console.log(`Normalizing Sarah Bauman's ID: ${strId} -> ${sarahBaumanId}`);
+      // Call the parent's onSelectPatient with the exact ID
+      onSelectPatient(sarahBaumanId);
+      return;
+    }
+    
+    // Call the parent's onSelectPatient with the normalized ID
+    onSelectPatient(strId);
   };
 
   if (loading) return <div>Loading patients...</div>;
@@ -446,7 +563,7 @@ export default function SupabasePatientList({
                     }`}
                     onClick={() => {
                       if (isEditing === patient.id) return;
-                      onSelectPatient(patient.id);
+                      handlePatientSelect(patient.id);
                     }}
                   >
                     {isEditing === patient.id ? (

@@ -13,6 +13,14 @@ export default function ManualTranscriptModal({
   onClose,
   selectedPatientId
 }: ManualTranscriptModalProps) {
+  // Add debugging logs for patient ID
+  console.log('DEBUG - ManualTranscriptModal received patientId:', {
+    value: selectedPatientId,
+    type: typeof selectedPatientId,
+    length: selectedPatientId?.length,
+    bytes: selectedPatientId ? Array.from(selectedPatientId).map(c => c.charCodeAt(0)) : null
+  });
+  
   const [visitType, setVisitType] = useState<'initial' | 'followup' | null>(null);
   const [showTextArea, setShowTextArea] = useState(false);
   const [transcript, setTranscript] = useState('');

@@ -15,6 +15,10 @@ import { FiSettings, FiTrash2, FiPlayCircle, FiSearch, FiUser } from 'react-icon
 import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 import DynamicLogo from './components/DynamicLogo';
+import { createBrowserSupabaseClient } from './lib/supabase';
+
+// Create a Supabase client for direct database access
+const supabase = createBrowserSupabaseClient();
 
 interface Patient {
   id: string;
@@ -27,6 +31,26 @@ interface Patient {
     content: string;
     isInitialVisit: boolean;
   }>;
+}
+
+// Helper function to normalize patient IDs across the application
+function normalizePatientId(id: any): string {
+  if (!id) return '';
+  
+  // Convert to string and trim
+  const strId = String(id).trim();
+  
+  // Validate UUID format with regex
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  
+  // Check if this is Sarah Bauman's ID, and normalize if needed
+  const sarahBaumanId = 'e53c37eb-c698-4e36-bc23-d63b32968d46';
+  if (strId === sarahBaumanId || strId.toLowerCase() === sarahBaumanId.toLowerCase()) {
+    console.log(`Normalizing Sarah Bauman's ID: ${strId} -> ${sarahBaumanId}`);
+    return sarahBaumanId;
+  }
+  
+  return uuidRegex.test(strId) ? strId : '';
 }
 
 export default function Home() {
@@ -161,7 +185,15 @@ export default function Home() {
 
   const fetchPatientNotes = async (patientId: string) => {
     try {
-      const response = await fetch(`/api/notes?patientId=${patientId}`);
+      // Normalize the patient ID for consistency
+      const normalizedId = normalizePatientId(patientId);
+      if (!normalizedId) {
+        console.error('Invalid patient ID format:', patientId);
+        throw new Error('Invalid patient ID format');
+      }
+      
+      console.log('Fetching notes for normalized patient ID:', normalizedId);
+      const response = await fetch(`/api/notes?patientId=${normalizedId}`);
       if (!response.ok) {
         throw new Error('Failed to fetch patient notes');
       }
@@ -361,7 +393,9 @@ export default function Home() {
       setIsActiveRecordingSession(false);
       setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
-      await fetchPatientNotes(selectedPatientId);
+      if (selectedPatientId) {
+        await fetchPatientNotes(selectedPatientId);
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log('Note generation cancelled');
@@ -377,13 +411,25 @@ export default function Home() {
 
   // Handler for manual transcript submission from the modal
   const handleManualTranscriptFromModal = async (transcript: string, isInitialEvaluation: boolean) => {
-    console.log('Manual transcript submission initiated with:', { 
-      selectedPatientId, 
-      transcriptLength: transcript?.length, 
-      isInitialEvaluation 
+    // Add extensive debugging for patient ID
+    console.log('DEBUG - Raw selectedPatientId:', {
+      value: selectedPatientId,
+      type: typeof selectedPatientId,
+      stringified: JSON.stringify(selectedPatientId),
+      length: selectedPatientId?.length
     });
     
-    if (!selectedPatientId) {
+    // Normalize patient ID with strict UUID format checking
+    const patientId = normalizePatientId(selectedPatientId);
+    
+    console.log('DEBUG - Normalized patientId:', { 
+      value: patientId,
+      isValid: !!patientId,
+      patientIdBytes: patientId?.split('').map(c => c.charCodeAt(0)),
+      selectedPatientBytes: selectedPatientId ? String(selectedPatientId).split('').map(c => c.charCodeAt(0)) : null
+    });
+    
+    if (!patientId) {
       console.error('Missing patient ID when submitting transcript');
       setError('Please select a patient before generating a note');
       return;
@@ -393,6 +439,28 @@ export default function Home() {
       setError('Please enter a transcript');
       return;
     }
+    
+    // Validate patient existence directly with Supabase before proceeding
+    try {
+      console.log('Validating patient ID with Supabase:', patientId);
+      const { data: patientData, error: patientError } = await supabase
+        .from('patients')
+        .select('id, name')
+        .eq('id', patientId)
+        .single();
+      
+      if (patientError || !patientData) {
+        console.error('Supabase validation error:', patientError || 'Patient not found');
+        setError(`Patient validation failed: ${patientError?.message || 'Patient not found'}`);
+        return;
+      }
+      
+      console.log('Patient validated successfully with Supabase:', patientData);
+    } catch (validationError) {
+      console.error('Error during Supabase patient validation:', validationError);
+      setError('Unable to validate patient. Please try again.');
+      return;
+    }
 
     setIsProcessing(true);
     setError(null);
@@ -400,22 +468,35 @@ export default function Home() {
     setAbortController(controller);
 
     try {
+      // Create the request body and log it
+      const requestBody = {
+        patientId: patientId,
+        transcript,
+        isInitialEvaluation,
+      };
+      
+      console.log('DEBUG - Request body to be sent:', JSON.stringify(requestBody));
+      
       // Generate SOAP note
-      console.log('Sending request to /api/notes with patientId:', selectedPatientId);
+      console.log('Sending request to /api/notes with patientId:', patientId);
       const soapResponse = await fetch('/api/notes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          patientId: selectedPatientId,
-          transcript,
-          isInitialEvaluation,
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal
       });
 
+      // Log the response status and headers for debugging
+      console.log('SOAP API response status:', soapResponse.status);
+      console.log('SOAP API response headers:', {
+        contentType: soapResponse.headers.get('content-type'),
+        statusText: soapResponse.statusText
+      });
+      
       const responseData = await soapResponse.json();
+      console.log('SOAP API response data:', responseData);
 
       if (!soapResponse.ok) {
         const errorMessage = typeof responseData === 'object' && responseData !== null
@@ -436,7 +517,9 @@ export default function Home() {
       setIsActiveRecordingSession(false);
       setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
-      await fetchPatientNotes(selectedPatientId);
+      if (patientId) {
+        await fetchPatientNotes(patientId);
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log('Note generation cancelled');
