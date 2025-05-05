@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma, connectWithFallback } from '@/app/lib/db'
+import { prisma } from '@/app/lib/db'
 import { getSupabaseNotes, convertToPrismaFormat, supabase, serverSupabase, PrismaNote, SupabaseNote } from '@/app/lib/supabase'
 import OpenAI from 'openai'
 import systemMessages from '@/app/config/systemMessages'
@@ -32,10 +32,10 @@ function truncateText(text: string, maxLength: number = 4000): string {
   // Rough approximation: 1 token ≈ 4 characters
   const maxChars = maxLength * 4;
   if (text.length <= maxChars) return text;
-  
+
   // Split text into sentences
   const sentences = text.split(/(?<=[.!?])\s+/);
-  
+
   // Keywords to prioritize (common medical terms and indicators)
   const importantKeywords = [
     'pain', 'symptoms', 'diagnosis', 'treatment', 'medication',
@@ -50,25 +50,25 @@ function truncateText(text: string, maxLength: number = 4000): string {
   const scoredSentences = sentences.map(sentence => {
     let score = 0;
     const lowerSentence = sentence.toLowerCase();
-    
+
     // Higher score for sentences with medical keywords
     importantKeywords.forEach(keyword => {
       if (lowerSentence.includes(keyword.toLowerCase())) {
         score += 2;
       }
     });
-    
+
     // Higher score for sentences that seem to be measurements or values
     if (/\d+/.test(sentence)) score += 1;
-    
+
     // Higher score for sentences that seem to be direct quotes or complaints
-    if (lowerSentence.includes('patient') || 
-        lowerSentence.includes('reports') || 
+    if (lowerSentence.includes('patient') ||
+        lowerSentence.includes('reports') ||
         lowerSentence.includes('states') ||
         lowerSentence.includes('complains')) {
       score += 2;
     }
-    
+
     return { sentence, score };
   });
 
@@ -82,11 +82,11 @@ function truncateText(text: string, maxLength: number = 4000): string {
   // Build the truncated text from highest scoring sentences
   let result = firstSentence + ' ';
   let currentLength = firstSentence.length;
-  
+
   // Add highest scoring sentences until we approach the limit
   for (const { sentence } of scoredSentences) {
     if (sentence === firstSentence || sentence === lastSentence) continue;
-    
+
     if (currentLength + sentence.length + 1 <= maxChars - lastSentence.length - 50) {
       result += sentence + ' ';
       currentLength += sentence.length + 1;
@@ -100,8 +100,8 @@ function truncateText(text: string, maxLength: number = 4000): string {
   if (result.length > maxChars) {
     const startLength = Math.floor(maxChars * 0.8);
     const endLength = maxChars - startLength - 20;
-    result = result.slice(0, startLength) + 
-             '\n...[some content omitted for length]...\n' + 
+    result = result.slice(0, startLength) +
+             '\n...[some content omitted for length]...\n' +
              result.slice(-endLength);
   }
 
@@ -117,22 +117,22 @@ function extractContentFromResponse(responseContent: string): NoteContent {
   try {
     // First try parsing as markdown/text
     const sections: NoteContent = {};
-    
+
     // Split content into sections by headers
     const sectionRegex = /(?:###|##|#)\s*([^#\n]+)([^#]*)/g;
     let match;
-    
+
     while ((match = sectionRegex.exec(responseContent)) !== null) {
       const [, title, content] = match;
       const sectionTitle = title.trim().toLowerCase();
       sections[sectionTitle] = content.trim();
     }
-    
+
     // If no sections were found, use the entire text as content
     if (Object.keys(sections).length === 0) {
       sections.content = responseContent.trim();
     }
-    
+
     return sections;
   } catch (error) {
     // If parsing as text fails for some reason, try JSON as fallback
@@ -160,22 +160,22 @@ function splitTranscriptIntoChunks(transcript: string, maxChunkSize: number = 16
     console.log('Transcript fits in single chunk:', { length: transcript?.length });
     return [transcript];
   }
-  
+
   const chunks: string[] = [];
   const chunkMetadata: Array<{ startIndex: number; endIndex: number }> = [];
   const overlap = 500; // Reduced overlap for better stability
   let startIndex = 0;
-  
-  console.log('Starting transcript chunking:', { 
+
+  console.log('Starting transcript chunking:', {
     totalLength: transcript.length,
     maxChunkSize,
-    overlap 
+    overlap
   });
-  
+
   while (startIndex < transcript.length) {
     // Calculate the end index, ensuring we don't exceed the string length
     const endIndex = Math.min(startIndex + maxChunkSize, transcript.length);
-    
+
     // Find a good breakpoint (end of sentence) if possible
     let actualEndIndex = endIndex;
     if (endIndex < transcript.length) {
@@ -185,18 +185,18 @@ function splitTranscriptIntoChunks(transcript: string, maxChunkSize: number = 16
         actualEndIndex = Math.max(endIndex - 100, startIndex) + lastPeriod + 1;
       }
     }
-    
+
     // Ensure we're making progress
     if (actualEndIndex <= startIndex) {
       actualEndIndex = endIndex;
     }
-    
+
     // Extract the chunk and add it to our array
     const chunk = transcript.slice(startIndex, actualEndIndex).trim();
     if (chunk) {
       chunks.push(chunk);
       chunkMetadata.push({ startIndex, endIndex: actualEndIndex });
-      console.log('Added chunk:', { 
+      console.log('Added chunk:', {
         chunkIndex: chunks.length - 1,
         chunkLength: chunk.length,
         startIndex,
@@ -204,26 +204,26 @@ function splitTranscriptIntoChunks(transcript: string, maxChunkSize: number = 16
         progress: `${Math.round((actualEndIndex / transcript.length) * 100)}%`
       });
     }
-    
+
     // Move the start index forward, ensuring we make progress
     startIndex = actualEndIndex - overlap;
     const lastChunkMeta = chunkMetadata[chunkMetadata.length - 1];
     if (lastChunkMeta && startIndex <= lastChunkMeta.startIndex) {
       startIndex = actualEndIndex; // Skip overlap if we're not making progress
     }
-    
+
     // Safety check to prevent infinite loops
     if (startIndex >= transcript.length) {
       console.log('Reached end of transcript');
       break;
     }
   }
-  
-  console.log('Chunking complete:', { 
+
+  console.log('Chunking complete:', {
     numberOfChunks: chunks.length,
     totalChunkedLength: chunks.reduce((sum, chunk) => sum + chunk.length, 0)
   });
-  
+
   return chunks;
 }
 
@@ -247,7 +247,7 @@ function supportsJsonFormat(model: string): boolean {
 function validateNoteStructure(content: any): boolean {
   try {
     // Basic structure check - just ensure we have a string or object with content
-    return (typeof content === 'string' && content.length > 0) || 
+    return (typeof content === 'string' && content.length > 0) ||
            (typeof content === 'object' && content !== null);
   } catch (error) {
     return false;
@@ -306,7 +306,7 @@ async function createFinalSynthesisPrompt(
 ): Promise<ChatCompletionCreateParamsNonStreaming> {
   const rawSystemMessage = isInitialVisit ? systemMessages.initialVisit : systemMessages.followUpVisit;
   const formattedSystemMessage = formatSystemMessage(rawSystemMessage);
-  
+
   const messages: ChatCompletionMessageParam[] = [
     {
       role: 'system',
@@ -327,7 +327,7 @@ async function createFinalSynthesisPrompt(
 // Helper function to convert markdown sections to structured format
 function convertMarkdownToStructured(markdown: string): any {
   // Return both the original markdown content and formatted HTML version
-  return { 
+  return {
     content: markdown,
     formattedContent: formatSoapNote(markdown)
   };
@@ -336,13 +336,13 @@ function convertMarkdownToStructured(markdown: string): any {
 // Helper function to ensure patient ID is properly formatted for Supabase
 function normalizePatientId(id: any): string {
   if (!id) return '';
-  
+
   // Convert to string and trim
   const strId = String(id).trim();
-  
+
   // Validate UUID format with regex
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  
+
   // Return the normalized ID if it matches UUID format
   return uuidRegex.test(strId) ? strId : '';
 }
@@ -352,7 +352,7 @@ export async function POST(request: NextRequest) {
     // Log the raw request structure
     const rawText = await request.text();
     console.log('DEBUG - Raw request body:', rawText);
-    
+
     // Parse the JSON manually to avoid errors
     let json;
     try {
@@ -364,7 +364,7 @@ export async function POST(request: NextRequest) {
         details: 'Could not parse request body as JSON'
       }, { status: 400 });
     }
-    
+
     const { patientId, transcript, audioFileUrl, useStructuredPrompt = false, isInitialEvaluation, patientName } = json;
 
     // Log received patient ID information with more details
@@ -384,13 +384,13 @@ export async function POST(request: NextRequest) {
         details: 'Invalid patient ID'
       }, { status: 404 });
     }
-    
+
     // Check if Supabase is available (inline implementation)
     let isSupabaseAvailable = false;
     try {
       // Check connection using the public client
       const { error } = await supabase.from('patients').select('id', { count: 'exact', head: true }).limit(1);
-      if (!error || error.code === '42P01') { 
+      if (!error || error.code === '42P01') {
         isSupabaseAvailable = true;
       } else {
         console.error('Supabase connection error (checking availability):', error);
@@ -398,13 +398,13 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('Failed to connect to Supabase (checking availability):', error);
     }
-    
+
     console.log('DEBUG - Supabase is available:', isSupabaseAvailable);
-    
+
     let patient;
     if (isSupabaseAvailable) {
       console.log('Using Supabase to get patient with ID:', normalizedPatientId);
-      
+
       // Get patient from Supabase using the SERVICE ROLE client to bypass RLS for this check
       console.log('Querying Supabase (Service Role) for patient with normalized ID:', normalizedPatientId);
       const { data, error } = await serverSupabase // Use serverSupabase here!
@@ -412,14 +412,14 @@ export async function POST(request: NextRequest) {
         .select('*')
         .eq('id', normalizedPatientId)
         .maybeSingle(); // Use maybeSingle() to handle 0 rows gracefully without error
-      
+
       console.log('DEBUG - Supabase (Service Role) query result:', {
         hasData: !!data,
         hasError: !!error,
         errorCode: error?.code,
         errorMessage: error?.message,
       });
-        
+
       if (error) {
         // Log the error but proceed to Prisma fallback for non-404 errors
         console.error('Error fetching patient from Supabase (Service Role):', error, 'Patient ID:', normalizedPatientId);
@@ -437,14 +437,15 @@ export async function POST(request: NextRequest) {
         }, { status: 404 });
       }
     }
-    
-    // Fall back to Prisma ONLY if Supabase is unavailable OR if the service role query failed unexpectedly (not just not found)
+
+    // If Supabase is unavailable, we can't proceed
     if (!patient && !isSupabaseAvailable) { // Adjusted fallback condition
-      console.log('Falling back to Prisma to get patient');
-      const db = await connectWithFallback();
-      patient = await db.patient.findUnique({
-        where: { id: normalizedPatientId },
-      });
+      console.error('Supabase is unavailable and patient data is required');
+      return NextResponse.json({
+        error: 'Database connection unavailable',
+        details: 'Please check your database connection settings.'
+      }, { status: 503 });
+    }
 
       if (!patient) {
         return NextResponse.json({
@@ -458,7 +459,7 @@ export async function POST(request: NextRequest) {
          console.error('Supabase query failed unexpectedly or patient variable not set. Cannot proceed.');
          return NextResponse.json({ error: 'Database query failed', details: 'Failed to retrieve patient information.' }, { status: 500 });
     }
-    
+
     // If patient is still not found after checks/fallbacks, something is wrong.
     if (!patient) {
         console.error('Patient could not be determined after all checks.');
@@ -468,14 +469,14 @@ export async function POST(request: NextRequest) {
     // Use provided patient name if available, otherwise fallback to the name from the database
     const effectivePatientName = patientName || patient.name;
 
-    console.log('Processing note request:', { 
-      patientId, 
+    console.log('Processing note request:', {
+      patientId,
       transcriptLength: transcript?.length,
-      hasAudioUrl: !!audioFileUrl 
+      hasAudioUrl: !!audioFileUrl
     });
 
     if (!normalizedPatientId || !transcript) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: 'Missing required fields',
         details: 'Both patientId and transcript are required'
       }, { status: 400 });
@@ -490,14 +491,14 @@ export async function POST(request: NextRequest) {
 
     // Check if this is the first visit
     let existingNotes = 0;
-    
+
     if (isSupabaseAvailable) {
       console.log('Using Supabase to count existing notes');
       const { count, error } = await supabase
         .from('notes')
         .select('id', { count: 'exact', head: true })
         .eq('patient_id', normalizedPatientId);
-        
+
       if (error) {
         console.error('Error counting notes in Supabase:', error);
         // Fall back to Prisma if Supabase query fails
@@ -505,7 +506,7 @@ export async function POST(request: NextRequest) {
         existingNotes = count || 0;
       }
     }
-    
+
     // Fall back to Prisma if Supabase is unavailable or query failed
     if (existingNotes === 0 && !isSupabaseAvailable) {
       console.log('Falling back to Prisma to count existing notes');
@@ -514,15 +515,15 @@ export async function POST(request: NextRequest) {
         where: { patientId: normalizedPatientId },
       });
     }
-    
+
     // Use the provided isInitialEvaluation parameter if available, otherwise fall back to checking for existing notes
     const isInitialVisit = isInitialEvaluation !== undefined ? isInitialEvaluation : existingNotes === 0;
-    
-    console.log('Visit type determination:', { 
+
+    console.log('Visit type determination:', {
       isInitialEvaluationProvided: isInitialEvaluation !== undefined,
-      isInitialEvaluation, 
-      existingNotes, 
-      finalDecision: isInitialVisit ? 'Initial Visit' : 'Follow-up Visit' 
+      isInitialEvaluation,
+      existingNotes,
+      finalDecision: isInitialVisit ? 'Initial Visit' : 'Follow-up Visit'
     });
 
     // Get the most recent previous note if this is not the initial visit
@@ -530,7 +531,7 @@ export async function POST(request: NextRequest) {
     if (!isInitialVisit) {
       try {
         let previousNote = null;
-        
+
         if (isSupabaseAvailable) {
           console.log('Using Supabase (Anon Key) to get previous note');
           const { data: noteData, error: noteError } = await supabase // Using anon client here
@@ -539,7 +540,7 @@ export async function POST(request: NextRequest) {
              .eq('patient_id', normalizedPatientId)
              .order('created_at', { ascending: false })
              .limit(1);
-            
+
           if (noteError) {
             console.error('Error fetching previous note from Supabase (Anon Key):', noteError);
             // Fall back to Prisma if Supabase query fails
@@ -547,13 +548,13 @@ export async function POST(request: NextRequest) {
             previousNote = { content: noteData[0].content };
           }
         }
-        
+
         // Fall back to Prisma if Supabase is unavailable or query failed
         if (!previousNote) {
           console.log('Falling back to Prisma to get previous note');
           const db = await connectWithFallback();
           previousNote = await db.note.findFirst({
-            where: { 
+            where: {
               patientId: normalizedPatientId,
               // Ensure we get a note from before the current request
               createdAt: { lt: new Date() }
@@ -562,21 +563,21 @@ export async function POST(request: NextRequest) {
             select: { content: true }
           });
         }
-        
+
         if (previousNote && previousNote.content) {
           let previousContent = '';
           try {
             // Try to parse the content, which might be in JSON format
             const parsedContent = JSON.parse(previousNote.content);
             // If it has a content property, use that, otherwise use the whole parsed object
-            previousContent = typeof parsedContent.content === 'string' 
-              ? parsedContent.content 
+            previousContent = typeof parsedContent.content === 'string'
+              ? parsedContent.content
               : JSON.stringify(parsedContent.content) || previousNote.content;
           } catch (e) {
             // If parsing fails, use the content as is
             previousContent = previousNote.content;
           }
-          
+
           // Add the previous note to the transcript with the specified format
           enhancedTranscript = transcript + `\n\n ##( Here is the note from the patient's previous visit to be used for greater context: ${previousContent} )`;
           console.log('Added previous note to transcript');
@@ -591,7 +592,7 @@ export async function POST(request: NextRequest) {
 
     // Get current settings for the model name
     let settings = null;
-    
+
     if (isSupabaseAvailable) {
       console.log('Using Supabase to get app settings');
       const { data, error } = await supabase
@@ -599,7 +600,7 @@ export async function POST(request: NextRequest) {
         .select('*')
         .eq('id', 'default')
         .single();
-        
+
       if (error) {
         console.error('Error fetching settings from Supabase:', error);
         // Fall back to Prisma if Supabase query fails
@@ -607,7 +608,7 @@ export async function POST(request: NextRequest) {
         settings = convertToPrismaFormat(data, 'settings');
       }
     }
-    
+
     // Fall back to Prisma if Supabase is unavailable or query failed
     if (!settings) {
       console.log('Falling back to Prisma to get app settings');
@@ -627,7 +628,7 @@ export async function POST(request: NextRequest) {
 
     // Make sure we have a valid model
     const model = settings.gptModel || 'gpt-4o'; // Use a default if undefined
-    
+
     if (!isValidModel(model)) {
       console.error('Invalid model specified:', model);
       return NextResponse.json({
@@ -640,32 +641,32 @@ export async function POST(request: NextRequest) {
 
     try {
       let responseContent;
-      
+
       // Check whether to use structured prompt approach or legacy chunking approach
       if (useStructuredPrompt) {
         console.log('======= USING NEW STRUCTURED PROMPT APPROACH =======');
         console.log('Message format: Previous note and transcript as separate messages');
         console.log('Temperature: 0.3 (more deterministic output)');
-        
+
         // Process and get previous note content if this isn't an initial visit
         let previousSoapNote = undefined;
         if (!isInitialVisit) {
           const previousNote = await prisma.note.findFirst({
-            where: { 
+            where: {
               patientId: normalizedPatientId,
               createdAt: { lt: new Date() }
             },
             orderBy: { createdAt: 'desc' },
             select: { content: true }
           });
-          
+
           if (previousNote && previousNote.content) {
             try {
               // Try to parse the content, which might be in JSON format
               const parsedContent = JSON.parse(previousNote.content);
               // If it has a content property, use that
-              previousSoapNote = typeof parsedContent.content === 'string' 
-                ? parsedContent.content 
+              previousSoapNote = typeof parsedContent.content === 'string'
+                ? parsedContent.content
                 : JSON.stringify(parsedContent.content) || previousNote.content;
             } catch (e) {
               // If parsing fails, use the content as is
@@ -673,35 +674,35 @@ export async function POST(request: NextRequest) {
             }
           }
         }
-        
+
         // Get the appropriate template
-        const rawSystemMessage = isInitialVisit 
-          ? systemMessages.initialVisit 
+        const rawSystemMessage = isInitialVisit
+          ? systemMessages.initialVisit
           : systemMessages.followUpVisit;
-          
+
         // Check if transcript exceeds token limits
         const tokenEstimate = estimateTokenCount(transcript);
         const isLongTranscript = tokenEstimate > 3000;
-        
+
         if (isLongTranscript) {
           console.log(`Long transcript detected (est. ${tokenEstimate} tokens), using chunking strategy`);
-          
+
           // Fall back to chunking for very long transcripts
           const maxChunkSize = transcript.length > 100000 ? 32000 : 16000;
           const chunks = splitTranscriptIntoChunks(transcript, maxChunkSize);
-          
+
           if (chunks.length === 0) {
             throw new Error('Failed to split transcript into chunks');
           }
 
           console.log(`Processing transcript in ${chunks.length} chunks`);
-          
+
           // Process chunks as before
           const chunkSummaries = await Promise.all(chunks.map(async (chunk, index) => {
             let attempts = 0;
             const maxAttempts = 3;
             let summary = '';
-            
+
             while (attempts < maxAttempts) {
               try {
                 const completion = await openai.chat.completions.create({
@@ -718,7 +719,7 @@ export async function POST(request: NextRequest) {
                 if (!summary) {
                   throw new Error('Empty response from OpenAI API');
                 }
-                
+
                 console.log(`Successfully processed chunk ${index + 1}/${chunks.length}`);
                 return summary;
               } catch (error) {
@@ -732,12 +733,12 @@ export async function POST(request: NextRequest) {
             }
             return summary;
           }));
-          
+
           // Filter out any undefined values
           const validSummaries = chunkSummaries.filter((summary): summary is string => !!summary);
-          
+
           console.log(`Generated ${validSummaries.length} valid chunk summaries`);
-          
+
           // Create structured messages with the chunk summaries as the transcript
           const finalContent = validSummaries.join("\n");
           const structuredMessages = buildOpenAIMessages({
@@ -746,11 +747,11 @@ export async function POST(request: NextRequest) {
             soapTemplate: rawSystemMessage,
             patientName: effectivePatientName
           });
-          
+
           // Make the final API call with structured messages
           let attempts = 0;
           const maxAttempts = 3;
-          
+
           while (attempts < maxAttempts) {
             try {
               const completion = await openai.chat.completions.create({
@@ -760,7 +761,7 @@ export async function POST(request: NextRequest) {
                 max_tokens: 4000,
                 response_format: { type: "text" }
               });
-              
+
               responseContent = completion.choices[0]?.message?.content;
               if (!responseContent) {
                 throw new Error('Empty response from OpenAI API');
@@ -778,14 +779,14 @@ export async function POST(request: NextRequest) {
         } else {
           // For shorter transcripts, use the structured approach directly
           console.log('Using direct structured approach without chunking');
-          
+
           const structuredMessages = buildOpenAIMessages({
             previousSoapNote,
             currentTranscript: transcript,
             soapTemplate: rawSystemMessage,
             patientName: effectivePatientName
           });
-          
+
           const completion = await openai.chat.completions.create({
             model,
             messages: structuredMessages,
@@ -793,7 +794,7 @@ export async function POST(request: NextRequest) {
             max_tokens: 4000,
             response_format: { type: "text" }
           });
-          
+
           responseContent = completion.choices[0]?.message?.content;
           if (!responseContent) {
             throw new Error('Empty response from OpenAI API');
@@ -802,10 +803,10 @@ export async function POST(request: NextRequest) {
       } else {
         // Use the legacy approach
         console.log('Using legacy chunking approach');
-        
+
         const maxChunkSize = enhancedTranscript.length > 100000 ? 32000 : 16000;
         const chunks = splitTranscriptIntoChunks(enhancedTranscript, maxChunkSize);
-        
+
         if (chunks.length === 0) {
           throw new Error('Failed to split transcript into chunks');
         }
@@ -817,7 +818,7 @@ export async function POST(request: NextRequest) {
           let attempts = 0;
           const maxAttempts = 3;
           let summary = '';
-          
+
           while (attempts < maxAttempts) {
             try {
               const completion = await openai.chat.completions.create({
@@ -834,7 +835,7 @@ export async function POST(request: NextRequest) {
               if (!summary) {
                 throw new Error('Empty response from OpenAI API');
               }
-              
+
               console.log(`Successfully processed chunk ${index + 1}/${chunks.length}`);
               return summary;
             } catch (error) {
@@ -857,7 +858,7 @@ export async function POST(request: NextRequest) {
         // Step 2: Synthesize all summaries into final note with retries
         let attempts = 0;
         const maxAttempts = 3;
-        
+
         while (attempts < maxAttempts) {
           try {
             const finalContent = validSummaries.length > 1 ? validSummaries.join("\n") : enhancedTranscript;
@@ -880,7 +881,7 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      
+
       // Handle the response content
       if (!responseContent) {
         throw new Error('Failed to generate SOAP note content');
@@ -888,17 +889,17 @@ export async function POST(request: NextRequest) {
 
       // Format the note content with HTML
       const formattedContent = formatSoapNote(responseContent);
-      
+
       // Create note in database with both raw and formatted content
       let note;
-      
+
       if (isSupabaseAvailable) {
         console.log('Using Supabase to create note');
         try {
           // Generate a new UUID for the note
           const noteId = crypto.randomUUID();
           const now = new Date().toISOString();
-          
+
           // Insert note into Supabase
           const { data, error } = await supabase
             .from('notes')
@@ -906,9 +907,9 @@ export async function POST(request: NextRequest) {
               id: noteId,
               patient_id: normalizedPatientId,
               transcript: transcript,
-              content: JSON.stringify({ 
+              content: JSON.stringify({
                 content: responseContent,
-                formattedContent 
+                formattedContent
               }),
               audio_file_url: audioFileUrl,
               is_initial_visit: isInitialVisit,
@@ -917,9 +918,9 @@ export async function POST(request: NextRequest) {
             })
             .select()
             .single();
-            
+
           if (error) throw error;
-          
+
           // Convert to Prisma format
           note = convertToPrismaFormat(data, 'note');
         } catch (error) {
@@ -927,7 +928,7 @@ export async function POST(request: NextRequest) {
           // Fall back to Prisma
         }
       }
-      
+
       // Fall back to Prisma if Supabase is unavailable or operation failed
       if (!note) {
         console.log('Falling back to Prisma to create note');
@@ -938,9 +939,9 @@ export async function POST(request: NextRequest) {
             transcript, // Store original transcript without the previous note
             audioFileUrl,
             isInitialVisit,
-            content: JSON.stringify({ 
+            content: JSON.stringify({
               content: responseContent,
-              formattedContent 
+              formattedContent
             }),
           },
         });
@@ -955,10 +956,10 @@ export async function POST(request: NextRequest) {
           },
           body: JSON.stringify({ content: responseContent }),
         });
-        
+
         if (summaryResponse.ok) {
           const { summary } = await summaryResponse.json();
-          
+
           // Update the note with the generated summary
           if (isSupabaseAvailable) {
             console.log('Using Supabase to update note summary');
@@ -966,7 +967,7 @@ export async function POST(request: NextRequest) {
               .from('notes')
               .update({ summary, updated_at: new Date().toISOString() })
               .eq('id', note.id);
-              
+
             if (error) {
               console.error('Error updating note summary in Supabase:', error);
               // Fall back to Prisma
@@ -983,7 +984,7 @@ export async function POST(request: NextRequest) {
               data: { summary }
             });
           }
-          
+
           note.summary = summary;
         }
       } catch (summaryError) {
@@ -1004,7 +1005,7 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Error in note generation:', error);
-    return NextResponse.json({ 
+    return NextResponse.json({
       error: 'Failed to create note',
       details: error instanceof Error ? error.message : 'Unknown error occurred'
     }, { status: 500 });
@@ -1025,7 +1026,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('GET notes for patient ID:', patientId);
-    
+
     // Using updated server-side validation
     try {
       const patientExists = await validatePatientWithServerSide(patientId);
@@ -1037,7 +1038,7 @@ export async function GET(request: NextRequest) {
       console.error('API Error during Supabase patient validation:', error);
       // Continue anyway to try to get notes
     }
-    
+
     // Check if Supabase is available (inline implementation)
     let isSupabaseAvailable = false;
     try {
@@ -1050,35 +1051,28 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       console.error('Failed to connect to Supabase:', error);
     }
-    
+
     if (isSupabaseAvailable) {
       console.log('Using Supabase to get notes');
       // Get notes from Supabase using the server-side function
       const supabaseNotes: SupabaseNote[] = await getSupabaseNotes(patientId);
-      
+
       // If no notes are found, this might be because the patient doesn't exist
       // But we'll still return an empty array rather than an error
-      
+
       // Convert to Prisma format
       const notes = supabaseNotes.map((note: SupabaseNote) =>
         convertToPrismaFormat(note, 'note')
       ).filter((note): note is PrismaNote => note !== null) as PrismaNote[];
-      
-      return NextResponse.json(notes);
-    } else {
-      // Fall back to Prisma/SQLite
-      console.log('Falling back to Prisma to get notes');
-      const db = await connectWithFallback();
-      const notes = await db.note.findMany({
-        where: {
-          patientId,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-      });
 
       return NextResponse.json(notes);
+    } else {
+      // No fallback to SQLite/Prisma - just return an error
+      console.error('Supabase is unavailable and no fallback is configured');
+      return NextResponse.json({
+        error: 'Database connection unavailable',
+        details: 'Please check your database connection settings.'
+      }, { status: 503 });
     }
   } catch (error) {
     console.error('Error fetching notes:', error)
@@ -1094,12 +1088,12 @@ async function validatePatientWithServerSide(patientId: string): Promise<boolean
       .select('id')
       .eq('id', patientId)
       .single();
-      
+
     if (error) {
       console.error('Error validating patient existence in Supabase:', error);
       return false;
     }
-    
+
     return !!data;
   } catch (error) {
     console.error('Error in validatePatientWithServerSide:', error);

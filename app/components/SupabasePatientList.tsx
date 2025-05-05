@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { checkSupabaseConnection, getClientSupabasePatients, convertToPrismaFormat, supabase, SupabasePatient, PrismaPatient } from '../lib/supabase';
-import { prisma, connectWithFallback } from '../lib/db';
+import { prisma } from '../lib/db';
 import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
 
 // Use PrismaPatient as the primary type for the list after conversion
@@ -16,7 +16,7 @@ interface SupabasePatientListProps {
 }
 
 /**
- * Component that uses Supabase for patient data with SQLite fallback capability
+ * Component that uses Supabase for patient data
  */
 export default function SupabasePatientList({
   selectedPatientId,
@@ -29,7 +29,7 @@ export default function SupabasePatientList({
   const [patients, setPatients] = useState<Patient[]>([]); // State uses the Patient (PrismaPatient) type
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dataSource, setDataSource] = useState<'supabase' | 'sqlite'>('supabase');
+  const [dataSource, setDataSource] = useState<'supabase'>('supabase');
 
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -45,7 +45,7 @@ export default function SupabasePatientList({
       setFilteredPatients(patients);
       return;
     }
-    
+
     const filtered = patients.filter((patient: Patient) => // Use Patient type
       patient.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
@@ -55,22 +55,22 @@ export default function SupabasePatientList({
   // Group patients by date (ignoring time)
   const groupPatientsByDate = (patientList: Patient[]) => { // Use Patient type
     const groups: {[key: string]: {date: Date, patients: Patient[]}} = {}; // Use Patient type
-    
+
     patientList.forEach((patient: Patient) => { // Use Patient type
       const dateObj = new Date(patient.createdAt);
       const dateString = dateObj.toISOString().split('T')[0];
-      
+
       if (!groups[dateString]) {
         groups[dateString] = {
           date: dateObj,
           patients: []
         };
       }
-      
+
       groups[dateString].patients.push(patient);
     });
-    
-    return Object.values(groups).sort((a, b) => 
+
+    return Object.values(groups).sort((a, b) =>
       b.date.getTime() - a.date.getTime()
     );
   };
@@ -79,59 +79,36 @@ export default function SupabasePatientList({
     async function loadPatients() {
       setLoading(true);
       setError(null);
-      
+
       try {
         const isSupabaseAvailable = await checkSupabaseConnection();
-        
+
         if (isSupabaseAvailable) {
           console.log('Supabase connection available, fetching patients client-side...');
           const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
-          
+
           const formattedPatients = supabasePatients
             .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
             .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
-            .sort((a: PrismaPatient, b: PrismaPatient) => 
+            .sort((a: PrismaPatient, b: PrismaPatient) =>
               b.createdAt.getTime() - a.createdAt.getTime()
             ) as Patient[]; // Cast to Patient[] which extends PrismaPatient
-            
+
           setPatients(formattedPatients);
           setDataSource('supabase');
           console.log(`Loaded ${formattedPatients.length} patients from Supabase (Client-side).`);
         } else {
-          console.log('Supabase connection unavailable, falling back to SQLite...');
-          const db = await connectWithFallback();
-          // Prisma already returns the correct shape, just cast to Patient
-          const sqlitePatients = await db.patient.findMany({
-            where: { isDeleted: showTrash },
-            orderBy: { createdAt: 'desc' },
-          }) as Patient[]; 
-          
-          setPatients(sqlitePatients);
-          setDataSource('sqlite');
-          console.log(`Loaded ${sqlitePatients.length} patients from SQLite fallback.`);
+          console.error('Supabase connection unavailable. Please check your connection settings.');
+          setError('Database connection unavailable. Please check your connection settings.');
         }
       } catch (err) {
         console.error('Error loading patients:', err);
-        setError('Failed to load patients. Please try again.');
-        try {
-          console.log('Error occurred, attempting SQLite fallback...');
-          const db = await connectWithFallback();
-          const sqlitePatients = await db.patient.findMany({
-            where: { isDeleted: showTrash },
-            orderBy: { createdAt: 'desc' },
-          }) as Patient[]; // Cast to Patient
-          setPatients(sqlitePatients);
-          setDataSource('sqlite');
-          console.log(`Loaded ${sqlitePatients.length} patients from SQLite fallback after error.`);
-        } catch (fallbackErr) {
-          console.error('Both data sources failed:', fallbackErr);
-          setError('All data sources unavailable. Please check your connection.');
-        }
+        setError('Failed to load patients. Please check your database connection settings.');
       } finally {
         setLoading(false);
       }
     }
-    
+
     loadPatients();
   }, [showTrash]);
 
@@ -139,17 +116,17 @@ export default function SupabasePatientList({
   const addPatient = async (name: string) => {
     try {
       let newPatientId = '';
-      
+
       if (dataSource === 'supabase') {
         // Get current user's session to access their email
         const { data: { session } } = await supabase.auth.getSession();
         const userEmail = session?.user?.email;
-        
+
         console.log('Creating patient with provider email:', userEmail);
-        
+
         // Generate a new UUID for the patient
         newPatientId = crypto.randomUUID();
-        
+
         // Add to Supabase with provider email
         const { error } = await supabase.from('patients').insert({
           id: newPatientId,
@@ -159,7 +136,7 @@ export default function SupabasePatientList({
           is_deleted: false,
           provider_email: userEmail || 'joshwoodland@gmail.com', // Use current user's email or fallback
         });
-        
+
         if (error) throw error;
       } else {
         // Add to SQLite
@@ -170,10 +147,10 @@ export default function SupabasePatientList({
         });
         newPatientId = newPatient.id;
       }
-      
+
       // Reload the patient list
       await loadPatients();
-      
+
       // Select the newly created patient
       if (newPatientId) {
         onSelectPatient(newPatientId);
@@ -198,7 +175,7 @@ export default function SupabasePatientList({
       return;
     }
     setIsProcessing(patientId);
-    
+
     try {
       if (dataSource === 'supabase') {
         // Update in Supabase
@@ -210,7 +187,7 @@ export default function SupabasePatientList({
             updated_at: now
           })
           .eq('id', patientId);
-          
+
         if (error) throw error;
       } else {
         // Update in SQLite
@@ -219,11 +196,11 @@ export default function SupabasePatientList({
           data: { name: editName.trim() },
         });
       }
-      
+
       onUpdatePatient(patientId, editName.trim());
       setIsEditing(null);
       setEditName('');
-      
+
       // Reload the patient list
       loadPatients();
     } catch (err) {
@@ -240,7 +217,7 @@ export default function SupabasePatientList({
       setError('Patient name cannot be empty');
       return;
     }
-    
+
     await addPatient(newPatientName.trim());
     setNewPatientName('');
     setIsAddingPatient(false);
@@ -249,7 +226,7 @@ export default function SupabasePatientList({
   const handleMoveToTrash = async (patientId: string, event: React.MouseEvent) => {
     event.stopPropagation();
     setIsProcessing(patientId);
-    
+
     try {
       if (dataSource === 'supabase') {
         // Update in Supabase
@@ -262,10 +239,10 @@ export default function SupabasePatientList({
             updated_at: now
           })
           .eq('id', patientId);
-          
+
         if (error) throw error;
       }
-      
+
       onMoveToTrash(patientId);
       loadPatients();
     } catch (err) {
@@ -279,7 +256,7 @@ export default function SupabasePatientList({
   const handleRestorePatient = async (patientId: string, event: React.MouseEvent) => {
     event.stopPropagation();
     setIsProcessing(patientId);
-    
+
     try {
       if (dataSource === 'supabase') {
         // Update in Supabase
@@ -292,10 +269,10 @@ export default function SupabasePatientList({
             updated_at: now
           })
           .eq('id', patientId);
-          
+
         if (error) throw error;
       }
-      
+
       onRestorePatient(patientId);
       loadPatients();
     } catch (err) {
@@ -310,7 +287,7 @@ export default function SupabasePatientList({
   const loadPatients = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const isSupabaseAvailable = await checkSupabaseConnection();
       if (isSupabaseAvailable) {
@@ -322,25 +299,12 @@ export default function SupabasePatientList({
         setPatients(formattedPatients);
         setDataSource('supabase');
       } else {
-        const db = await connectWithFallback();
-        const sqlitePatients = await db.patient.findMany({
-          where: { isDeleted: showTrash },
-          orderBy: { createdAt: 'desc' },
-        }) as Patient[];
-        setPatients(sqlitePatients);
-        setDataSource('sqlite');
+        console.error('Supabase connection unavailable. Please check your connection settings.');
+        setError('Database connection unavailable. Please check your connection settings.');
       }
     } catch (err) {
       console.error('Error reloading patients:', err);
-      setError('Failed to reload patients.');
-      try {
-        const db = await connectWithFallback();
-        const sqlitePatients = await db.patient.findMany({ where: { isDeleted: showTrash }, orderBy: { createdAt: 'desc' } }) as Patient[];
-        setPatients(sqlitePatients);
-        setDataSource('sqlite');
-      } catch (fallbackErr) {
-        console.error('Fallback failed during reload:', fallbackErr);
-      }
+      setError('Failed to reload patients. Please check your database connection settings.');
     } finally {
       setLoading(false);
     }
@@ -354,25 +318,25 @@ export default function SupabasePatientList({
       length: patientId.length,
       bytes: Array.from(patientId).map(c => c.charCodeAt(0))
     });
-    
+
     // Ensure the ID is a properly formatted string and valid UUID
     const strId = String(patientId).trim();
-    
+
     // Validate UUID format with regex
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const isValidUuid = uuidRegex.test(strId);
-    
-    console.log('DEBUG - SupabasePatientList normalized patient ID:', { 
+
+    console.log('DEBUG - SupabasePatientList normalized patient ID:', {
       normalized: strId,
       isValidUuid
     });
-    
+
     if (!isValidUuid) {
       console.error('Invalid UUID format:', strId);
       setError('Invalid patient ID format detected');
       return;
     }
-    
+
     // Check specific case for Sarah Bauman's ID
     const sarahBaumanId = 'e53c37eb-c698-4e36-bc23-d63b32968d46';
     if (strId.toLowerCase() === sarahBaumanId.toLowerCase()) {
@@ -381,7 +345,7 @@ export default function SupabasePatientList({
       onSelectPatient(sarahBaumanId);
       return;
     }
-    
+
     // Call the parent's onSelectPatient with the normalized ID
     onSelectPatient(strId);
   };
@@ -415,7 +379,7 @@ export default function SupabasePatientList({
               Trash
             </h2>
           )}
-          
+
           {!showTrash && (
             <>
               {!isAddingPatient ? (
@@ -431,7 +395,7 @@ export default function SupabasePatientList({
                   <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
                     <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                   </div>
-                  <form 
+                  <form
                     onSubmit={handleAddPatientSubmit}
                     className="flex-1"
                   >
@@ -475,7 +439,7 @@ export default function SupabasePatientList({
               )}
             </>
           )}
-          
+
           {/* Search box - Now below the add button */}
           <div className="relative mt-2">
             <input
@@ -516,15 +480,15 @@ export default function SupabasePatientList({
               {/* Date header */}
               <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 sticky top-0 z-10 border-t border-b border-gray-200 dark:border-gray-600">
                 <p className="font-medium text-gray-700 dark:text-gray-300">
-                  {group.date.toLocaleDateString(undefined, { 
+                  {group.date.toLocaleDateString(undefined, {
                     weekday: 'long',
-                    month: 'long', 
+                    month: 'long',
                     day: 'numeric',
                     year: 'numeric'
                   })}
                 </p>
               </div>
-              
+
               {/* Patients for this date */}
               <div className="divide-y dark:divide-gray-700">
                 {group.patients.map(patient => (
@@ -546,7 +510,7 @@ export default function SupabasePatientList({
                         <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
                           <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                         </div>
-                        <form 
+                        <form
                           onSubmit={(e) => handleEditSubmit(patient.id, e)}
                           className="flex-1"
                         >

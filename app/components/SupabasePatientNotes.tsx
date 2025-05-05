@@ -1,6 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { checkSupabaseConnection, getSupabaseNotes, convertToPrismaFormat, supabase } from '../lib/supabase';
-import { prisma, connectWithFallback } from '../lib/db';
 import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiZap, FiSend } from 'react-icons/fi';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
@@ -34,7 +33,7 @@ function AIMagicModal({ isOpen, onClose, onSubmit, isLoading }: AIMagicModalProp
             placeholder="E.g., Change the diagnosis from Depression to Undiagnosed mood disorder"
           />
           <div className="mt-4 flex justify-end gap-2">
-            <button 
+            <button
               onClick={onClose}
               className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 border rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
             >
@@ -78,11 +77,11 @@ interface SupabasePatientNotesProps {
 }
 
 /**
- * Component that uses Supabase for patient notes with SQLite fallback capability
+ * Component that uses Supabase for patient notes
  */
-export default function SupabasePatientNotes({ 
-  patientId, 
-  selectedNoteId, 
+export default function SupabasePatientNotes({
+  patientId,
+  selectedNoteId,
   onNoteSelect,
   forceCollapse,
   refreshTrigger = 0 // Default to 0
@@ -90,8 +89,8 @@ export default function SupabasePatientNotes({
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dataSource, setDataSource] = useState<'supabase' | 'sqlite'>('supabase');
-  
+
+
   // Added state variables for Note functionality
   const [isEditing, setIsEditing] = useState<Record<string, boolean>>({});
   const [editableContent, setEditableContent] = useState<Record<string, string>>({});
@@ -114,14 +113,14 @@ export default function SupabasePatientNotes({
     try {
       const parsedContent = safeJsonParse<any>(content);
       if (!parsedContent) return content;
-      
+
       // If it's the simple format with just content
       if (parsedContent.content) {
-        return typeof parsedContent.content === 'string' 
-          ? parsedContent.content 
+        return typeof parsedContent.content === 'string'
+          ? parsedContent.content
           : JSON.stringify(parsedContent.content);
       }
-      
+
       // If it's the complex SOAP format, combine all sections
       const sections = [];
       if (parsedContent.subjective) sections.push('Subjective:\n' + parsedContent.subjective);
@@ -149,12 +148,12 @@ export default function SupabasePatientNotes({
   const toggleEditing = (noteId: string) => {
     setIsEditing(prev => {
       const isCurrentlyEditing = prev[noteId] || false;
-      
+
       if (isCurrentlyEditing) {
         // If we're closing edit mode, save the changes
         handleSave(noteId);
       }
-      
+
       return {
         ...prev,
         [noteId]: !isCurrentlyEditing
@@ -166,40 +165,40 @@ export default function SupabasePatientNotes({
   const handleSave = async (noteId: string) => {
     const editableText = editableContent[noteId];
     if (!editableText) return;
-    
+
     try {
       // Format the edited text back to proper JSON structure that the API expects
       const formattedContent = formatSoapNote(editableText);
-      
+
       // Create a content JSON string
       const contentJson = JSON.stringify({
         content: editableText,
         formattedContent
       });
-      
+
       // First check if Supabase is available
       const isSupabaseAvailable = await checkSupabaseConnection();
-      
+
       let success = false;
       let updatedContent = contentJson;
-      
+
       if (isSupabaseAvailable) {
         // Try to update the note directly in Supabase
         const { error } = await supabase
           .from('notes')
-          .update({ 
+          .update({
             content: contentJson,
             updated_at: new Date().toISOString()
           })
           .eq('id', noteId);
-          
+
         if (!error) {
           success = true;
         } else {
           console.error('Error updating note in Supabase:', error);
         }
       }
-      
+
       // If Supabase failed or is not available, try the API
       if (!success) {
         // Make API call to save the note
@@ -210,31 +209,31 @@ export default function SupabasePatientNotes({
           },
           body: JSON.stringify({ content: contentJson }), // Send the properly formatted JSON content
         });
-        
+
         if (!response.ok) {
           throw new Error('Failed to save note');
         }
-        
+
         success = true;
       }
-      
+
       if (success) {
         // Update the local note data with the new content
-        setNotes(prev => 
-          prev.map(note => 
+        setNotes(prev =>
+          prev.map(note =>
             note.id === noteId ? { ...note, content: updatedContent } : note
           )
         );
-        
+
         // Update the editable content with the parsed version
         setEditableContent(prev => ({
           ...prev,
           [noteId]: editableText
         }));
-        
+
         // Show success toast
         setToast({ message: 'Note saved successfully', type: 'success' });
-        
+
         // Update the editing state to exit edit mode
         setIsEditing(prev => ({
           ...prev,
@@ -251,17 +250,17 @@ export default function SupabasePatientNotes({
   const copyNoteToClipboard = (noteId: string) => {
     const note = notes.find(n => n.id === noteId);
     if (!note) return;
-    
+
     const content = parseNoteContent(note.content);
     const formattedContent = formatSoapNote(content);
-    
+
     // Create a temporary element with the formatted content
     const tempElement = document.createElement('div');
     tempElement.innerHTML = formattedContent;
-    
+
     // Extract the text content from the HTML
     const plainText = tempElement.textContent || tempElement.innerText || '';
-    
+
     navigator.clipboard.writeText(plainText).then(() => {
       // Show toast notification
       setToast({ message: 'Note copied!', type: 'success' });
@@ -275,20 +274,20 @@ export default function SupabasePatientNotes({
   const sendNoteWebhook = async (noteId: string) => {
     const note = notes.find(n => n.id === noteId);
     if (!note) return;
-    
+
     try {
       // Use the parsed content with markdown formatting
       const rawMarkdownNote = parseNoteContent(note.content);
-      
+
       // Send webhook POST request
       const response = await fetch('https://woodlandpsychiatry.app.n8n.cloud/webhook/boredcertified', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ soapNote: rawMarkdownNote }),
       });
-      
+
       if (!response.ok) throw new Error('Failed to send note');
-      
+
       // Show success toast
       setToast({ message: 'Note shipped successfully!', type: 'success' });
     } catch (error) {
@@ -308,38 +307,38 @@ export default function SupabasePatientNotes({
         },
         body: JSON.stringify({ editRequest }),
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.details || 'Failed to apply AI Magic edits');
       }
-      
+
       const editedNote = await response.json();
-      
+
       // Force refresh from the server to get the latest note
       const refreshResponse = await fetch(`/api/notes/${noteId}/edit`);
       if (!refreshResponse.ok) {
         throw new Error('Failed to refresh note after edits');
       }
-      
+
       const refreshedNote = await refreshResponse.json();
-      
+
       // Update local state with the edited content
       setEditableContent(prev => ({
         ...prev,
         [noteId]: refreshedNote.content
       }));
-      
+
       // Update notes array
-      setNotes(prev => 
-        prev.map(note => 
+      setNotes(prev =>
+        prev.map(note =>
           note.id === noteId ? { ...note, content: refreshedNote.content } : note
         )
       );
-      
+
       // Show success toast
       setToast({ message: 'SOAP note updated with AI Magic!', type: 'success' });
-      
+
       // Close the modal
       setIsAIMagicModalOpen(null);
     } catch (error) {
@@ -363,62 +362,38 @@ export default function SupabasePatientNotes({
 
       setLoading(true);
       setError(null);
-      
+
       try {
-        // First try Supabase
         const isSupabaseAvailable = await checkSupabaseConnection();
-        
+
         if (isSupabaseAvailable) {
           // Get data from Supabase
           const supabaseNotes = await getSupabaseNotes(patientId);
-          
+
           // Convert to Prisma format
           const formattedNotes = supabaseNotes
             .map(note => convertToPrismaFormat(note, 'note'))
             .filter(note => note !== null)
-            .sort((a, b) => 
+            .sort((a, b) =>
               (b as Note).createdAt.getTime() - (a as Note).createdAt.getTime()
             ) as Note[];
-            
+
           setNotes(formattedNotes);
-          setDataSource('supabase');
         } else {
-          // Fall back to SQLite
-          const db = await connectWithFallback();
-          const sqliteNotes = await db.note.findMany({
-            where: { patientId },
-            orderBy: { createdAt: 'desc' },
-          });
-          
-          setNotes(sqliteNotes as Note[]);
-          setDataSource('sqlite');
+          console.error('Supabase connection unavailable. Please check your connection settings.');
+          setError('Database connection unavailable. Please check your connection settings.');
         }
       } catch (err) {
         console.error('Error loading notes:', err);
-        setError('Failed to load notes. Please try again.');
-        
-        // Attempt SQLite fallback if there was an error with Supabase
-        try {
-          const db = await connectWithFallback();
-          const sqliteNotes = await db.note.findMany({
-            where: { patientId },
-            orderBy: { createdAt: 'desc' },
-          });
-          
-          setNotes(sqliteNotes as Note[]);
-          setDataSource('sqlite');
-        } catch (fallbackErr) {
-          console.error('Both data sources failed:', fallbackErr);
-          setError('All data sources unavailable. Please check your connection.');
-        }
+        setError('Failed to load notes. Please check your database connection settings.');
       } finally {
         setLoading(false);
       }
     }
-    
+
     loadNotes();
   }, [patientId, refreshTrigger]); // Add refreshTrigger as a dependency
-  
+
 
   // Function to load notes
   const loadNotes = async () => {
@@ -430,54 +405,30 @@ export default function SupabasePatientNotes({
 
     setLoading(true);
     setError(null);
-    
+
     try {
-      // First try Supabase
       const isSupabaseAvailable = await checkSupabaseConnection();
-      
+
       if (isSupabaseAvailable) {
         // Get data from Supabase
         const supabaseNotes = await getSupabaseNotes(patientId);
-        
+
         // Convert to Prisma format
         const formattedNotes = supabaseNotes
           .map(note => convertToPrismaFormat(note, 'note'))
           .filter(note => note !== null)
-          .sort((a, b) => 
+          .sort((a, b) =>
             (b as Note).createdAt.getTime() - (a as Note).createdAt.getTime()
           ) as Note[];
-          
+
         setNotes(formattedNotes);
-        setDataSource('supabase');
       } else {
-        // Fall back to SQLite
-        const db = await connectWithFallback();
-        const sqliteNotes = await db.note.findMany({
-          where: { patientId },
-          orderBy: { createdAt: 'desc' },
-        });
-        
-        setNotes(sqliteNotes as Note[]);
-        setDataSource('sqlite');
+        console.error('Supabase connection unavailable. Please check your connection settings.');
+        setError('Database connection unavailable. Please check your connection settings.');
       }
     } catch (err) {
       console.error('Error loading notes:', err);
-      setError('Failed to load notes. Please try again.');
-      
-      // Attempt SQLite fallback if there was an error with Supabase
-      try {
-        const db = await connectWithFallback();
-        const sqliteNotes = await db.note.findMany({
-          where: { patientId },
-          orderBy: { createdAt: 'desc' },
-        });
-        
-        setNotes(sqliteNotes as Note[]);
-        setDataSource('sqlite');
-      } catch (fallbackErr) {
-        console.error('Both data sources failed:', fallbackErr);
-        setError('All data sources unavailable. Please check your connection.');
-      }
+      setError('Failed to load notes. Please check your database connection settings.');
     } finally {
       setLoading(false);
     }
@@ -491,7 +442,7 @@ export default function SupabasePatientNotes({
     <div className="space-y-6 max-w-4xl mx-auto bg-gray-50 dark:bg-gray-900 p-6 rounded-lg">
       {/* Refresh button */}
       <div className="flex justify-end mb-2">
-        <button 
+        <button
           type="button"
           onClick={() => loadNotes()}
           className="p-1.5 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-gray-800 transition-colors"
@@ -500,7 +451,7 @@ export default function SupabasePatientNotes({
           <FiRefreshCw className="w-4 h-4" />
         </button>
       </div>
-      
+
       {notes.length === 0 ? (
         <div className="text-center py-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-200 dark:bg-gray-700 mb-4">
@@ -516,14 +467,14 @@ export default function SupabasePatientNotes({
       ) : (
         <div className="space-y-6">
           {notes.map(note => (
-            <div 
+            <div
               key={note.id}
               className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow ${
                 selectedNoteId === note.id ? 'ring-2 ring-blue-500 dark:ring-blue-400' : ''
               }`}
               onClick={() => onNoteSelect && onNoteSelect(note)}
             >
-              <div 
+              <div
                 className="p-4 border-b border-gray-100 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-750 cursor-pointer relative"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -535,9 +486,9 @@ export default function SupabasePatientNotes({
                   <div className="flex items-center space-x-2">
                     <FiCalendar className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                     <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
-                      {new Date(note.createdAt).toLocaleDateString(undefined, { 
-                        year: 'numeric', 
-                        month: 'short', 
+                      {new Date(note.createdAt).toLocaleDateString(undefined, {
+                        year: 'numeric',
+                        month: 'short',
                         day: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit'
@@ -545,32 +496,32 @@ export default function SupabasePatientNotes({
                     </span>
                   </div>
                   <span className={`px-2 py-1 text-xs rounded-full ${
-                    note.isInitialVisit 
-                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' 
+                    note.isInitialVisit
+                      ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300'
                       : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                   }`}>
                     {note.isInitialVisit ? 'Initial Visit' : 'Follow-up'}
                   </span>
                 </div>
-                
+
                 <div className="mt-2 text-sm pr-8 text-gray-600 dark:text-gray-300 font-medium">
                   {note.summary || 'No summary available'}
                 </div>
-                
+
                 <div className="absolute bottom-4 right-4 text-gray-500 dark:text-gray-400">
                   <FiChevronDown className="w-5 h-5" />
                 </div>
               </div>
-              
+
               <details open={selectedNoteId === note.id} className={`${forceCollapse ? '' : 'group'}`}>
                 <summary className="hidden">
                   Expand note
                 </summary>
-                
+
                 <div className="mt-4">
                   {/* Collapse button positioned at top-right of the details section */}
                   <div className="flex justify-end px-4 mb-2">
-                    <button 
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         const detailsEl = e.currentTarget.closest('details') as HTMLDetailsElement;
@@ -631,7 +582,7 @@ export default function SupabasePatientNotes({
                   </div>
 
                   <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
-                  
+
                   {/* Note Content */}
                   <div className="px-4 pb-4">
                     {isEditing[note.id] ? (
@@ -642,17 +593,17 @@ export default function SupabasePatientNotes({
                       />
                     ) : (
                       <div className="prose dark:prose-invert max-w-none leading-relaxed text-base">
-                        <div 
-                          dangerouslySetInnerHTML={{ 
-                            __html: formatSoapNote(parseNoteContent(note.content)) 
-                          }} 
+                        <div
+                          dangerouslySetInnerHTML={{
+                            __html: formatSoapNote(parseNoteContent(note.content))
+                          }}
                           className="text-sm text-gray-700 dark:text-gray-300"
                         />
                       </div>
                     )}
                   </div>
                 </div>
-                
+
                 {note.audioFileUrl && (
                   <div className="px-4 pb-4">
                     <div className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
@@ -663,7 +614,7 @@ export default function SupabasePatientNotes({
                     </audio>
                   </div>
                 )}
-                
+
                 {/* AI Magic Modal for this note */}
                 {isAIMagicModalOpen === note.id && (
                   <AIMagicModal
@@ -678,7 +629,7 @@ export default function SupabasePatientNotes({
           ))}
         </div>
       )}
-      
+
       {/* Toast notification */}
       {toast && (
         <Toast

@@ -25,11 +25,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const globalForPrisma = global as unknown as { 
-  prisma: PrismaClient 
+const globalForPrisma = global as unknown as {
+  prisma: PrismaClient
 }
 
-// Initialize Prisma Client (now connected to PostgreSQL via the DATABASE_URL in .env.local)
+// Initialize Prisma Client (connected to PostgreSQL via the DATABASE_URL in .env.local)
 export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
@@ -38,30 +38,17 @@ export const prisma =
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
 
-// Create a fallback function to SQLite if Postgres connection fails
-export const connectWithFallback = async () => {
+// Function to get Prisma client - no fallback to SQLite
+export const getPrismaClient = async () => {
   try {
     // Test connection to PostgreSQL
     await prisma.$queryRaw`SELECT 1`
     console.log('Connected to PostgreSQL database')
     return prisma
   } catch (error) {
-    console.error('Failed to connect to PostgreSQL, falling back to SQLite', error)
-    
-    // If we have a SQLite connection string, use it as fallback
-    if (process.env.SQLITE_DATABASE_URL) {
-      const sqlitePrisma = new PrismaClient({
-        datasources: {
-          db: {
-            url: process.env.SQLITE_DATABASE_URL,
-          },
-        },
-      })
-      
-      return sqlitePrisma
-    }
-    
-    // If no fallback is available, rethrow the error
-    throw error
+    console.error('Failed to connect to PostgreSQL database', error)
+    throw new Error('Database connection failed. Please check your PostgreSQL connection settings.')
   }
 }
+
+

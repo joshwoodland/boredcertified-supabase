@@ -29,6 +29,9 @@ yarn-error.log*
 .env*.local
 .env
 
+# Add exception for .env.local to keep it in Git
+!.env.local
+
 # vercel
 .vercel
 
