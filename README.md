@@ -19,6 +19,7 @@ A web application for medical professionals to record patient conversations and 
 - TypeScript
 - Tailwind CSS
 - Prisma (SQLite database)
+- Supabase (PostgreSQL database and authentication)
 - OpenAI API (GPT-4)
 - Deepgram for speech-to-text transcription
 - React Media Recorder
@@ -32,10 +33,16 @@ A web application for medical professionals to record patient conversations and 
    ```
 
 3. Set up environment variables:
-   Create a `.env` file in the root directory with:
+   Create a `.env.local` file in the root directory with:
    ```
    OPENAI_API_KEY=your_openai_api_key
    DEEPGRAM_API_KEY=your_deepgram_api_key
+   NEXT_PUBLIC_DEEPGRAM_API_KEY=your_deepgram_api_key
+
+   # Supabase configuration (if using Supabase)
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
    ```
 
 4. Initialize the database:
@@ -66,8 +73,24 @@ A web application for medical professionals to record patient conversations and 
 The application can be deployed to any platform that supports Next.js applications. For production deployment:
 
 1. Set up a production database
-2. Update the database connection string in `.env`
+2. Update the database connection string in `.env.local`
 3. Deploy using your preferred platform (Vercel, AWS, etc.)
+
+## Supabase Integration
+
+This application supports Supabase for data storage and authentication:
+
+1. Create a Supabase project at [supabase.com](https://supabase.com)
+2. Set up the required tables using the SQL script in `scripts/supabase-setup.sql`
+3. Add your Supabase credentials to `.env.local`
+4. To migrate data from SQLite to Supabase:
+   ```bash
+   npm run supabase:backup
+   ```
+5. To test your Supabase connection:
+   ```bash
+   npm run supabase:test
+   ```
 
 ## Security Considerations
 

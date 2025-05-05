@@ -7,13 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "vercel-build": "PRISMA_SKIP_GENERATE=true next build",
     "supabase:setup": "echo 'Run this SQL script in your Supabase SQL Editor: scripts/supabase-setup.sql'",
-    "supabase:backup": "node scripts/backup-to-supabase.js",
+    "supabase:backup": "npx ts-node scripts/backup-to-supabase.ts",
     "supabase:test-data": "node scripts/create-test-data.js",
     "supabase:full-migration": "npm run supabase:setup && npm run supabase:backup",
-    "supabase:migrate-provider": "node scripts/migrate-provider-emails.js joshwoodland@gmail.com",
-    "supabase:migrate-provider:ts": "npx ts-node scripts/migrate-provider-emails.ts joshwoodland@gmail.com"
+    "supabase:migrate-provider": "npx ts-node scripts/migrate-provider-emails.ts joshwoodland@gmail.com",
+    "supabase:test": "npx ts-node scripts/test-supabase.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

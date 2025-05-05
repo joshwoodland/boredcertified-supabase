@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma, connectWithFallback } from '@/app/lib/db';
 import { v4 as uuidv4 } from 'uuid';
-import { convertToPrismaFormat, getSupabasePatients } from '@/app/lib/supabase';
+import { convertToPrismaFormat, getSupabasePatients, serverSupabase } from '@/app/lib/supabase';
 import { createClient } from '@/app/utils/supabase/server';
 
 export async function GET(request: NextRequest) {
@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
         userEmail 
       });
       
-      // Get patients from Supabase
-      const patients = await getSupabasePatients(filterByProvider);
+      // Get patients from Supabase using the server-side function
+      const patients = await getSupabasePatients(filterByProvider ? userEmail : null);
       
       // Filter by search query if provided
       const filteredPatients = searchQuery

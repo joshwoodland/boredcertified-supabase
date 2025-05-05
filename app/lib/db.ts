@@ -1,18 +1,29 @@
 import { PrismaClient } from '@prisma/client'
 import { createClient } from '@supabase/supabase-js'
 
+console.log('--- Loading app/lib/db.ts ---');
+console.log('process.env.NEXT_PUBLIC_SUPABASE_URL (in db.ts):', process.env.NEXT_PUBLIC_SUPABASE_URL);
+console.log('process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY (in db.ts):', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+console.log('-----------------------------');
+
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
 
+// Environment variables
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
 // Initialize Supabase client with appropriate environment variables
-export const supabase = createClient(
-  isClient 
-    ? process.env.NEXT_PUBLIC_SUPABASE_URL || '' 
-    : process.env.SUPABASE_URL || '',
-  isClient 
-    ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' 
-    : process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-)
+console.log('db.ts - Initializing Supabase client. isClient:', isClient, 'URL:', supabaseUrl);
+
+// Use the public anon key for both client and server in this context,
+// as RLS should handle permissions. Use serverSupabase from supabase.ts for admin tasks.
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('db.ts - Supabase URL or Anon Key is missing!');
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const globalForPrisma = global as unknown as { 
   prisma: PrismaClient 
@@ -27,11 +38,30 @@ export const prisma =
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
 
-// For compatibility with existing code, provide a function that only returns the Prisma client
-// This replaces the previous connectWithFallback function which had SQLite fallback
+// Create a fallback function to SQLite if Postgres connection fails
 export const connectWithFallback = async () => {
-  // Test connection to PostgreSQL
-  await prisma.$queryRaw`SELECT 1`
-  console.log('Connected to PostgreSQL database')
-  return prisma
+  try {
+    // Test connection to PostgreSQL
+    await prisma.$queryRaw`SELECT 1`
+    console.log('Connected to PostgreSQL database')
+    return prisma
+  } catch (error) {
+    console.error('Failed to connect to PostgreSQL, falling back to SQLite', error)
+    
+    // If we have a SQLite connection string, use it as fallback
+    if (process.env.SQLITE_DATABASE_URL) {
+      const sqlitePrisma = new PrismaClient({
+        datasources: {
+          db: {
+            url: process.env.SQLITE_DATABASE_URL,
+          },
+        },
+      })
+      
+      return sqlitePrisma
+    }
+    
+    // If no fallback is available, rethrow the error
+    throw error
+  }
 }

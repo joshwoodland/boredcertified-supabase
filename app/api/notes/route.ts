@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, connectWithFallback } from '@/app/lib/db'
-import { getSupabaseNotes, convertToPrismaFormat, supabase } from '@/app/lib/supabase'
+import { getSupabaseNotes, convertToPrismaFormat, supabase, serverSupabase, PrismaNote, SupabaseNote } from '@/app/lib/supabase'
 import OpenAI from 'openai'
 import systemMessages from '@/app/config/systemMessages'
-import { ChatCompletionMessageParam } from 'openai/resources/chat'
-import { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
+import { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
 import { formatSystemMessage } from '@/app/utils/formatSystemMessage'
 import { formatSoapNote } from '@/app/utils/formatSoapNote'
 import { estimateTokenCount, mightExceedTokenLimit } from '@/app/utils/tokenEncoding'
 import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages'
+
+// Add logging right before OpenAI initialization
+console.log('--- Initializing OpenAI Client --- ');
+console.log('process.env.OPENAI_API_KEY (in notes route):', process.env.OPENAI_API_KEY ? `Exists (length: ${process.env.OPENAI_API_KEY.length})` : 'MISSING or EMPTY');
+console.log('---------------------------------');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -343,31 +347,6 @@ function normalizePatientId(id: any): string {
   return uuidRegex.test(strId) ? strId : '';
 }
 
-// Helper function to validate patient exists in Supabase
-async function validatePatientExists(patientId: string): Promise<boolean> {
-  if (!patientId) return false;
-  
-  try {
-    console.log('API validating patient ID with Supabase:', patientId);
-    const { data, error } = await supabase
-      .from('patients')
-      .select('id')
-      .eq('id', patientId)
-      .single();
-    
-    if (error || !data) {
-      console.error('API Supabase patient validation error:', error || 'Patient not found');
-      return false;
-    }
-    
-    console.log('API Patient validated successfully with Supabase:', data);
-    return true;
-  } catch (error) {
-    console.error('API Error during Supabase patient validation:', error);
-    return false;
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     // Log the raw request structure
@@ -406,78 +385,61 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
     
-    // Validate patient exists in Supabase
-    const patientExists = await validatePatientExists(normalizedPatientId);
-    if (!patientExists) {
-      console.error('Patient not found in Supabase:', normalizedPatientId);
-      return NextResponse.json({
-        error: 'Patient not found',
-        details: 'Patient ID not found in database'
-      }, { status: 404 });
-    }
-    
     // Check if Supabase is available (inline implementation)
     let isSupabaseAvailable = false;
     try {
-      const { data, error } = await supabase.from('patients').select('id').limit(1);
-      if (!error || error.code === '42P01') { // 42P01 means table doesn't exist, which is fine
+      // Check connection using the public client
+      const { error } = await supabase.from('patients').select('id', { count: 'exact', head: true }).limit(1);
+      if (!error || error.code === '42P01') { 
         isSupabaseAvailable = true;
       } else {
-        console.error('Supabase connection error:', error);
+        console.error('Supabase connection error (checking availability):', error);
       }
     } catch (error) {
-      console.error('Failed to connect to Supabase:', error);
+      console.error('Failed to connect to Supabase (checking availability):', error);
     }
     
     console.log('DEBUG - Supabase is available:', isSupabaseAvailable);
     
     let patient;
     if (isSupabaseAvailable) {
-      console.log('Using Supabase to get patient with ID:', normalizedPatientId, 'Type:', typeof normalizedPatientId);
+      console.log('Using Supabase to get patient with ID:', normalizedPatientId);
       
-      // Get patient from Supabase
-      console.log('Querying Supabase for patient with normalized ID:', normalizedPatientId);
-      const { data, error } = await supabase
+      // Get patient from Supabase using the SERVICE ROLE client to bypass RLS for this check
+      console.log('Querying Supabase (Service Role) for patient with normalized ID:', normalizedPatientId);
+      const { data, error } = await serverSupabase // Use serverSupabase here!
         .from('patients')
         .select('*')
         .eq('id', normalizedPatientId)
-        .single();
+        .maybeSingle(); // Use maybeSingle() to handle 0 rows gracefully without error
       
-      // Log the Supabase query result
-      console.log('DEBUG - Supabase query result:', {
+      console.log('DEBUG - Supabase (Service Role) query result:', {
         hasData: !!data,
         hasError: !!error,
         errorCode: error?.code,
         errorMessage: error?.message,
-        dataKeys: data ? Object.keys(data) : null
       });
         
       if (error) {
-        console.error('Error fetching patient from Supabase:', error, 'Patient ID:', normalizedPatientId);
-        // Don't fall back to Prisma yet - handle specific Supabase errors
-        if (error.code === 'PGRST116') {
-          // No rows returned - patient not found
-          return NextResponse.json({
-            error: 'Patient not found',
-            details: 'No patient found with the provided ID'
-          }, { status: 404 });
-        }
-        // Fall back to Prisma for other errors
-      } else if (!data) {
-        console.error('Patient not found in Supabase with ID:', normalizedPatientId);
-        return NextResponse.json({
-          error: 'Patient not found',
-          details: 'Invalid patient ID'
-        }, { status: 404 });
-      } else {
-        console.log('Patient found in Supabase:', data.name, 'ID:', data.id);
+        // Log the error but proceed to Prisma fallback for non-404 errors
+        console.error('Error fetching patient from Supabase (Service Role):', error, 'Patient ID:', normalizedPatientId);
+      } else if (data) {
+        // Patient found with service role!
+        console.log('Patient found in Supabase (Service Role):', data.name, 'ID:', data.id);
         patient = convertToPrismaFormat(data, 'patient');
         console.log('DEBUG - Converted patient data:', patient);
+      } else {
+        // Patient genuinely not found, even with service role
+        console.warn('Patient not found in Supabase (Service Role) with ID:', normalizedPatientId);
+        return NextResponse.json({
+          error: 'Patient not found',
+          details: 'No patient found with the provided ID in the database.'
+        }, { status: 404 });
       }
     }
     
-    // Fall back to Prisma if Supabase is unavailable or query failed
-    if (!patient) {
+    // Fall back to Prisma ONLY if Supabase is unavailable OR if the service role query failed unexpectedly (not just not found)
+    if (!patient && !isSupabaseAvailable) { // Adjusted fallback condition
       console.log('Falling back to Prisma to get patient');
       const db = await connectWithFallback();
       patient = await db.patient.findUnique({
@@ -490,8 +452,19 @@ export async function POST(request: NextRequest) {
           details: 'Invalid patient ID'
         }, { status: 404 });
       }
+    } else if (!patient && isSupabaseAvailable) {
+        // This case means Supabase is available, service role query ran, but failed for a reason other than not finding the user.
+        // Or if the logic above didn't set the patient variable correctly.
+         console.error('Supabase query failed unexpectedly or patient variable not set. Cannot proceed.');
+         return NextResponse.json({ error: 'Database query failed', details: 'Failed to retrieve patient information.' }, { status: 500 });
     }
     
+    // If patient is still not found after checks/fallbacks, something is wrong.
+    if (!patient) {
+        console.error('Patient could not be determined after all checks.');
+        return NextResponse.json({ error: 'Patient not found', details: 'Could not retrieve patient information.' }, { status: 404 });
+    }
+
     // Use provided patient name if available, otherwise fallback to the name from the database
     const effectivePatientName = patientName || patient.name;
 
@@ -559,20 +532,19 @@ export async function POST(request: NextRequest) {
         let previousNote = null;
         
         if (isSupabaseAvailable) {
-          console.log('Using Supabase to get previous note');
-          // Get the most recent note from Supabase
-          const { data, error } = await supabase
-            .from('notes')
-            .select('content')
-            .eq('patient_id', normalizedPatientId)
-            .order('created_at', { ascending: false })
-            .limit(1);
+          console.log('Using Supabase (Anon Key) to get previous note');
+          const { data: noteData, error: noteError } = await supabase // Using anon client here
+             .from('notes')
+             .select('content')
+             .eq('patient_id', normalizedPatientId)
+             .order('created_at', { ascending: false })
+             .limit(1);
             
-          if (error) {
-            console.error('Error fetching previous note from Supabase:', error);
+          if (noteError) {
+            console.error('Error fetching previous note from Supabase (Anon Key):', noteError);
             // Fall back to Prisma if Supabase query fails
-          } else if (data && data.length > 0) {
-            previousNote = { content: data[0].content };
+          } else if (noteData && noteData.length > 0) {
+            previousNote = { content: noteData[0].content };
           }
         }
         
@@ -1054,16 +1026,18 @@ export async function GET(request: NextRequest) {
 
     console.log('GET notes for patient ID:', patientId);
     
-    // Validate patient existence in Supabase
-    const patientExists = await validatePatientExists(patientId);
-    if (!patientExists) {
-      console.error('Patient not found in Supabase for GET request:', patientId);
-      return NextResponse.json({
-        error: 'Patient not found',
-        details: 'Patient ID not found in database'
-      }, { status: 404 });
+    // Using updated server-side validation
+    try {
+      const patientExists = await validatePatientWithServerSide(patientId);
+      if (!patientExists) {
+        console.warn(`Patient not found in Supabase for GET request: ${patientId}`);
+        // Continue anyway to try to get notes
+      }
+    } catch (error) {
+      console.error('API Error during Supabase patient validation:', error);
+      // Continue anyway to try to get notes
     }
-
+    
     // Check if Supabase is available (inline implementation)
     let isSupabaseAvailable = false;
     try {
@@ -1079,13 +1053,16 @@ export async function GET(request: NextRequest) {
     
     if (isSupabaseAvailable) {
       console.log('Using Supabase to get notes');
-      // Get notes from Supabase
-      const supabaseNotes = await getSupabaseNotes(patientId);
+      // Get notes from Supabase using the server-side function
+      const supabaseNotes: SupabaseNote[] = await getSupabaseNotes(patientId);
+      
+      // If no notes are found, this might be because the patient doesn't exist
+      // But we'll still return an empty array rather than an error
       
       // Convert to Prisma format
-      const notes = supabaseNotes.map(note => 
+      const notes = supabaseNotes.map((note: SupabaseNote) =>
         convertToPrismaFormat(note, 'note')
-      ).filter(Boolean);
+      ).filter((note): note is PrismaNote => note !== null) as PrismaNote[];
       
       return NextResponse.json(notes);
     } else {
@@ -1106,5 +1083,26 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error fetching notes:', error)
     return NextResponse.json({ error: 'Failed to fetch notes' }, { status: 500 })
+  }
+}
+
+// Add this helper function for server-side patient validation
+async function validatePatientWithServerSide(patientId: string): Promise<boolean> {
+  try {
+    const { data, error } = await serverSupabase
+      .from('patients')
+      .select('id')
+      .eq('id', patientId)
+      .single();
+      
+    if (error) {
+      console.error('Error validating patient existence in Supabase:', error);
+      return false;
+    }
+    
+    return !!data;
+  } catch (error) {
+    console.error('Error in validatePatientWithServerSide:', error);
+    return false;
   }
 }

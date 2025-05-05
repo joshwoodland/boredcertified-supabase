@@ -1,16 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { checkSupabaseConnection, getSupabasePatients, convertToPrismaFormat, supabase } from '../lib/supabase';
+import { checkSupabaseConnection, getClientSupabasePatients, convertToPrismaFormat, supabase, SupabasePatient, PrismaPatient } from '../lib/supabase';
 import { prisma, connectWithFallback } from '../lib/db';
 import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
 
-interface Patient {
-  id: string;
-  name: string;
-  isDeleted: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  deletedAt: Date | null;
-}
+// Use PrismaPatient as the primary type for the list after conversion
+interface Patient extends PrismaPatient {}
 
 interface SupabasePatientListProps {
   selectedPatientId?: string;
@@ -32,7 +26,7 @@ export default function SupabasePatientList({
   onUpdatePatient,
   showTrash
 }: SupabasePatientListProps) {
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]); // State uses the Patient (PrismaPatient) type
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dataSource, setDataSource] = useState<'supabase' | 'sqlite'>('supabase');
@@ -43,7 +37,7 @@ export default function SupabasePatientList({
   const [newPatientName, setNewPatientName] = useState('');
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]);
+  const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]); // Use Patient type
 
   // Filter patients when search query changes
   useEffect(() => {
@@ -52,20 +46,19 @@ export default function SupabasePatientList({
       return;
     }
     
-    const filtered = patients.filter(patient => 
+    const filtered = patients.filter((patient: Patient) => // Use Patient type
       patient.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
     setFilteredPatients(filtered);
   }, [searchQuery, patients]);
 
   // Group patients by date (ignoring time)
-  const groupPatientsByDate = (patientList: Patient[]) => {
-    const groups: {[key: string]: {date: Date, patients: Patient[]}} = {};
+  const groupPatientsByDate = (patientList: Patient[]) => { // Use Patient type
+    const groups: {[key: string]: {date: Date, patients: Patient[]}} = {}; // Use Patient type
     
-    patientList.forEach(patient => {
-      // Extract just the date part (ignoring time)
+    patientList.forEach((patient: Patient) => { // Use Patient type
       const dateObj = new Date(patient.createdAt);
-      const dateString = dateObj.toISOString().split('T')[0]; // YYYY-MM-DD format
+      const dateString = dateObj.toISOString().split('T')[0];
       
       if (!groups[dateString]) {
         groups[dateString] = {
@@ -77,7 +70,6 @@ export default function SupabasePatientList({
       groups[dateString].patients.push(patient);
     });
     
-    // Convert to array and sort by date (newest first)
     return Object.values(groups).sort((a, b) => 
       b.date.getTime() - a.date.getTime()
     );
@@ -89,48 +81,48 @@ export default function SupabasePatientList({
       setError(null);
       
       try {
-        // First try Supabase
         const isSupabaseAvailable = await checkSupabaseConnection();
         
         if (isSupabaseAvailable) {
-          // Get data from Supabase
-          const supabasePatients = await getSupabasePatients();
+          console.log('Supabase connection available, fetching patients client-side...');
+          const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
           
-          // Convert to Prisma format
           const formattedPatients = supabasePatients
-            .map(patient => convertToPrismaFormat(patient, 'patient'))
-            .filter(patient => patient !== null && (patient as Patient).isDeleted === showTrash)
-            .sort((a, b) => 
-              (b as Patient).createdAt.getTime() - (a as Patient).createdAt.getTime()
-            ) as Patient[];
+            .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
+            .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
+            .sort((a: PrismaPatient, b: PrismaPatient) => 
+              b.createdAt.getTime() - a.createdAt.getTime()
+            ) as Patient[]; // Cast to Patient[] which extends PrismaPatient
             
           setPatients(formattedPatients);
           setDataSource('supabase');
+          console.log(`Loaded ${formattedPatients.length} patients from Supabase (Client-side).`);
         } else {
-          // Fall back to SQLite
+          console.log('Supabase connection unavailable, falling back to SQLite...');
           const db = await connectWithFallback();
+          // Prisma already returns the correct shape, just cast to Patient
           const sqlitePatients = await db.patient.findMany({
-            where: { isDeleted: false },
+            where: { isDeleted: showTrash },
             orderBy: { createdAt: 'desc' },
-          });
+          }) as Patient[]; 
           
-          setPatients(sqlitePatients as Patient[]);
+          setPatients(sqlitePatients);
           setDataSource('sqlite');
+          console.log(`Loaded ${sqlitePatients.length} patients from SQLite fallback.`);
         }
       } catch (err) {
         console.error('Error loading patients:', err);
         setError('Failed to load patients. Please try again.');
-        
-        // Attempt SQLite fallback if there was an error with Supabase
         try {
+          console.log('Error occurred, attempting SQLite fallback...');
           const db = await connectWithFallback();
           const sqlitePatients = await db.patient.findMany({
             where: { isDeleted: showTrash },
             orderBy: { createdAt: 'desc' },
-          });
-          
-          setPatients(sqlitePatients as Patient[]);
+          }) as Patient[]; // Cast to Patient
+          setPatients(sqlitePatients);
           setDataSource('sqlite');
+          console.log(`Loaded ${sqlitePatients.length} patients from SQLite fallback after error.`);
         } catch (fallbackErr) {
           console.error('Both data sources failed:', fallbackErr);
           setError('All data sources unavailable. Please check your connection.');
@@ -142,7 +134,7 @@ export default function SupabasePatientList({
     
     loadPatients();
   }, [showTrash]);
-  
+
   // Function to add a new patient
   const addPatient = async (name: string) => {
     try {
@@ -320,52 +312,34 @@ export default function SupabasePatientList({
     setError(null);
     
     try {
-      // First try Supabase
       const isSupabaseAvailable = await checkSupabaseConnection();
-      
       if (isSupabaseAvailable) {
-        // Get data from Supabase - explicitly filter by current user email
-        console.log('Loading patients from Supabase with provider email filtering');
-        const supabasePatients = await getSupabasePatients(true);
-        
-        // Convert to Prisma format
+        const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
         const formattedPatients = supabasePatients
-          .map(patient => convertToPrismaFormat(patient, 'patient'))
-          .filter(patient => patient !== null && (patient as Patient).isDeleted === showTrash)
-          .sort((a, b) => 
-            (b as Patient).createdAt.getTime() - (a as Patient).createdAt.getTime()
-          ) as Patient[];
-          
+          .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
+          .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
+          .sort((a: PrismaPatient, b: PrismaPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
         setPatients(formattedPatients);
         setDataSource('supabase');
       } else {
-        // Fall back to SQLite
         const db = await connectWithFallback();
         const sqlitePatients = await db.patient.findMany({
           where: { isDeleted: showTrash },
           orderBy: { createdAt: 'desc' },
-        });
-        
-        setPatients(sqlitePatients as Patient[]);
+        }) as Patient[];
+        setPatients(sqlitePatients);
         setDataSource('sqlite');
       }
     } catch (err) {
-      console.error('Error loading patients:', err);
-      setError('Failed to load patients. Please try again.');
-      
-      // Attempt SQLite fallback if there was an error with Supabase
+      console.error('Error reloading patients:', err);
+      setError('Failed to reload patients.');
       try {
         const db = await connectWithFallback();
-        const sqlitePatients = await db.patient.findMany({
-          where: { isDeleted: showTrash },
-          orderBy: { createdAt: 'desc' },
-        });
-        
-        setPatients(sqlitePatients as Patient[]);
+        const sqlitePatients = await db.patient.findMany({ where: { isDeleted: showTrash }, orderBy: { createdAt: 'desc' } }) as Patient[];
+        setPatients(sqlitePatients);
         setDataSource('sqlite');
       } catch (fallbackErr) {
-        console.error('Both data sources failed:', fallbackErr);
-        setError('All data sources unavailable. Please check your connection.');
+        console.error('Fallback failed during reload:', fallbackErr);
       }
     } finally {
       setLoading(false);

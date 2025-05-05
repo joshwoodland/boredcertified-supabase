@@ -1,8 +1,12 @@
-'use client';
-
 import { createClient } from '@supabase/supabase-js';
 import { createBrowserClient } from '@supabase/ssr';
 import { createClient as createClientSideClient } from '@/app/utils/supabase/client';
+
+console.log('--- Loading app/lib/supabase.ts ---');
+console.log('process.env.NEXT_PUBLIC_SUPABASE_URL (in supabase.ts):', process.env.NEXT_PUBLIC_SUPABASE_URL);
+console.log('process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY (in supabase.ts):', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+console.log('process.env.SUPABASE_SERVICE_ROLE_KEY (in supabase.ts):', process.env.SUPABASE_SERVICE_ROLE_KEY);
+console.log('---------------------------------');
 
 // Check if we're running in the browser or on the server
 const isClient = typeof window !== 'undefined';
@@ -16,8 +20,34 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
  * Creates a Supabase client for browser usage.
  * This should be used in client components.
  */
-export const createBrowserSupabaseClient = () => 
-  createBrowserClient(supabaseUrl, supabaseAnonKey);
+export const createBrowserSupabaseClient = () => {
+  // Check if environment variables are available
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('Supabase environment variables are missing');
+    // Return a dummy client to prevent application crashes
+    return {
+      from: () => ({
+        select: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+        insert: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+        update: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+        delete: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+        eq: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+      }),
+      auth: {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+        signOut: async () => ({ error: null }),
+      },
+    } as any;
+  }
+  
+  // Create and return the actual client when environment variables are available
+  // Ensure URL doesn't have any unexpected spaces or line breaks
+  const cleanUrl = supabaseUrl.trim();
+  const cleanKey = supabaseAnonKey.trim();
+  console.log('Creating Supabase client with URL:', cleanUrl);
+  return createBrowserClient(cleanUrl, cleanKey);
+};
 
 /**
  * Singleton browser client
@@ -37,16 +67,110 @@ export const createAdminSupabaseClient = () =>
     }
   });
 
+// Server-side Supabase client for API routes
+export const serverSupabase = (() => {
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error('Supabase service role key is missing');
+    // Return a more robust dummy client to prevent application crashes from chained methods
+    const dummyChain = {
+      select: () => dummyChain,
+      insert: () => dummyChain,
+      update: () => dummyChain,
+      delete: () => dummyChain,
+      eq: () => dummyChain,
+      neq: () => dummyChain,
+      gt: () => dummyChain,
+      lt: () => dummyChain,
+      gte: () => dummyChain,
+      lte: () => dummyChain,
+      like: () => dummyChain,
+      ilike: () => dummyChain,
+      is: () => dummyChain,
+      in: () => dummyChain,
+      contains: () => dummyChain,
+      containedBy: () => dummyChain,
+      rangeGt: () => dummyChain,
+      rangeGte: () => dummyChain,
+      rangeLt: () => dummyChain,
+      rangeLte: () => dummyChain,
+      rangeAdjacent: () => dummyChain,
+      overlaps: () => dummyChain,
+      textSearch: () => dummyChain,
+      match: () => dummyChain,
+      not: () => dummyChain,
+      or: () => dummyChain,
+      filter: () => dummyChain,
+      limit: () => dummyChain,
+      order: () => dummyChain,
+      range: () => dummyChain,
+      single: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+      maybeSingle: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+      csv: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+      // Add any other methods that might be chained
+      then: (onfulfilled: any) => { // Handle promises
+        if (onfulfilled) {
+          onfulfilled({ data: null, error: new Error('Supabase configuration missing') });
+        }
+        return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
+      },
+      catch: (onrejected: any) => { // Handle promises
+         if (onrejected) {
+           onrejected(new Error('Supabase configuration missing'));
+         }
+        return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
+      },
+      finally: (onfinally: any) => { // Handle promises
+        if (onfinally) {
+          onfinally();
+        }
+        return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
+      },
+      [Symbol.toStringTag]: 'Promise',
+      data: null,
+      error: new Error('Supabase configuration missing')
+    };
+    
+    return {
+      from: () => dummyChain,
+      auth: {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+        // Add other auth methods if needed
+      },
+      // Add other top-level methods if needed (e.g., rpc)
+    } as any;
+  }
+  
+  // Clean up URL and key to prevent any space/newline issues
+  const cleanUrl = supabaseUrl.trim();
+  const cleanKey = supabaseServiceKey.trim();
+  console.log('Creating server API Supabase client with URL:', cleanUrl);
+  
+  return createClient(cleanUrl, cleanKey, {
+    auth: {
+      persistSession: false,
+    }
+  });
+})();
+
 /**
  * Checks if the Supabase connection is available
  * @returns True if connection is successful, false otherwise
  */
 export async function checkSupabaseConnection(): Promise<boolean> {
   try {
-    const { data, error } = await supabase.from('patients').select('id').limit(1);
-    if (error && error.code !== '42P01') { // 42P01 means table doesn't exist, which is fine
-      console.error('Supabase connection error:', error);
-      return false;
+    if (isClient) {
+      const { data, error } = await supabase.from('patients').select('id').limit(1);
+      if (error && error.code !== '42P01') { // 42P01 means table doesn't exist, which is fine
+        console.error('Supabase connection error:', error);
+        return false;
+      }
+    } else {
+      const { data, error } = await serverSupabase.from('patients').select('id').limit(1);
+      if (error && error.code !== '42P01') {
+        console.error('Supabase server connection error:', error);
+        return false;
+      }
     }
     return true;
   } catch (error) {
@@ -56,11 +180,16 @@ export async function checkSupabaseConnection(): Promise<boolean> {
 }
 
 /**
- * Fetches patients from Supabase
+ * CLIENT-SIDE ONLY: Fetches patients from Supabase
  * @param filterByCurrentUser Whether to filter patients by the current user's email (true by default)
  * @returns Array of patients
  */
-export async function getSupabasePatients(filterByCurrentUser = true) {
+export async function getClientSupabasePatients(filterByCurrentUser = true) {
+  if (!isClient) {
+    console.error('getClientSupabasePatients should only be called from client components');
+    return [];
+  }
+  
   try {
     // Always use client-side Supabase in this client component
     const clientSupabase = supabase;
@@ -90,19 +219,52 @@ export async function getSupabasePatients(filterByCurrentUser = true) {
     
     return data || [];
   } catch (error) {
-    console.error('Error in getSupabasePatients:', error);
+    console.error('Error in getClientSupabasePatients:', error);
     return [];
   }
 }
 
 /**
- * Fetches notes for a specific patient from Supabase
- * @param patientId The patient's ID
- * @returns Array of notes
+ * SERVER-SIDE ONLY: Fetches patients from Supabase
+ * This is meant to be used in API routes and server components
  */
-export async function getSupabaseNotes(patientId: string) {
+export async function getSupabasePatients(providerEmail?: string | null) {
   try {
-    // Always use client-side Supabase in this client component
+    let query = serverSupabase
+      .from('patients')
+      .select('*')
+      .eq('is_deleted', false)
+      .order('created_at', { ascending: false });
+    
+    // Filter by provider email if provided
+    if (providerEmail) {
+      query = query.eq('provider_email', providerEmail);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('Error fetching patients from server-side Supabase:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Error in getSupabasePatients (server-side):', error);
+    return [];
+  }
+}
+
+/**
+ * CLIENT-SIDE ONLY: Fetches notes for a specific patient from Supabase
+ */
+export async function getClientSupabaseNotes(patientId: string) {
+  if (!isClient) {
+    console.error('getClientSupabaseNotes should only be called from client components');
+    return [];
+  }
+  
+  try {
     const clientSupabase = supabase;
     
     const { data, error } = await clientSupabase
@@ -118,7 +280,31 @@ export async function getSupabaseNotes(patientId: string) {
     
     return data || [];
   } catch (error) {
-    console.error('Error in getSupabaseNotes:', error);
+    console.error('Error in getClientSupabaseNotes:', error);
+    return [];
+  }
+}
+
+/**
+ * SERVER-SIDE ONLY: Fetches notes for a specific patient from Supabase
+ * This is meant to be used in API routes and server components
+ */
+export async function getSupabaseNotes(patientId: string) {
+  try {
+    const { data, error } = await serverSupabase
+      .from('notes')
+      .select('*')
+      .eq('patient_id', patientId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error(`Error fetching notes for patient ${patientId} from server-side Supabase:`, error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Error in getSupabaseNotes (server-side):', error);
     return [];
   }
 }
@@ -128,7 +314,7 @@ export async function getSupabaseNotes(patientId: string) {
  * @param record The Supabase record to convert
  * @returns Converted record in Prisma format
  */
-interface SupabasePatient {
+export interface SupabasePatient {
   id: string;
   created_at: string;
   updated_at: string;
@@ -138,7 +324,7 @@ interface SupabasePatient {
   provider_email: string | null;
 }
 
-interface SupabaseNote {
+export interface SupabaseNote {
   id: string;
   created_at: string;
   updated_at: string;
@@ -150,7 +336,7 @@ interface SupabaseNote {
   is_initial_visit: boolean;
 }
 
-interface SupabaseAppSettings {
+export interface SupabaseAppSettings {
   id: string;
   dark_mode: boolean;
   gpt_model: string;
@@ -165,7 +351,7 @@ interface SupabaseAppSettings {
 
 type SupabaseRecord = SupabasePatient | SupabaseNote | SupabaseAppSettings;
 
-interface PrismaPatient {
+export interface PrismaPatient {
   id: string;
   createdAt: Date;
   updatedAt: Date;
@@ -175,7 +361,7 @@ interface PrismaPatient {
   providerEmail: string | null;
 }
 
-interface PrismaNote {
+export interface PrismaNote {
   id: string;
   createdAt: Date;
   updatedAt: Date;
@@ -187,7 +373,7 @@ interface PrismaNote {
   isInitialVisit: boolean;
 }
 
-interface PrismaAppSettings {
+export interface PrismaAppSettings {
   id: string;
   darkMode: boolean;
   gptModel: string;
