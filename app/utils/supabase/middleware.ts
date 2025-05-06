@@ -1,116 +1,79 @@
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-// Simple debug function to help troubleshoot cookie issues
-const debugCookies = (request: NextRequest, prefix: string) => {
-  if (process.env.NODE_ENV === 'development') {
-    const cookies = request.cookies.getAll();
-    console.log(`[${prefix}] Found ${cookies.length} cookies`);
-    
-    // Look specifically for auth cookies
-    const authCookies = cookies.filter(c => c.name.includes('-auth-token'));
-    console.log(`[${prefix}] Auth cookies: ${authCookies.map(c => c.name).join(', ')}`);
-    
-    // Log the first few characters of each auth cookie
+// Helper to debug cookie issues
+function debugCookies(cookies: string[], prefix: string = 'DEBUG') {
+  // Only log in development
+  if (process.env.NODE_ENV !== 'development') return;
+  
+  const authCookies = cookies.filter(c => c.startsWith('sb-'));
+  if (process.env.NODE_ENV === 'development' && authCookies.length > 0) {
     authCookies.forEach(cookie => {
-      const valuePreview = cookie.value.substring(0, 30) + '...';
-      console.log(`[${prefix}] ${cookie.name}: ${valuePreview}`);
+      const [name, value] = cookie.split('=');
+      const valuePreview = value.length > 20 ? `${value.substring(0, 20)}...` : value;
     });
   }
-};
+}
 
 export async function updateSession(request: NextRequest) {
-  // Debug cookies before any processing
-  debugCookies(request, 'MIDDLEWARE-START');
+  try {
+    // Create an unmodified response
+    let response = NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    });
 
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          // Get all cookies from the request
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          // When setting cookies, set them in both the request and response
-          cookiesToSet.forEach(({ name, value, options }) => {
-            // For auth token cookies, log the type (to help debug base64 issues)
-            if (name.includes('-auth-token') && process.env.NODE_ENV === 'development') {
-              console.log(`[MIDDLEWARE-COOKIE] Setting cookie ${name}: ${value.substring(0, 10)}...`);
-              if (value.startsWith('base64-')) {
-                console.log(`[MIDDLEWARE-COOKIE] Detected base64-encoded cookie`);
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value;
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            // Only log in development
+            if (process.env.NODE_ENV === 'development') {
+              if (value.startsWith('eyJ')) {
+                // Base64 encoded JWT token detected
+                debugCookies([`${name}=${value}`], 'MIDDLEWARE-COOKIE');
               }
             }
-            
-            request.cookies.set(name, value);
-          });
-          
-          // Create a new response with the updated request
-          supabaseResponse = NextResponse.next({
-            request,
-          });
-          
-          // Also set cookies in the response
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
+            response.cookies.set(name, value, options);
+          },
+          remove(name: string, options: CookieOptions) {
+            response.cookies.set(name, '', options);
+          },
         },
-      },
-    }
-  );
+      }
+    );
 
-  // IMPORTANT: Avoid writing any logic between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with users being randomly logged out.
+    // Refresh session if it exists
+    const { data: { session } } = await supabase.auth.getSession();
 
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-  
-    // Debug cookies after auth check
-    debugCookies(request, 'MIDDLEWARE-AFTER-AUTH');
-  
-    if (
-      !user &&
-      !request.nextUrl.pathname.startsWith('/login') &&
-      !request.nextUrl.pathname.startsWith('/auth') &&
-      !request.nextUrl.pathname.startsWith('/api')) {
-      // no user, potentially respond by redirecting the user to the login page
-      console.log(`[MIDDLEWARE] No authenticated user, redirecting to login from: ${request.nextUrl.pathname}`);
-      const url = request.nextUrl.clone();
-      url.pathname = '/login';
-      return NextResponse.redirect(url);
+    // Handle authentication for protected routes
+    const isAuthRoute = request.nextUrl.pathname === '/login';
+    const isProtectedRoute = !request.nextUrl.pathname.startsWith('/_next') && 
+                           !request.nextUrl.pathname.startsWith('/static') &&
+                           !isAuthRoute;
+
+    if (isProtectedRoute && !session) {
+      // Redirect unauthenticated users to login
+      return NextResponse.redirect(new URL('/login', request.url));
     }
 
-    // If user exists and trying to access login page, redirect to home
-    if (user && request.nextUrl.pathname === '/login') {
-      console.log(`[MIDDLEWARE] User already logged in, redirecting to home`);
-      const url = request.nextUrl.clone();
-      url.pathname = '/';
-      return NextResponse.redirect(url);
+    if (isAuthRoute && session) {
+      // Redirect authenticated users to home
+      return NextResponse.redirect(new URL('/', request.url));
     }
 
-    return supabaseResponse;
+    return response;
   } catch (error) {
-    // Log any errors that occur during auth check
-    console.error('[MIDDLEWARE] Error checking authentication:', error);
-    
-    // On error for non-login paths, redirect to login (safety fallback)
-    if (!request.nextUrl.pathname.startsWith('/login') && 
-        !request.nextUrl.pathname.startsWith('/auth') &&
-        !request.nextUrl.pathname.startsWith('/api')) {
-      console.log(`[MIDDLEWARE] Error in auth check, redirecting to login for safety`);
-      const url = request.nextUrl.clone();
-      url.pathname = '/login';
-      return NextResponse.redirect(url);
+    // Log error and redirect to login for safety
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[MIDDLEWARE] Auth check error:', error);
     }
-    
-    return supabaseResponse;
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 } 

@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { createClient } from '../utils/supabase/client';
+import { createClient } from '@/app/utils/supabase/client';
 import { loginWithGoogle } from './actions';
 import DynamicLogo from '../components/DynamicLogo';
+import { useRouter } from 'next/navigation';
+import { Session } from '@supabase/supabase-js';
 
 export default function LoginPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -11,108 +13,86 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [videoLoaded, setVideoLoaded] = useState(false);
+  const [canAutoplay, setCanAutoplay] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const supabase = createClient();
+  const router = useRouter();
 
-  const handleLogin = async () => {
-    setError(null);
+  const handleGoogleLogin = async () => {
     try {
-      setIsLoading(true);
-      console.log('[AUTH] Initiating login with Google');
-      const result = await loginWithGoogle();
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      });
+
+      if (error) throw error;
       
-      if (result.error) {
-        console.error('[AUTH] Login error:', result.error);
-        setError(`Login failed: ${result.error}`);
-      } else if (result.url) {
-        console.log('[AUTH] Redirecting to OAuth provider URL');
-        window.location.href = result.url;
-      } else {
-        setError('Could not initiate login. Please try again.');
+      // Redirect to OAuth provider URL
+      if (data?.url) {
+        window.location.href = data.url;
       }
-    } catch (err) {
-      console.error('[AUTH] Unexpected login error:', err);
-      setError('An unexpected error occurred during login. Please try again.');
-    } finally {
-      setIsLoading(false);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to login with Google');
     }
   };
 
   useEffect(() => {
-    // Check current session
     const checkSession = async () => {
-      setIsCheckingSession(true);
       try {
-        console.log('[AUTH] Checking for existing session');
-        const { data: { session }, error } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
         
-        if (error) {
-          console.error('[AUTH] Error getting session:', error.message);
-          return null;
+        if (session) {
+          router.push('/');
         }
-        
-        setUserEmail(session?.user?.email ?? null);
-        
-        // If user is already logged in, redirect to home page
-        if (session?.user?.email) {
-          console.log('[AUTH] Existing session found, redirecting to home');
-          window.location.href = '/';
-        } else {
-          console.log('[AUTH] No active session found');
-        }
-      } catch (err) {
-        console.error('[AUTH] Unexpected error checking session:', err);
-      } finally {
-        setIsCheckingSession(false);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Failed to check session');
       }
     };
-    
-    checkSession();
 
-    // Listen for auth state changes
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log('[AUTH] Auth state changed:', _event);
-      setUserEmail(session?.user?.email ?? null);
-      
-      // If user becomes logged in, redirect to home page
-      if (session?.user?.email) {
-        console.log('[AUTH] User logged in, redirecting to home');
-        window.location.href = '/';
+    checkSession();
+  }, [router]);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
+      if (session) {
+        router.push('/');
       }
     });
 
-    // Preload and play video background
-    if (videoRef.current) {
-      // Add event listeners to track video loading
-      videoRef.current.addEventListener('loadeddata', () => {
-        console.log('[VIDEO] Video data loaded');
-        setVideoLoaded(true);
-      });
-      
-      videoRef.current.addEventListener('canplaythrough', () => {
-        console.log('[VIDEO] Video can play through');
-        // Start playing once it can play through
-        videoRef.current?.play().catch(err => {
-          console.log('[VIDEO] Video autoplay prevented by browser:', err);
-        });
-      });
-      
-      videoRef.current.addEventListener('error', (e) => {
-        console.error('[VIDEO] Error loading video:', e);
-      });
-      
-      // Force load the video
-      videoRef.current.load();
-    }
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  useEffect(() => {
+    const videoElement = videoRef.current;
+    if (!videoElement) return;
+
+    const handleLoadedData = () => {
+      setVideoLoaded(true);
+    };
+
+    const handleCanPlayThrough = () => {
+      setCanAutoplay(true);
+    };
+
+    const handleAutoplayError = (event: ErrorEvent) => {
+      setCanAutoplay(false);
+      setError('Video autoplay prevented by browser settings');
+    };
+
+    videoElement.addEventListener('loadeddata', handleLoadedData);
+    videoElement.addEventListener('canplaythrough', handleCanPlayThrough);
+    videoElement.addEventListener('error', handleAutoplayError);
 
     return () => {
-      listener.subscription.unsubscribe();
-      // Clean up event listeners
-      if (videoRef.current) {
-        videoRef.current.removeEventListener('loadeddata', () => setVideoLoaded(true));
-        videoRef.current.removeEventListener('canplaythrough', () => {});
-        videoRef.current.removeEventListener('error', () => {});
-      }
+      videoElement.removeEventListener('loadeddata', handleLoadedData);
+      videoElement.removeEventListener('canplaythrough', handleCanPlayThrough);
+      videoElement.removeEventListener('error', handleAutoplayError);
     };
   }, []);
 
@@ -161,7 +141,7 @@ export default function LoginPage() {
             )}
             <button
               type="button"
-              onClick={handleLogin}
+              onClick={handleGoogleLogin}
               disabled={isLoading}
               className="w-64 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white py-3 px-6 rounded-lg transition transform hover:scale-105 active:scale-95 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
