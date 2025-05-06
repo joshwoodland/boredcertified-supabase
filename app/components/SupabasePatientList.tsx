@@ -87,7 +87,10 @@ export default function SupabasePatientList({
         const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
         const formattedPatients = supabasePatients
           .map((patient: SupabasePatient) => convertToAppFormat(patient, 'patient'))
-          .filter((patient): patient is AppPatient => patient !== null && patient.isDeleted === showTrash)
+          .filter((patient): patient is AppPatient => {
+            if (!patient || !('isDeleted' in patient)) return false;
+            return patient.isDeleted === showTrash;
+          })
           .sort((a: AppPatient, b: AppPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
         
         setPatients(formattedPatients);
@@ -182,12 +185,6 @@ export default function SupabasePatientList({
           .eq('id', patientId);
 
         if (error) throw error;
-      } else {
-        // Update in SQLite
-        await prisma.patient.update({
-          where: { id: patientId },
-          data: { name: editName.trim() },
-        });
       }
 
       onUpdatePatient(patientId, editName.trim());
