@@ -16,6 +16,8 @@ import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 import DynamicLogo from './components/DynamicLogo';
 import { createBrowserSupabaseClient } from './lib/supabase';
+import type { PrismaPatient } from './lib/supabase';
+import type { Note } from './types/notes';
 
 // Create a Supabase client for direct database access
 const supabase = createBrowserSupabaseClient();
@@ -54,11 +56,11 @@ function normalizePatientId(id: any): string {
 }
 
 export default function Home() {
-  const { settings } = useAppSettings();
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const { settings, loading: settingsLoading, error: settingsError, fetchSettings } = useAppSettings();
+  const [patients, setPatients] = useState<PrismaPatient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>();
-  const [currentNote, setCurrentNote] = useState<Patient['notes'][0] | null>(null);
-  const [patientNotes, setPatientNotes] = useState<Patient['notes']>([]);
+  const [currentNote, setCurrentNote] = useState<Note | null>(null);
+  const [patientNotes, setPatientNotes] = useState<Note[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState<string>('');
@@ -69,7 +71,7 @@ export default function Home() {
   const [showManualTranscriptModal, setShowManualTranscriptModal] = useState(false);
   const [forceCollapse, setForceCollapse] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Processing...');
-  const [trashedPatientsData, setTrashedPatientsData] = useState<Patient[]>([]);
+  const [trashedPatientsData, setTrashedPatientsData] = useState<PrismaPatient[]>([]);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showInitialVisitModal, setShowInitialVisitModal] = useState(false);
@@ -81,6 +83,7 @@ export default function Home() {
   const [isAudioRecordingsOpen, setIsAudioRecordingsOpen] = useState(false);
   const [notesRefreshTrigger, setNotesRefreshTrigger] = useState(0); // Add refresh trigger state
   const searchRef = useRef<HTMLDivElement>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Handle clicks outside of the search dropdown
   useEffect(() => {
@@ -159,9 +162,41 @@ export default function Home() {
     "Walter White from Breaking Bad is calculating medication dosages… let's double-check that. ⚗️"
   ];
 
+  // Function to handle initial data loading
+  const loadInitialData = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Fetch settings and patients in parallel
+      await Promise.all([
+        fetchSettings(),
+        // We'll get patients through the SupabasePatientList component's callback
+        Promise.resolve()
+      ]);
+
+      if (settingsError) {
+        console.error('Error loading settings:', settingsError);
+        setError('Failed to load settings');
+      }
+    } catch (err) {
+      console.error('Error loading initial data:', err);
+      setError('Failed to load initial data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load initial data when component mounts
   useEffect(() => {
-    fetchPatients();
-  }, [showTrash]);
+    loadInitialData();
+  }, []);
+
+  // Handle patients loaded from SupabasePatientList
+  const handlePatientsLoaded = (loadedPatients: PrismaPatient[]) => {
+    setPatients(loadedPatients);
+    setIsLoading(false);
+  };
 
   useEffect(() => {
     if (selectedPatientId) {
@@ -211,7 +246,7 @@ export default function Home() {
       const response = await fetch(`/api/patients?showDeleted=${showTrash}`);
       const data = await response.json();
       setPatients(data);
-      setTrashedPatientsData(data.filter((p: Patient) => p.isDeleted));
+      setTrashedPatientsData(data.filter((p: PrismaPatient) => p.isDeleted));
     } catch (error) {
       console.error('Error fetching patients:', error);
       setError('Failed to load patients. Please refresh the page.');
@@ -602,12 +637,20 @@ export default function Home() {
     }
   };
 
-  const handleUpdatePatient = (patientId: string, newName: string) => {
-    setPatients(prevPatients =>
-      prevPatients.map(patient =>
-        patient.id === patientId ? { ...patient, name: newName } : patient
-      )
-    );
+  const handleUpdatePatient = async (patientId: string, name: string) => {
+    try {
+      const response = await fetch('/api/patients', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ id: patientId, name }),
+      });
+      if (!response.ok) throw new Error('Failed to update patient');
+    } catch (error) {
+      console.error('Error updating patient:', error);
+      setError('Failed to update patient');
+    }
   };
 
   const selectedPatient = patients.find(p => p.id === selectedPatientId);
@@ -658,7 +701,7 @@ export default function Home() {
 
                   <div className="max-h-60 overflow-y-auto">
                     {filteredPatients.length > 0 ? (
-                      filteredPatients.map((patient: Patient) => (
+                      filteredPatients.map((patient: PrismaPatient) => (
                         <div
                           key={patient.id}
                           className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
@@ -710,9 +753,9 @@ export default function Home() {
           </div>
         </div>
 
-        {error && (
+        {(error || settingsError) && (
           <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
-            {error}
+            {error || settingsError}
           </div>
         )}
 
@@ -726,6 +769,7 @@ export default function Home() {
               onRestorePatient={handleRestorePatient}
               onUpdatePatient={handleUpdatePatient}
               showTrash={showTrash}
+              onPatientsLoaded={handlePatientsLoaded}
             />
           </div>
 

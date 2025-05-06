@@ -1,42 +1,36 @@
-import { useEffect } from 'react';
-import { FiCheckCircle, FiAlertCircle, FiInfo } from 'react-icons/fi';
+import React, { useEffect } from 'react';
+import { FiX, FiCheck, FiAlertCircle } from 'react-icons/fi';
 
 interface ToastProps {
   message: string;
-  type?: 'success' | 'error' | 'info';
-  duration?: number;
+  type: 'success' | 'error';
   onClose: () => void;
 }
 
-export default function Toast({ message, type = 'info', duration = 3000, onClose }: ToastProps) {
+export default function Toast({ message, type, onClose }: ToastProps) {
   useEffect(() => {
     const timer = setTimeout(() => {
       onClose();
-    }, duration);
+    }, 3000);
 
     return () => clearTimeout(timer);
-  }, [duration, onClose]);
+  }, [onClose]);
 
-  const bgColor = {
-    success: 'bg-green-500',
-    error: 'bg-red-500',
-    info: 'bg-blue-500',
-  }[type];
-
-  const Icon = {
-    success: FiCheckCircle,
-    error: FiAlertCircle,
-    info: FiInfo,
-  }[type];
+  const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+  const Icon = type === 'success' ? FiCheck : FiAlertCircle;
 
   return (
-    <div
-      className={`fixed bottom-4 right-4 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg 
-        flex items-center gap-2 animate-fade-in z-50`}
-      role="alert"
-    >
-      <Icon className="w-5 h-5" />
-      <span>{message}</span>
+    <div className="fixed bottom-4 right-4 z-50">
+      <div className={`${bgColor} text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3`}>
+        <Icon className="w-5 h-5" />
+        <span className="font-medium">{message}</span>
+        <button
+          onClick={onClose}
+          className="ml-2 text-white hover:text-gray-200 focus:outline-none"
+        >
+          <FiX className="w-5 h-5" />
+        </button>
+      </div>
     </div>
   );
 } 

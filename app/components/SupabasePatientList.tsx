@@ -8,11 +8,12 @@ interface Patient extends PrismaPatient {}
 
 interface SupabasePatientListProps {
   selectedPatientId?: string;
-  onSelectPatient: (patientId: string) => void;
-  onMoveToTrash: (patientId: string) => void;
-  onRestorePatient: (patientId: string) => void;
-  onUpdatePatient: (patientId: string, name: string) => void;
+  onSelectPatient: (id: string) => void;
+  onMoveToTrash: (id: string) => void;
+  onRestorePatient: (id: string) => void;
+  onUpdatePatient: (id: string, name: string) => void;
   showTrash: boolean;
+  onPatientsLoaded?: (patients: Patient[]) => void;
 }
 
 /**
@@ -24,7 +25,8 @@ export default function SupabasePatientList({
   onMoveToTrash,
   onRestorePatient,
   onUpdatePatient,
-  showTrash
+  showTrash,
+  onPatientsLoaded
 }: SupabasePatientListProps) {
   const [patients, setPatients] = useState<Patient[]>([]); // State uses the Patient (PrismaPatient) type
   const [loading, setLoading] = useState(true);
@@ -75,40 +77,42 @@ export default function SupabasePatientList({
     );
   };
 
-  useEffect(() => {
-    async function loadPatients() {
-      setLoading(true);
-      setError(null);
+  // Function to load patients
+  const loadPatients = async () => {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const isSupabaseAvailable = await checkSupabaseConnection();
-
-        if (isSupabaseAvailable) {
-          console.log('Supabase connection available, fetching patients client-side...');
-          const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
-
-          const formattedPatients = supabasePatients
-            .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
-            .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
-            .sort((a: PrismaPatient, b: PrismaPatient) =>
-              b.createdAt.getTime() - a.createdAt.getTime()
-            ) as Patient[]; // Cast to Patient[] which extends PrismaPatient
-
-          setPatients(formattedPatients);
-          setDataSource('supabase');
-          console.log(`Loaded ${formattedPatients.length} patients from Supabase (Client-side).`);
-        } else {
-          console.error('Supabase connection unavailable. Please check your connection settings.');
-          setError('Database connection unavailable. Please check your connection settings.');
-        }
-      } catch (err) {
-        console.error('Error loading patients:', err);
-        setError('Failed to load patients. Please check your database connection settings.');
-      } finally {
-        setLoading(false);
+    try {
+      const isSupabaseAvailable = await checkSupabaseConnection();
+      if (isSupabaseAvailable) {
+        const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
+        const formattedPatients = supabasePatients
+          .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
+          .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
+          .sort((a: PrismaPatient, b: PrismaPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
+        
+        setPatients(formattedPatients);
+        setDataSource('supabase');
+        
+        // Call the callback with loaded patients
+        onPatientsLoaded?.(formattedPatients);
+        
+        return formattedPatients;
+      } else {
+        console.error('Supabase connection unavailable. Please check your connection settings.');
+        setError('Database connection unavailable. Please check your connection settings.');
+        return [];
       }
+    } catch (err) {
+      console.error('Error reloading patients:', err);
+      setError('Failed to reload patients. Please check your database connection settings.');
+      return [];
+    } finally {
+      setLoading(false);
     }
+  };
 
+  useEffect(() => {
     loadPatients();
   }, [showTrash]);
 
@@ -280,33 +284,6 @@ export default function SupabasePatientList({
       setError('Failed to restore patient');
     } finally {
       setIsProcessing(null);
-    }
-  };
-
-  // Function to load patients
-  const loadPatients = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const isSupabaseAvailable = await checkSupabaseConnection();
-      if (isSupabaseAvailable) {
-        const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
-        const formattedPatients = supabasePatients
-          .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
-          .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
-          .sort((a: PrismaPatient, b: PrismaPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
-        setPatients(formattedPatients);
-        setDataSource('supabase');
-      } else {
-        console.error('Supabase connection unavailable. Please check your connection settings.');
-        setError('Database connection unavailable. Please check your connection settings.');
-      }
-    } catch (err) {
-      console.error('Error reloading patients:', err);
-      setError('Failed to reload patients. Please check your database connection settings.');
-    } finally {
-      setLoading(false);
     }
   };
 
