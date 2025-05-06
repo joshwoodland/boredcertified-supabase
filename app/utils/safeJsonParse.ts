@@ -15,13 +15,26 @@ export function safeJsonParse<T>(jsonString: string, fallback: T | null = null):
     
     // Try to clean up common JSON parsing issues
     try {
-      // Try to find a complete JSON object and ignore extra characters
-      const objectRegex = /({[\s\S]*})/; // Using [\s\S] instead of dot with 's' flag
+      // First attempt: try to find a complete JSON object by matching balanced braces
+      // This is a more robust approach for finding a complete JSON object
+      const objectRegex = /({(?:[^{}]|(?:\{[^{}]*\}))*})/;
       const matches = jsonString.match(objectRegex);
+      
       if (matches && matches[1]) {
         const cleanedJson = matches[1];
         console.log('Attempting to parse cleaned JSON:', cleanedJson.substring(0, 50) + '...');
         return JSON.parse(cleanedJson) as T;
+      }
+      
+      // Second attempt: trim leading/trailing non-JSON characters
+      if (jsonString.includes('{') && jsonString.includes('}')) {
+        const startPos = jsonString.indexOf('{');
+        const endPos = jsonString.lastIndexOf('}') + 1;
+        if (startPos >= 0 && endPos > startPos) {
+          const extractedJson = jsonString.substring(startPos, endPos);
+          console.log('Attempting to parse extracted JSON object:', extractedJson.substring(0, 50) + '...');
+          return JSON.parse(extractedJson) as T;
+        }
       }
     } catch (cleanupError) {
       console.error('JSON cleanup failed:', cleanupError);
