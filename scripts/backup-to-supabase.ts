@@ -1,4 +1,3 @@
-const { PrismaClient } = require('@prisma/client');
 const { createClient } = require('@supabase/supabase-js');
 const dotenv = require('dotenv');
 const fs = require('node:fs');
@@ -18,31 +17,34 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Initialize SQLite Prisma client for our local database
-const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: process.env.SQLITE_DATABASE_URL || 'file:./prisma/dev.db',
-    },
-  },
-});
-
 /**
- * Retrieves all patients and their notes from the local SQLite database
+ * Retrieves all patients and their notes from Supabase
  */
-async function getLocalData() {
-  console.log('Fetching data from local SQLite database...');
+async function getSupabaseData() {
+  console.log('Fetching data from Supabase...');
   
-  // Get all patients with their notes
-  const patients = await prisma.patient.findMany({
-    include: { notes: true },
-  });
+  // Get all patients
+  const { data: patients, error: patientsError } = await supabase
+    .from('patients')
+    .select('*, notes(*)');
+  
+  if (patientsError) {
+    console.error('Error fetching patients:', patientsError);
+    return { patients: [], settings: null };
+  }
   console.log(`Found ${patients.length} patients`);
   
   // Get app settings
-  const settings = await prisma.appSettings.findUnique({
-    where: { id: 'default' },
-  });
+  const { data: settings, error: settingsError } = await supabase
+    .from('app_settings')
+    .select('*')
+    .eq('id', 'default')
+    .single();
+  
+  if (settingsError) {
+    console.error('Error fetching settings:', settingsError);
+    return { patients, settings: null };
+  }
   console.log('Retrieved app settings');
   
   return { patients, settings };
@@ -52,37 +54,40 @@ async function getLocalData() {
 /**
  * @typedef {Object} Note
  * @property {string} id
- * @property {Date|string} createdAt
- * @property {Date|string} updatedAt
- * @property {string} patientId
+ * @property {string} created_at
+ * @property {string} updated_at
+ * @property {string} patient_id
  * @property {string} transcript
  * @property {string} content
  * @property {string|null} summary
- * @property {string|null} audioFileUrl
- * @property {boolean} isInitialVisit
+ * @property {string|null} audio_file_url
+ * @property {boolean} is_initial_visit
  */
 
 /**
  * @typedef {Object} Patient
  * @property {string} id
- * @property {Date|string} createdAt
- * @property {Date|string} updatedAt
+ * @property {string} created_at
+ * @property {string} updated_at
  * @property {string} name
- * @property {boolean} isDeleted
- * @property {Date|string|null} deletedAt
+ * @property {boolean} is_deleted
+ * @property {string|null} deleted_at
+ * @property {string|null} provider_email
  * @property {Note[]} notes
  */
 
 /**
  * @typedef {Object} AppSettings
  * @property {string} id
- * @property {boolean} darkMode
- * @property {string} gptModel
- * @property {string} initialVisitPrompt
- * @property {string} followUpVisitPrompt
- * @property {boolean} autoSave
- * @property {boolean} lowEchoCancellation
- * @property {Date|string} updatedAt
+ * @property {boolean} dark_mode
+ * @property {string} gpt_model
+ * @property {string} initial_visit_prompt
+ * @property {string} follow_up_visit_prompt
+ * @property {boolean} auto_save
+ * @property {boolean} low_echo_cancellation
+ * @property {string|null} email
+ * @property {string|null} user_id
+ * @property {string} updated_at
  */
 
 /**
@@ -101,7 +106,8 @@ async function createSupabaseTables() {
         updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
         name TEXT NOT NULL,
         is_deleted BOOLEAN DEFAULT FALSE,
-        deleted_at TIMESTAMP WITH TIME ZONE
+        deleted_at TIMESTAMP WITH TIME ZONE,
+        provider_email TEXT
       );
 
       -- Create notes table if it doesn't exist
@@ -126,6 +132,8 @@ async function createSupabaseTables() {
         follow_up_visit_prompt TEXT NOT NULL,
         auto_save BOOLEAN DEFAULT FALSE,
         low_echo_cancellation BOOLEAN DEFAULT FALSE,
+        email TEXT,
+        user_id TEXT,
         updated_at TIMESTAMP WITH TIME ZONE NOT NULL
       );
     `
@@ -158,7 +166,8 @@ async function checkAndCreateTables() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         name: 'Test Patient',
-        is_deleted: false
+        is_deleted: false,
+        provider_email: null
       }).select();
     }
     
@@ -188,6 +197,8 @@ async function checkAndCreateTables() {
         follow_up_visit_prompt: 'Test Prompt',
         auto_save: false,
         low_echo_cancellation: false,
+        email: null,
+        user_id: null,
         updated_at: new Date().toISOString()
       }).select();
     }
@@ -199,142 +210,50 @@ async function checkAndCreateTables() {
 }
 
 /**
- * Uploads data to Supabase tables
- * @param {Object} data - The data to upload
- * @param {Patient[]} data.patients - Array of patients
- * @param {AppSettings|null} data.settings - App settings
- */
-async function uploadToSupabase(data) {
-  console.log('Uploading data to Supabase...');
-  
-  // Store patients in Supabase
-  let patientsUploaded = 0;
-  for (const patient of data.patients) {
-    const { notes, ...patientData } = patient;
-    
-    // Insert or update patient
-    const { error: patientError } = await supabase
-      .from('patients')
-      .upsert({
-        id: patientData.id,
-        created_at: new Date(patientData.createdAt).toISOString(),
-        updated_at: new Date(patientData.updatedAt).toISOString(),
-        name: patientData.name,
-        is_deleted: patientData.isDeleted,
-        deleted_at: patientData.deletedAt ? new Date(patientData.deletedAt).toISOString() : null,
-      });
-    
-    if (patientError) {
-      console.error(`Error uploading patient ${patientData.name}:`, patientError);
-      continue;
-    }
-    
-    patientsUploaded++;
-    
-    // Insert or update notes for this patient
-    let notesUploaded = 0;
-    if (notes && notes.length > 0) {
-      for (const note of notes) {
-        const { error: noteError } = await supabase
-          .from('notes')
-          .upsert({
-            id: note.id,
-            created_at: new Date(note.createdAt).toISOString(),
-            updated_at: new Date(note.updatedAt).toISOString(),
-            patient_id: note.patientId,
-            transcript: note.transcript,
-            content: note.content,
-            summary: note.summary || null,
-            audio_file_url: note.audioFileUrl || null,
-            is_initial_visit: note.isInitialVisit,
-          });
-        
-        if (noteError) {
-          console.error(`Error uploading note for patient ${patientData.name}:`, noteError);
-          continue;
-        }
-        
-        notesUploaded++;
-      }
-      
-      console.log(`Uploaded ${notesUploaded} notes for patient ${patientData.name}`);
-    }
-  }
-  
-  console.log(`Successfully uploaded ${patientsUploaded} patients`);
-  
-  // Upload app settings
-  if (data.settings) {
-    const { error: settingsError } = await supabase
-      .from('app_settings')
-      .upsert({
-        id: data.settings.id,
-        dark_mode: data.settings.darkMode,
-        gpt_model: data.settings.gptModel,
-        initial_visit_prompt: data.settings.initialVisitPrompt,
-        follow_up_visit_prompt: data.settings.followUpVisitPrompt,
-        auto_save: data.settings.autoSave,
-        low_echo_cancellation: data.settings.lowEchoCancellation,
-        updated_at: new Date(data.settings.updatedAt).toISOString(),
-      });
-    
-    if (settingsError) {
-      console.error('Error uploading app settings:', settingsError);
-    } else {
-      console.log('Successfully uploaded app settings');
-    }
-  }
-}
-
-/**
- * Save data to local JSON files as backup
- * @param {Object} data - The data to save
- * @param {Patient[]} data.patients - Array of patients
- * @param {AppSettings|null} data.settings - App settings
+ * Saves a local backup of the data
  */
 async function saveLocalBackup(data) {
-  console.log('Saving local backup files...');
+  console.log('Saving local backup...');
   
-  // Save patients and notes to JSON file
+  const timestamp = Date.now();
+  const backupDir = path.join(TEMP_DIR, `backup_${timestamp}`);
+  
+  if (!fs.existsSync(backupDir)) {
+    fs.mkdirSync(backupDir);
+  }
+  
   fs.writeFileSync(
-    path.join(TEMP_DIR, `patients_backup_${Date.now()}.json`),
+    path.join(backupDir, 'patients.json'),
     JSON.stringify(data.patients, null, 2)
   );
   
-  // Save settings to JSON file
   fs.writeFileSync(
-    path.join(TEMP_DIR, `settings_backup_${Date.now()}.json`),
+    path.join(backupDir, 'settings.json'),
     JSON.stringify(data.settings, null, 2)
   );
   
-  console.log(`Backup saved to ${TEMP_DIR}`);
+  console.log(`Backup saved to ${backupDir}`);
 }
-
 
 /**
  * Main function
  */
 async function main() {
   try {
-    console.log('Starting data backup to Supabase...');
+    console.log('Starting Supabase backup process...');
     
-    // Ensure tables exist in Supabase
+    // Create tables if they don't exist
     await createSupabaseTables();
     
-    // Get data from local database
-    const data = await getLocalData();
+    // Get data from Supabase
+    const data = await getSupabaseData();
     
-    // Save local backup just in case
+    // Save local backup
     await saveLocalBackup(data);
     
-    // Upload data to Supabase
-    await uploadToSupabase(data);
-    
-    console.log('Backup to Supabase completed successfully!');
+    console.log('Backup process completed successfully!');
   } catch (error) {
     console.error('Backup failed:', error);
-  } finally {
-    await prisma.$disconnect();
   }
 }
 

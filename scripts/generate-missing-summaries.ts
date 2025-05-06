@@ -1,67 +1,65 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
-import { checkSupabaseConnection, convertToPrismaFormat } from '@/app/lib/supabase';
+import { checkSupabaseConnection } from '@/app/lib/supabase';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
+
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Initialize Supabase client
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-// Initialize OpenAI client
-const openai = new OpenAI();
-
-async function generateSummary(content: string, model: string): Promise<string> {
+async function generateSummary(content: string, isInitialVisit: boolean) {
   try {
-    const completion = await openai.chat.completions.create({
-      model: model || 'gpt-4-turbo-preview',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a medical scribe assistant. Your task is to generate a concise summary of the medical note, focusing on key changes in medications, diagnoses, and treatment plans.'
-        },
-        {
-          role: 'user',
-          content: `Please provide a concise summary of this medical note, focusing on key changes in medications, diagnoses, and treatment plans:\n\n${content}`
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 500
-    });
-
-    return completion.choices[0]?.message?.content || '';
-  } catch (error) {
-    console.error('Error generating summary:', error);
-    throw error;
-  }
-}
-
-async function main() {
-  try {
-    // Check if Supabase is available
-    const isSupabaseAvailable = await checkSupabaseConnection();
-    
-    if (!isSupabaseAvailable) {
-      throw new Error('Supabase connection unavailable. Please check your connection settings.');
-    }
-
-    // Get current settings
-    const { data: settingsData, error: settingsError } = await supabase
+    // Get settings for the prompts
+    const { data: settings, error: settingsError } = await supabase
       .from('app_settings')
       .select('*')
       .eq('id', 'default')
       .single();
 
     if (settingsError) {
-      throw new Error(`Error fetching settings: ${settingsError.message}`);
+      console.error('Error fetching settings:', settingsError);
+      return null;
     }
 
-    const settings = convertToPrismaFormat(settingsData, 'settings');
-    if (!settings) {
-      throw new Error('Failed to convert settings data');
+    const prompt = isInitialVisit ? settings.initial_visit_prompt : settings.follow_up_visit_prompt;
+
+    const completion = await openai.chat.completions.create({
+      model: settings.gpt_model || 'gpt-4',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content }
+      ],
+      temperature: 0.7,
+      max_tokens: 500
+    });
+
+    return completion.choices[0]?.message?.content || null;
+  } catch (error) {
+    console.error('Error generating summary:', error);
+    return null;
+  }
+}
+
+async function main() {
+  try {
+    // Check Supabase connection
+    const isConnected = await checkSupabaseConnection();
+    if (!isConnected) {
+      throw new Error('Could not connect to Supabase');
     }
 
-    // Get all notes that don't have a summary
-    const { data: notesData, error: notesError } = await supabase
+    // Get all notes without summaries
+    const { data: notes, error: notesError } = await supabase
       .from('notes')
       .select('*')
       .is('summary', null);
@@ -70,52 +68,47 @@ async function main() {
       throw new Error(`Error fetching notes: ${notesError.message}`);
     }
 
-    console.log(`Found ${notesData.length} notes without summaries`);
+    if (!notes || notes.length === 0) {
+      console.log('No notes found without summaries');
+      return;
+    }
 
-    // Process notes in sequence to avoid rate limits
-    for (const noteData of notesData) {
-      try {
-        console.log(`Processing note ${noteData.id}...`);
-        
-        // Extract content for summarization
-        let content;
-        try {
-          // Try to parse JSON content format
-          const parsedContent = JSON.parse(noteData.content);
-          content = parsedContent.content || noteData.content;
-        } catch {
-          // If not JSON, use as is
-          content = noteData.content;
-        }
-        
-        const summary = await generateSummary(content, settings.gptModel || 'gpt-4-turbo-preview');
-        
-        // Update the note with the summary
+    console.log(`Found ${notes.length} notes without summaries`);
+
+    // Process each note
+    for (const note of notes) {
+      console.log(`Processing note ${note.id}...`);
+
+      // Generate summary
+      const summary = await generateSummary(note.content, note.is_initial_visit);
+
+      if (summary) {
+        // Update note with summary
         const { error: updateError } = await supabase
           .from('notes')
-          .update({ 
-            summary,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', noteData.id);
+          .update({ summary })
+          .eq('id', note.id);
 
         if (updateError) {
-          throw new Error(`Error updating note: ${updateError.message}`);
+          console.error(`Error updating note ${note.id}:`, updateError);
+          continue;
         }
 
-        console.log(`✓ Generated summary for note ${noteData.id}`);
-        
-        // Add a small delay to avoid hitting rate limits
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        console.error(`Failed to process note ${noteData.id}:`, error);
+        console.log(`Updated note ${note.id} with summary`);
+      } else {
+        console.error(`Failed to generate summary for note ${note.id}`);
       }
     }
 
-    console.log('Finished generating summaries');
+    console.log('Finished processing notes');
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error in main:', error);
   }
 }
 
-main(); 
+// Run the script
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  }); 

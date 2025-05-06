@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { checkSupabaseConnection, getClientSupabasePatients, convertToPrismaFormat, supabase, SupabasePatient, PrismaPatient } from '../lib/supabase';
-import { prisma } from '../lib/db';
+import { checkSupabaseConnection, getClientSupabasePatients, convertToAppFormat, supabase, SupabasePatient, AppPatient } from '../lib/supabase';
 import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
 
-// Use PrismaPatient as the primary type for the list after conversion
-interface Patient extends PrismaPatient {}
+// Use AppPatient as the primary type for the list after conversion
+interface Patient extends AppPatient {}
 
 interface SupabasePatientListProps {
   selectedPatientId?: string;
@@ -28,7 +27,7 @@ export default function SupabasePatientList({
   showTrash,
   onPatientsLoaded
 }: SupabasePatientListProps) {
-  const [patients, setPatients] = useState<Patient[]>([]); // State uses the Patient (PrismaPatient) type
+  const [patients, setPatients] = useState<Patient[]>([]); // State uses the Patient (AppPatient) type
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dataSource, setDataSource] = useState<'supabase'>('supabase');
@@ -87,9 +86,9 @@ export default function SupabasePatientList({
       if (isSupabaseAvailable) {
         const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
         const formattedPatients = supabasePatients
-          .map((patient: SupabasePatient) => convertToPrismaFormat(patient, 'patient'))
-          .filter((patient): patient is PrismaPatient => patient !== null && patient.isDeleted === showTrash)
-          .sort((a: PrismaPatient, b: PrismaPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
+          .map((patient: SupabasePatient) => convertToAppFormat(patient, 'patient'))
+          .filter((patient): patient is AppPatient => patient !== null && patient.isDeleted === showTrash)
+          .sort((a: AppPatient, b: AppPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
         
         setPatients(formattedPatients);
         setDataSource('supabase');
@@ -121,36 +120,26 @@ export default function SupabasePatientList({
     try {
       let newPatientId = '';
 
-      if (dataSource === 'supabase') {
-        // Get current user's session to access their email
-        const { data: { session } } = await supabase.auth.getSession();
-        const userEmail = session?.user?.email;
+      // Get current user's session to access their email
+      const { data: { session } } = await supabase.auth.getSession();
+      const userEmail = session?.user?.email;
 
-        console.log('Creating patient with provider email:', userEmail);
+      console.log('Creating patient with provider email:', userEmail);
 
-        // Generate a new UUID for the patient
-        newPatientId = crypto.randomUUID();
+      // Generate a new UUID for the patient
+      newPatientId = crypto.randomUUID();
 
-        // Add to Supabase with provider email
-        const { error } = await supabase.from('patients').insert({
-          id: newPatientId,
-          name: name,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          is_deleted: false,
-          provider_email: userEmail || 'joshwoodland@gmail.com', // Use current user's email or fallback
-        });
+      // Add to Supabase with provider email
+      const { error } = await supabase.from('patients').insert({
+        id: newPatientId,
+        name: name,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        is_deleted: false,
+        provider_email: userEmail || 'joshwoodland@gmail.com', // Use current user's email or fallback
+      });
 
-        if (error) throw error;
-      } else {
-        // Add to SQLite
-        const newPatient = await prisma.patient.create({
-          data: {
-            name: name,
-          },
-        });
-        newPatientId = newPatient.id;
-      }
+      if (error) throw error;
 
       // Reload the patient list
       await loadPatients();

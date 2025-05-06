@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getCurrentModel } from '@/app/utils/modelCache';
-import { checkSupabaseConnection, supabase, convertToPrismaFormat } from '@/app/lib/supabase';
+import { checkSupabaseConnection, supabase, convertToAppFormat } from '@/app/lib/supabase';
+import { cookies } from 'next/headers';
 
 const openai = new OpenAI();
 
@@ -48,7 +49,7 @@ export async function POST(
       return NextResponse.json({ error: 'Note not found' }, { status: 404 });
     }
 
-    const note = convertToPrismaFormat(noteData, 'note');
+    const note = convertToAppFormat(noteData, 'note');
     if (!note) {
       return NextResponse.json({ 
         error: 'Failed to convert note data', 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { checkSupabaseConnection, supabase, serverSupabase, convertToPrismaFormat, SupabaseNote } from '@/app/lib/supabase'
+import { checkSupabaseConnection, supabase, serverSupabase, convertToAppFormat, SupabaseNote } from '@/app/lib/supabase'
 import OpenAI from 'openai'
 import systemMessages from '@/app/config/systemMessages'
 import { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
@@ -7,6 +7,9 @@ import { formatSystemMessage } from '@/app/utils/formatSystemMessage'
 import { formatSoapNote } from '@/app/utils/formatSoapNote'
 import { estimateTokenCount, mightExceedTokenLimit } from '@/app/utils/tokenEncoding'
 import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages'
+import { v4 as uuidv4 } from 'uuid'
+import { createClient } from '@/app/utils/supabase/server'
+import { cookies } from 'next/headers'
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -81,7 +84,7 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
 
-    const patient = convertToPrismaFormat(patientData, 'patient');
+    const patient = convertToAppFormat(patientData, 'patient');
     if (!patient) {
       return NextResponse.json({
         error: 'Failed to convert patient data',
@@ -173,7 +176,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    const settings = convertToPrismaFormat(settingsData, 'settings');
+    const settings = convertToAppFormat(settingsData, 'settings');
     if (!settings) {
       return NextResponse.json({
         error: 'Failed to convert settings data',
@@ -265,7 +268,7 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
 
-      const note = convertToPrismaFormat(noteData, 'note');
+      const note = convertToAppFormat(noteData, 'note');
       if (!note) {
         return NextResponse.json({
           error: 'Failed to convert note data',
@@ -370,10 +373,10 @@ export async function GET(request: NextRequest) {
       console.log(`Found ${notesData.length} notes for patient ID: ${patientId}`);
     }
 
-    // Convert to Prisma format
+    // Convert to App format
     const notes = notesData
-      .map((note: SupabaseNote) => convertToPrismaFormat(note, 'note'))
-      .filter((note: unknown): note is NonNullable<ReturnType<typeof convertToPrismaFormat>> => note !== null);
+      .map((note: SupabaseNote) => convertToAppFormat(note, 'note'))
+      .filter((note: unknown): note is NonNullable<ReturnType<typeof convertToAppFormat>> => note !== null);
 
     return NextResponse.json(notes);
   } catch (error) {
@@ -392,7 +395,8 @@ function isValidModel(model: string): boolean {
     'gpt-4-32k',
     'gpt-3.5-turbo',
     'gpt-3.5-turbo-16k',
-    'gpt-4o'
+    'gpt-4o',
+    'gpt-4o-mini'
   ];
   return validModels.includes(model);
 }

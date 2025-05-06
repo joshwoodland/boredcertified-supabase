@@ -16,7 +16,7 @@ import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 import DynamicLogo from './components/DynamicLogo';
 import { createBrowserSupabaseClient } from './lib/supabase';
-import type { PrismaPatient } from './lib/supabase';
+import type { AppPatient } from './lib/supabase';
 import type { Note } from './types/notes';
 
 // Create a Supabase client for direct database access
@@ -57,7 +57,7 @@ function normalizePatientId(id: any): string {
 
 export default function Home() {
   const { settings, loading: settingsLoading, error: settingsError, fetchSettings } = useAppSettings();
-  const [patients, setPatients] = useState<PrismaPatient[]>([]);
+  const [patients, setPatients] = useState<AppPatient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>();
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
   const [patientNotes, setPatientNotes] = useState<Note[]>([]);
@@ -71,7 +71,7 @@ export default function Home() {
   const [showManualTranscriptModal, setShowManualTranscriptModal] = useState(false);
   const [forceCollapse, setForceCollapse] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Processing...');
-  const [trashedPatientsData, setTrashedPatientsData] = useState<PrismaPatient[]>([]);
+  const [trashedPatientsData, setTrashedPatientsData] = useState<AppPatient[]>([]);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showInitialVisitModal, setShowInitialVisitModal] = useState(false);
@@ -193,9 +193,10 @@ export default function Home() {
   }, []);
 
   // Handle patients loaded from SupabasePatientList
-  const handlePatientsLoaded = (loadedPatients: PrismaPatient[]) => {
+  const handlePatientsLoaded = (loadedPatients: AppPatient[]) => {
     setPatients(loadedPatients);
     setIsLoading(false);
+    setTrashedPatientsData(loadedPatients.filter((p: AppPatient) => p.isDeleted));
   };
 
   useEffect(() => {
@@ -246,7 +247,7 @@ export default function Home() {
       const response = await fetch(`/api/patients?showDeleted=${showTrash}`);
       const data = await response.json();
       setPatients(data);
-      setTrashedPatientsData(data.filter((p: PrismaPatient) => p.isDeleted));
+      setTrashedPatientsData(data.filter((p: AppPatient) => p.isDeleted));
     } catch (error) {
       console.error('Error fetching patients:', error);
       setError('Failed to load patients. Please refresh the page.');
@@ -701,7 +702,7 @@ export default function Home() {
 
                   <div className="max-h-60 overflow-y-auto">
                     {filteredPatients.length > 0 ? (
-                      filteredPatients.map((patient: PrismaPatient) => (
+                      filteredPatients.map((patient: AppPatient) => (
                         <div
                           key={patient.id}
                           className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"

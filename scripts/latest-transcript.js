@@ -1,46 +1,44 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { createClient } = require('@supabase/supabase-js');
+const dotenv = require('dotenv');
 
-async function findLatestTranscripts() {
+// Load environment variables
+dotenv.config({ path: '.env.local' });
+
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+async function main() {
   try {
-    const recentNotes = await prisma.note.findMany({
-      orderBy: {
-        createdAt: 'desc'
-      },
-      take: 3,
-      select: {
-        id: true,
-        createdAt: true,
-        transcript: true,
-        patientId: true,
-        patient: {
-          select: {
-            name: true
-          }
-        }
-      }
-    });
-    
-    if (recentNotes.length > 0) {
-      console.log(`Found ${recentNotes.length} recent notes:`);
-      
-      recentNotes.forEach((note, index) => {
-        console.log(`\n==== NOTE ${index + 1} ====`);
-        console.log(`ID: ${note.id}`);
-        console.log(`Created at: ${note.createdAt}`);
-        console.log(`Patient ID: ${note.patientId}`);
-        console.log(`Patient name: ${note.patient?.name || 'Unknown'}`);
-        console.log(`\nTranscript:\n${note.transcript}`);
-        console.log('=================\n');
-      });
-    } else {
-      console.log('No notes found in the database');
+    // Get the 5 most recent notes
+    const { data: recentNotes, error: notesError } = await supabase
+      .from('notes')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (notesError) {
+      console.error('Error fetching notes:', notesError);
+      return;
     }
+
+    if (!recentNotes || recentNotes.length === 0) {
+      console.log('No notes found');
+      return;
+    }
+
+    // Print each note's transcript
+    recentNotes.forEach((note, index) => {
+      console.log(`\nNote ${index + 1} (${new Date(note.created_at).toLocaleString()}):`);
+      console.log('Transcript:', note.transcript);
+      console.log('Content:', note.content);
+      console.log('Summary:', note.summary);
+      console.log('-'.repeat(80));
+    });
   } catch (error) {
     console.error('Error:', error);
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
-findLatestTranscripts(); 
+main(); 

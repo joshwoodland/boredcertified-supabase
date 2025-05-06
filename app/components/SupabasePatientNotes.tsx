@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { checkSupabaseConnection, getSupabaseNotes, convertToPrismaFormat, supabase, SupabaseNote, PrismaNote } from '../lib/supabase';
+import { checkSupabaseConnection, getSupabaseNotes, convertToAppFormat, supabase, SupabaseNote, AppNote } from '../lib/supabase';
 import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiZap, FiSend } from 'react-icons/fi';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
@@ -66,10 +66,10 @@ export default function SupabasePatientNotes({
         // Get data from Supabase
         const supabaseNotes = await getSupabaseNotes(patientId);
 
-        // Convert to Prisma format and ensure dates are Date objects
+        // Convert to App format and ensure dates are Date objects
         const formattedNotes = supabaseNotes
           .map((note: SupabaseNote) => {
-            const converted = convertToPrismaFormat(note, 'note') as PrismaNote | null;
+            const converted = convertToAppFormat(note, 'note') as AppNote | null;
             if (!converted) return null;
             
             // Ensure dates are properly converted

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkSupabaseConnection, supabase, convertToPrismaFormat } from '@/app/lib/supabase';
+import { checkSupabaseConnection, supabase, convertToAppFormat } from '@/app/lib/supabase';
 import OpenAI from 'openai';
 import { formatSoapNote } from '@/app/utils/formatSoapNote';
 import { safeJsonParse } from '@/app/utils/safeJsonParse';
+import { createClient } from '@/app/utils/supabase/server';
+import { cookies } from 'next/headers';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -47,7 +49,7 @@ export async function GET(
       return NextResponse.json({ error: 'Note not found' }, { status: 404 });
     }
 
-    note = convertToPrismaFormat(data, 'note');
+    note = convertToAppFormat(data, 'note');
     return NextResponse.json(note);
   } catch (error) {
     console.error('Error fetching note:', error);
@@ -104,7 +106,7 @@ export async function POST(
       return NextResponse.json({ error: 'Note not found' }, { status: 404 });
     }
 
-    const note = convertToPrismaFormat(noteData, 'note');
+    const note = convertToAppFormat(noteData, 'note');
     if (!note) {
       return NextResponse.json({ 
         error: 'Failed to convert note data', 
@@ -176,7 +178,7 @@ export async function POST(
       }, { status: 500 });
     }
 
-    const updatedNote = convertToPrismaFormat(updatedData, 'note');
+    const updatedNote = convertToAppFormat(updatedData, 'note');
     return NextResponse.json(updatedNote);
   } catch (error) {
     console.error('Error editing note:', error);

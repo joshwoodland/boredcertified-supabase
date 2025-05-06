@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkSupabaseConnection, supabase, convertToPrismaFormat, convertToSupabaseFormat, SupabaseNote } from '@/app/lib/supabase';
+import { checkSupabaseConnection, supabase, convertToAppFormat, convertToSupabaseFormat, SupabaseNote } from '@/app/lib/supabase';
 
 interface SyncRequest {
   deviceId: string;
@@ -125,9 +125,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Convert server notes to Prisma format for consistency
+    // Convert server notes to App format for consistency
     const formattedServerNotes = (serverNotes as SupabaseNote[])
-      .map(note => convertToPrismaFormat(note, 'note'))
+      .map(note => convertToAppFormat(note, 'note'))
       .filter(note => note !== null);
 
     return NextResponse.json({

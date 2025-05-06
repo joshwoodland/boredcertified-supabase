@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
-import { checkSupabaseConnection, convertToPrismaFormat } from '@/app/lib/supabase';
+import { checkSupabaseConnection, convertToAppFormat } from '@/app/lib/supabase';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -55,7 +55,7 @@ async function main() {
       throw new Error(`Error fetching settings: ${settingsError.message}`);
     }
 
-    const settings = convertToPrismaFormat(settingsData, 'settings');
+    const settings = convertToAppFormat(settingsData, 'settings');
     if (!settings) {
       throw new Error('Failed to convert settings data');
     }

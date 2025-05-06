@@ -2,6 +2,7 @@
 
 import { createClient } from '@/app/utils/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import type { AppPatient, AppNote, AppSettings } from '@/app/lib/supabase';
 
 // Get environment variables
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -41,9 +42,9 @@ export async function checkServerSupabaseConnection(): Promise<boolean> {
 }
 
 /**
- * Converts Supabase record format to Prisma format (server-side version)
+ * Converts Supabase record format to App format (server-side version)
  */
-export async function convertServerRecordToPrisma(record: any, type: 'patient' | 'note' | 'settings'): Promise<any> {
+export async function convertServerRecordToApp(record: any, type: 'patient' | 'note' | 'settings'): Promise<AppPatient | AppNote | AppSettings | null> {
   if (!record) return null;
   
   switch (type) {
@@ -56,7 +57,7 @@ export async function convertServerRecordToPrisma(record: any, type: 'patient' |
         isDeleted: record.is_deleted,
         deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
         providerEmail: record.provider_email,
-      };
+      } as AppPatient;
     }
     case 'note': {
       return {
@@ -69,7 +70,7 @@ export async function convertServerRecordToPrisma(record: any, type: 'patient' |
         summary: record.summary,
         audioFileUrl: record.audio_file_url,
         isInitialVisit: record.is_initial_visit,
-      };
+      } as AppNote;
     }
     case 'settings': {
       return {
@@ -83,10 +84,10 @@ export async function convertServerRecordToPrisma(record: any, type: 'patient' |
         email: record.email,
         userId: record.user_id,
         updatedAt: new Date(record.updated_at),
-      };
+      } as AppSettings;
     }
     default:
-      return record;
+      return null;
   }
 }
 

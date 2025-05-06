@@ -1,28 +1,14 @@
-# Bored Certified Web
+# BoredCertified
 
-A web application for medical professionals to record patient conversations and automatically generate SOAP notes using AI. The application uses Deepgram for speech-to-text transcription and GPT-4 for generating structured SOAP notes.
-
-## Features
-
-- 🎙️ Audio recording of patient conversations
-- 📝 Automatic transcription using Deepgram
-- 🤖 AI-powered SOAP note generation
-- 👥 Patient management system
-- 📁 Organized storage of patient records
-- 🔄 Historical context integration
-- 💾 Audio file storage
-- 🔄 Data synchronization
+A web application for managing patient notes and transcripts.
 
 ## Tech Stack
 
-- Next.js with App Router
-- TypeScript
-- Tailwind CSS
-- Prisma (SQLite database)
-- Supabase (PostgreSQL database and authentication)
-- OpenAI API (GPT-4)
-- Deepgram for speech-to-text transcription
-- React Media Recorder
+- Next.js 14
+- React
+- Supabase (PostgreSQL database)
+- OpenAI API
+- TailwindCSS
 
 ## Getting Started
 
@@ -31,31 +17,50 @@ A web application for medical professionals to record patient conversations and 
    ```bash
    npm install
    ```
-
 3. Set up environment variables:
-   Create a `.env.local` file in the root directory with:
    ```
-   OPENAI_API_KEY=your_openai_api_key
-   DEEPGRAM_API_KEY=your_deepgram_api_key
-   NEXT_PUBLIC_DEEPGRAM_API_KEY=your_deepgram_api_key
-
-   # Supabase configuration (if using Supabase)
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+   OPENAI_API_KEY=your_openai_api_key
    ```
-
-4. Initialize the database:
-   ```bash
-   npx prisma db push
-   ```
-
-5. Run the development server:
+4. Run the development server:
    ```bash
    npm run dev
    ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser
+## Database Setup
+
+1. Create a new Supabase project
+2. Run the setup script:
+   ```bash
+   npm run supabase:setup
+   ```
+3. (Optional) Import test data:
+   ```bash
+   npm run supabase:test-data
+   ```
+
+## Features
+
+- Real-time audio transcription
+- Patient note management
+- SOAP note formatting
+- Note summaries using GPT-4
+- Dark mode support
+- Automatic saving
+- Data synchronization
+
+## Scripts
+
+- `npm run dev` - Start development server
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run linter
+- `npm run supabase:setup` - Set up Supabase tables
+- `npm run supabase:backup` - Backup data to Supabase
+- `npm run supabase:test-data` - Import test data
+- `npm run supabase:full-migration` - Run full migration
 
 ## Usage
 

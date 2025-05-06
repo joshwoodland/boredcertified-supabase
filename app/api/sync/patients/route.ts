@@ -1,95 +1,96 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/app/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { serverSupabase } from '@/app/lib/supabase';
+import { createClient } from '@/app/utils/supabase/server';
+import { cookies } from 'next/headers';
+
+export async function GET(request: NextRequest) {
+  try {
+    // Get the provider's email from the query string
+    const { searchParams } = new URL(request.url);
+    const providerEmail = searchParams.get('provider_email');
+
+    if (!providerEmail) {
+      return NextResponse.json({ error: 'Provider email is required' }, { status: 400 });
+    }
+
+    // Get all patients for this provider
+    const { data: serverPatients, error: patientsError } = await serverSupabase
+      .from('patients')
+      .select('*')
+      .eq('provider_email', providerEmail);
+
+    if (patientsError) {
+      console.error('Error fetching patients:', patientsError);
+      return NextResponse.json({ error: 'Failed to fetch patients' }, { status: 500 });
+    }
+
+    return NextResponse.json(serverPatients);
+  } catch (error) {
+    console.error('Error in sync/patients route:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
-    const session = await getServerSession(authOptions);
-    if (!session || !session.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { patient, providerEmail } = await request.json();
+
+    if (!patient || !providerEmail) {
+      return NextResponse.json({ error: 'Patient data and provider email are required' }, { status: 400 });
     }
 
-    // Parse request data
-    const data = await request.json();
-    const { deviceId, lastSyncTime, patients } = data;
+    // Check if patient already exists
+    const { data: existingPatient, error: lookupError } = await serverSupabase
+      .from('patients')
+      .select('*')
+      .eq('id', patient.id)
+      .single();
 
-    if (!deviceId) {
-      return NextResponse.json({ error: 'Device ID is required' }, { status: 400 });
+    if (lookupError && lookupError.code !== 'PGRST116') { // PGRST116 means no rows found
+      console.error('Error looking up patient:', lookupError);
+      return NextResponse.json({ error: 'Failed to check for existing patient' }, { status: 500 });
     }
 
-    // Get patients modified since last sync
-    let modifiedSince = new Date(0); // Default to epoch
-    if (lastSyncTime) {
-      modifiedSince = new Date(lastSyncTime);
-    }
+    if (existingPatient) {
+      // Update existing patient
+      const { error: updateError } = await serverSupabase
+        .from('patients')
+        .update({
+          name: patient.name,
+          is_deleted: patient.is_deleted,
+          deleted_at: patient.deleted_at,
+          provider_email: providerEmail,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', patient.id);
 
-    // Get patients from server that were modified since last sync
-    const serverPatients = await prisma.patient.findMany({
-      where: {
-        updatedAt: {
-          gt: modifiedSince
-        }
+      if (updateError) {
+        console.error('Error updating patient:', updateError);
+        return NextResponse.json({ error: 'Failed to update patient' }, { status: 500 });
       }
-    });
-
-    // Process patients from client
-    const conflicts = [];
-    if (patients && patients.length > 0) {
-      for (const patient of patients) {
-        // Check if patient exists
-        const existingPatient = await prisma.patient.findUnique({
-          where: { id: patient.remote_id || patient.id }
+    } else {
+      // Create new patient
+      const { error: createError } = await serverSupabase
+        .from('patients')
+        .insert({
+          id: patient.id,
+          name: patient.name,
+          is_deleted: patient.is_deleted,
+          deleted_at: patient.deleted_at,
+          provider_email: providerEmail,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         });
 
-        if (existingPatient) {
-          // Check for conflicts (both client and server modified)
-          const clientModified = new Date(patient.updated_at);
-          const serverModified = existingPatient.updatedAt;
-
-          if (clientModified > modifiedSince && serverModified > modifiedSince) {
-            // Conflict detected - for now, server wins
-            conflicts.push({
-              local: patient,
-              remote: existingPatient
-            });
-          } else if (clientModified > serverModified) {
-            // Client has newer version, update server
-            await prisma.patient.update({
-              where: { id: existingPatient.id },
-              data: {
-                name: patient.name,
-                isDeleted: patient.is_deleted === 1,
-                updatedAt: new Date()
-              }
-            });
-          }
-        } else {
-          // New patient from client, create on server
-          await prisma.patient.create({
-            data: {
-              id: patient.remote_id || patient.id,
-              name: patient.name,
-              isDeleted: patient.is_deleted === 1,
-              createdAt: new Date(patient.created_at),
-              updatedAt: new Date()
-            }
-          });
-        }
+      if (createError) {
+        console.error('Error creating patient:', createError);
+        return NextResponse.json({ error: 'Failed to create patient' }, { status: 500 });
       }
     }
 
-    // Return updated patients and conflicts
-    return NextResponse.json({
-      patients: serverPatients,
-      conflicts
-    });
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error syncing patients:', error);
-    return NextResponse.json(
-      { error: 'Failed to sync patients' },
-      { status: 500 }
-    );
+    console.error('Error in sync/patients route:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

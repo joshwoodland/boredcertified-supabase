@@ -310,9 +310,10 @@ export async function getSupabaseNotes(patientId: string) {
 }
 
 /**
- * Converts Supabase record format to Prisma format
+ * Converts Supabase record format to application format
  * @param record The Supabase record to convert
- * @returns Converted record in Prisma format
+ * @param type The type of record being converted
+ * @returns Converted record in application format
  */
 export interface SupabasePatient {
   id: string;
@@ -351,7 +352,7 @@ export interface SupabaseAppSettings {
 
 type SupabaseRecord = SupabasePatient | SupabaseNote | SupabaseAppSettings;
 
-export interface PrismaPatient {
+export interface AppPatient {
   id: string;
   createdAt: Date;
   updatedAt: Date;
@@ -361,7 +362,7 @@ export interface PrismaPatient {
   providerEmail: string | null;
 }
 
-export interface PrismaNote {
+export interface AppNote {
   id: string;
   createdAt: Date;
   updatedAt: Date;
@@ -373,7 +374,7 @@ export interface PrismaNote {
   isInitialVisit: boolean;
 }
 
-export interface PrismaAppSettings {
+export interface AppSettings {
   id: string;
   darkMode: boolean;
   gptModel: string;
@@ -386,109 +387,116 @@ export interface PrismaAppSettings {
   updatedAt: Date;
 }
 
-type PrismaRecord = PrismaPatient | PrismaNote | PrismaAppSettings;
+type AppRecord = AppPatient | AppNote | AppSettings;
 
-export function convertToPrismaFormat(record: SupabaseRecord, type: 'patient' | 'note' | 'settings') {
+/**
+ * Converts Supabase record format to application format
+ * @param record The Supabase record to convert
+ * @param type The type of record being converted
+ * @returns Converted record in application format
+ */
+export function convertToAppFormat(record: SupabaseRecord, type: 'patient' | 'note' | 'settings') {
   if (!record) return null;
-  
-  switch (type) {
-    case 'patient': {
-      const patientRecord = record as SupabasePatient;
-      return {
-        id: patientRecord.id,
-        createdAt: new Date(patientRecord.created_at),
-        updatedAt: new Date(patientRecord.updated_at),
-        name: patientRecord.name,
-        isDeleted: patientRecord.is_deleted,
-        deletedAt: patientRecord.deleted_at ? new Date(patientRecord.deleted_at) : null,
-        providerEmail: patientRecord.provider_email,
-      };
-    }
-    case 'note': {
-      const noteRecord = record as SupabaseNote;
-      return {
-        id: noteRecord.id,
-        createdAt: new Date(noteRecord.created_at),
-        updatedAt: new Date(noteRecord.updated_at),
-        patientId: noteRecord.patient_id,
-        transcript: noteRecord.transcript,
-        content: noteRecord.content,
-        summary: noteRecord.summary,
-        audioFileUrl: noteRecord.audio_file_url,
-        isInitialVisit: noteRecord.is_initial_visit,
-      };
-    }
-    case 'settings': {
-      const settingsRecord = record as SupabaseAppSettings;
-      return {
-        id: settingsRecord.id,
-        darkMode: settingsRecord.dark_mode,
-        gptModel: settingsRecord.gpt_model,
-        initialVisitPrompt: settingsRecord.initial_visit_prompt,
-        followUpVisitPrompt: settingsRecord.follow_up_visit_prompt,
-        autoSave: settingsRecord.auto_save,
-        lowEchoCancellation: settingsRecord.low_echo_cancellation,
-        email: settingsRecord.email,
-        userId: settingsRecord.user_id,
-        updatedAt: new Date(settingsRecord.updated_at),
-      };
-    }
-    default:
-      return null;
+
+  if (type === 'patient') {
+    const patientRecord = record as SupabasePatient;
+    return {
+      id: patientRecord.id,
+      createdAt: new Date(patientRecord.created_at),
+      updatedAt: new Date(patientRecord.updated_at),
+      name: patientRecord.name,
+      isDeleted: patientRecord.is_deleted,
+      deletedAt: patientRecord.deleted_at ? new Date(patientRecord.deleted_at) : null,
+      providerEmail: patientRecord.provider_email
+    } as AppPatient;
   }
+
+  if (type === 'note') {
+    const noteRecord = record as SupabaseNote;
+    return {
+      id: noteRecord.id,
+      createdAt: new Date(noteRecord.created_at),
+      updatedAt: new Date(noteRecord.updated_at),
+      patientId: noteRecord.patient_id,
+      transcript: noteRecord.transcript,
+      content: noteRecord.content,
+      summary: noteRecord.summary,
+      audioFileUrl: noteRecord.audio_file_url,
+      isInitialVisit: noteRecord.is_initial_visit
+    } as AppNote;
+  }
+
+  if (type === 'settings') {
+    const settingsRecord = record as SupabaseAppSettings;
+    return {
+      id: settingsRecord.id,
+      darkMode: settingsRecord.dark_mode,
+      gptModel: settingsRecord.gpt_model,
+      initialVisitPrompt: settingsRecord.initial_visit_prompt,
+      followUpVisitPrompt: settingsRecord.follow_up_visit_prompt,
+      autoSave: settingsRecord.auto_save,
+      lowEchoCancellation: settingsRecord.low_echo_cancellation,
+      email: settingsRecord.email,
+      userId: settingsRecord.user_id,
+      updatedAt: new Date(settingsRecord.updated_at)
+    } as AppSettings;
+  }
+
+  return null;
 }
 
 /**
- * Converts Prisma format to Supabase record format
- * @param record The Prisma record to convert
+ * Converts application format to Supabase record format
+ * @param record The application record to convert
+ * @param type The type of record being converted
  * @returns Converted record in Supabase format
  */
-export function convertToSupabaseFormat(record: PrismaRecord, type: 'patient' | 'note' | 'settings') {
+export function convertToSupabaseFormat(record: AppRecord, type: 'patient' | 'note' | 'settings') {
   if (!record) return null;
-  
-  switch (type) {
-    case 'patient': {
-      const patientRecord = record as PrismaPatient;
-      return {
-        id: patientRecord.id,
-        created_at: new Date(patientRecord.createdAt).toISOString(),
-        updated_at: new Date(patientRecord.updatedAt).toISOString(),
-        name: patientRecord.name,
-        is_deleted: patientRecord.isDeleted,
-        deleted_at: patientRecord.deletedAt ? new Date(patientRecord.deletedAt).toISOString() : null,
-        provider_email: patientRecord.providerEmail,
-      };
-    }
-    case 'note': {
-      const noteRecord = record as PrismaNote;
-      return {
-        id: noteRecord.id,
-        created_at: new Date(noteRecord.createdAt).toISOString(),
-        updated_at: new Date(noteRecord.updatedAt).toISOString(),
-        patient_id: noteRecord.patientId,
-        transcript: noteRecord.transcript,
-        content: noteRecord.content,
-        summary: noteRecord.summary,
-        audio_file_url: noteRecord.audioFileUrl,
-        is_initial_visit: noteRecord.isInitialVisit,
-      };
-    }
-    case 'settings': {
-      const settingsRecord = record as PrismaAppSettings;
-      return {
-        id: settingsRecord.id,
-        dark_mode: settingsRecord.darkMode,
-        gpt_model: settingsRecord.gptModel,
-        initial_visit_prompt: settingsRecord.initialVisitPrompt,
-        follow_up_visit_prompt: settingsRecord.followUpVisitPrompt,
-        auto_save: settingsRecord.autoSave,
-        low_echo_cancellation: settingsRecord.lowEchoCancellation,
-        email: settingsRecord.email,
-        user_id: settingsRecord.userId,
-        updated_at: new Date(settingsRecord.updatedAt).toISOString(),
-      };
-    }
-    default:
-      return null;
+
+  if (type === 'patient') {
+    const patientRecord = record as AppPatient;
+    return {
+      id: patientRecord.id,
+      created_at: patientRecord.createdAt.toISOString(),
+      updated_at: patientRecord.updatedAt.toISOString(),
+      name: patientRecord.name,
+      is_deleted: patientRecord.isDeleted,
+      deleted_at: patientRecord.deletedAt?.toISOString() || null,
+      provider_email: patientRecord.providerEmail
+    } as SupabasePatient;
   }
+
+  if (type === 'note') {
+    const noteRecord = record as AppNote;
+    return {
+      id: noteRecord.id,
+      created_at: noteRecord.createdAt.toISOString(),
+      updated_at: noteRecord.updatedAt.toISOString(),
+      patient_id: noteRecord.patientId,
+      transcript: noteRecord.transcript,
+      content: noteRecord.content,
+      summary: noteRecord.summary,
+      audio_file_url: noteRecord.audioFileUrl,
+      is_initial_visit: noteRecord.isInitialVisit
+    } as SupabaseNote;
+  }
+
+  if (type === 'settings') {
+    const settingsRecord = record as AppSettings;
+    return {
+      id: settingsRecord.id,
+      dark_mode: settingsRecord.darkMode,
+      gpt_model: settingsRecord.gptModel,
+      initial_visit_prompt: settingsRecord.initialVisitPrompt,
+      follow_up_visit_prompt: settingsRecord.followUpVisitPrompt,
+      auto_save: settingsRecord.autoSave,
+      low_echo_cancellation: settingsRecord.lowEchoCancellation,
+      email: settingsRecord.email,
+      user_id: settingsRecord.userId,
+      updated_at: settingsRecord.updatedAt.toISOString()
+    } as SupabaseAppSettings;
+  }
+
+  return null;
 }
