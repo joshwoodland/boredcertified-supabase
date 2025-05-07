@@ -69,81 +69,66 @@ export const createAdminSupabaseClient = () =>
 
 // Server-side Supabase client for API routes
 export const serverSupabase = (() => {
+  // Define dummy chain for error cases
+  const dummyChain = {
+    select: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+    insert: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+    update: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+    delete: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+    eq: () => ({ data: null, error: new Error('Supabase configuration missing') }),
+    then: (onfulfilled: any) => {
+      if (onfulfilled) {
+        onfulfilled({ data: null, error: new Error('Supabase configuration missing') });
+      }
+      return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
+    }
+  };
+
   if (!supabaseUrl || !supabaseServiceKey) {
     console.error('Supabase service role key is missing');
-    // Return a more robust dummy client to prevent application crashes from chained methods
-    const dummyChain = {
-      select: () => dummyChain,
-      insert: () => dummyChain,
-      update: () => dummyChain,
-      delete: () => dummyChain,
-      eq: () => dummyChain,
-      neq: () => dummyChain,
-      gt: () => dummyChain,
-      lt: () => dummyChain,
-      gte: () => dummyChain,
-      lte: () => dummyChain,
-      like: () => dummyChain,
-      ilike: () => dummyChain,
-      is: () => dummyChain,
-      in: () => dummyChain,
-      contains: () => dummyChain,
-      containedBy: () => dummyChain,
-      rangeGt: () => dummyChain,
-      rangeGte: () => dummyChain,
-      rangeLt: () => dummyChain,
-      rangeLte: () => dummyChain,
-      rangeAdjacent: () => dummyChain,
-      overlaps: () => dummyChain,
-      textSearch: () => dummyChain,
-      match: () => dummyChain,
-      not: () => dummyChain,
-      or: () => dummyChain,
-      filter: () => dummyChain,
-      limit: () => dummyChain,
-      order: () => dummyChain,
-      range: () => dummyChain,
-      single: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-      maybeSingle: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-      csv: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-      // Add any other methods that might be chained
-      then: (onfulfilled: any) => { // Handle promises
-        if (onfulfilled) {
-          onfulfilled({ data: null, error: new Error('Supabase configuration missing') });
-        }
-        return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
-      },
-      catch: (onrejected: any) => { // Handle promises
-         if (onrejected) {
-           onrejected(new Error('Supabase configuration missing'));
-         }
-        return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
-      },
-      finally: (onfinally: any) => { // Handle promises
-        if (onfinally) {
-          onfinally();
-        }
-        return Promise.resolve({ data: null, error: new Error('Supabase configuration missing') });
-      },
-      [Symbol.toStringTag]: 'Promise',
-      data: null,
-      error: new Error('Supabase configuration missing')
-    };
-    
     return {
       from: () => dummyChain,
       auth: {
         getSession: async () => ({ data: { session: null }, error: null }),
         getUser: async () => ({ data: { user: null }, error: null }),
-        // Add other auth methods if needed
       },
-      // Add other top-level methods if needed (e.g., rpc)
     } as any;
   }
   
   // Clean up URL and key to prevent any space/newline issues
   const cleanUrl = supabaseUrl.trim();
   const cleanKey = supabaseServiceKey.trim();
+
+  // Add detailed logging
+  console.log('Supabase Initialization Debug:');
+  console.log('- supabaseUrl (raw):', supabaseUrl);
+  console.log('- supabaseServiceKey exists:', !!supabaseServiceKey);
+  console.log('- cleanUrl:', cleanUrl);
+  console.log('- cleanKey exists:', !!cleanKey);
+  console.log('- isClient:', isClient);
+
+  if (!cleanUrl || cleanUrl === 'undefined') {
+    console.error('Supabase URL is missing or invalid');
+    return {
+      from: () => dummyChain,
+      auth: {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+      },
+    } as any;
+  }
+
+  if (!cleanKey || cleanKey === 'undefined') {
+    console.error('Supabase Service Key is missing or invalid');
+    return {
+      from: () => dummyChain,
+      auth: {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+      },
+    } as any;
+  }
+
   console.log('Creating server API Supabase client with URL:', cleanUrl);
   
   return createClient(cleanUrl, cleanKey, {

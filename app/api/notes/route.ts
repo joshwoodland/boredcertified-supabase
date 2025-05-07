@@ -352,7 +352,7 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('Using Supabase to get notes');
-    const { data: notesData, error: notesError } = await supabase
+    const { data: notesData, error: notesError } = await serverSupabase
       .from('notes')
       .select('*')
       .eq('patient_id', patientId)

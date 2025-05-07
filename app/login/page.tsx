@@ -52,6 +52,8 @@ export default function LoginPage() {
         }
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Failed to check session');
+      } finally {
+        setIsCheckingSession(false);
       }
     };
 
@@ -119,6 +121,7 @@ export default function LoginPage() {
       <div className="flex flex-col items-center relative z-10">
         <DynamicLogo 
           className="h-96 w-auto mb-4"
+          forceWhite={true}
         />
 
         {isCheckingSession ? (

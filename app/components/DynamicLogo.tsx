@@ -6,14 +6,15 @@ interface DynamicLogoProps {
   className?: string;
   style?: React.CSSProperties;
   alt?: string;
+  forceWhite?: boolean;
 }
 
-export default function DynamicLogo({ className, style, alt = "Bored Certified Logo" }: DynamicLogoProps) {
+export default function DynamicLogo({ className, style, alt = "Bored Certified Logo", forceWhite = false }: DynamicLogoProps) {
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   useEffect(() => {
-    // Initialize the mode from document class on mount
-    if (typeof window !== 'undefined') {
+    // Only check dark mode if not forcing white
+    if (!forceWhite && typeof window !== 'undefined') {
       setIsDarkMode(document.documentElement.classList.contains('dark'));
       
       // Create a mutation observer to watch for class changes on html element
@@ -31,12 +32,12 @@ export default function DynamicLogo({ className, style, alt = "Bored Certified L
       // Cleanup
       return () => observer.disconnect();
     }
-  }, []);
+  }, [forceWhite]);
 
   // Combine custom styles with filter if needed
   const combinedStyle = {
     ...style,
-    filter: isDarkMode ? 'none' : 'invert(1)',
+    filter: (isDarkMode || forceWhite) ? 'none' : 'invert(1)',
   };
 
   return (
