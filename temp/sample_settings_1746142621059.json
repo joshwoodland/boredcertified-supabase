@@ -1,9 +1,0 @@
-{
-  "id": "default",
-  "darkMode": false,
-  "gptModel": "gpt-4o",
-  "initialVisitPrompt": "You are a medical scribe assistant. Your task is to generate a note for an INITIAL VISIT based on the provided medical visit transcript.",
-  "followUpVisitPrompt": "You are a medical scribe assistant. Your task is to generate a note for a FOLLOW-UP VISIT based on the provided medical visit transcript.",
-  "autoSave": false,
-  "lowEchoCancellation": false
-}
