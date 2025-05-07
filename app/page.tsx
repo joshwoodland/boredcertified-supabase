@@ -587,9 +587,6 @@ export default function Home() {
       // Use the complete transcript without additional processing
       const fullTranscript = transcript;
 
-      // Audio file storage is disabled, use a placeholder URL
-      const audioFileUrl = null;
-
       // Generate SOAP note
       const soapResponse = await fetch('/api/notes', {
         method: 'POST',
@@ -599,7 +596,6 @@ export default function Home() {
         body: JSON.stringify({
           patientId: selectedPatientId,
           transcript,
-          audioFileUrl,
           isInitialEvaluation,
         }),
         signal: controller.signal
@@ -923,14 +919,18 @@ export default function Home() {
                 patientId={selectedPatientId}
                 selectedNoteId={currentNote?.id}
                 onNoteSelect={(note) => {
-                // Convert from the Supabase Note format to the format expected by page.tsx
-                setCurrentNote({
-                  id: note.id,
-                  createdAt: note.createdAt.toISOString(),
-                  content: note.content,
-                  isInitialVisit: note.isInitialVisit
-                });
-              }}
+                  // Convert from the Supabase Note format to the format expected by page.tsx
+                  setCurrentNote({
+                    id: note.id,
+                    patientId: note.patientId,
+                    transcript: note.transcript,
+                    content: note.content,
+                    summary: note.summary,
+                    isInitialVisit: note.isInitialVisit,
+                    createdAt: note.createdAt instanceof Date ? note.createdAt.toISOString() : note.createdAt,
+                    updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt
+                  });
+                }}
                 forceCollapse={forceCollapse}
                 refreshTrigger={notesRefreshTrigger} // Pass the refresh trigger
               />
