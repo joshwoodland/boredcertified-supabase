@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { FollowUpItem, fetchFollowUps, getCategoryEmoji, getCategoryName } from "../utils/fetchFollowUps";
-import { matchesDiagnosis } from "../utils/diagnosisKeywordMap";
 import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../hooks/useAppSettings';
@@ -252,60 +251,50 @@ export default function FollowUpModal({
       }
       const processedKeywords = processedKeywordsRef.current.get(item.id)!;
 
-      // Check if diagnoses category matches
-      if (item.category === 'diagnoses' && matchesDiagnosis(transcriptLower, item.text)) {
-        const matchKey = `diagnosis-${item.id}`;
-        if (!processedKeywords.has(matchKey)) {
-          detectedKeywords.add(matchKey);
-          processedKeywords.add(matchKey);
+      // Process keywords for all categories
+      if (item.keywords) {
+        item.keywords.forEach(keyword => {
+          const keywordLower = keyword.toLowerCase();
 
-          // Add 1 point for diagnosis match
-          newItemPoints[item.id] = (newItemPoints[item.id] || 0) + 1;
-        }
+          // Skip very common words that might cause false positives
+          if (['the', 'and', 'that', 'with', 'for', 'this', 'patient'].includes(keywordLower)) {
+            return;
+          }
+
+          // Only process keywords we haven't seen before in this session
+          if (!processedKeywords.has(keywordLower) && matchesWordVariation(transcriptLower, keywordLower)) {
+            // Add to detected and processed sets
+            detectedKeywords.add(keywordLower);
+            processedKeywords.add(keywordLower);
+
+            // Calculate point value
+            let pointValue: number;
+
+            // Count how many keywords we've already processed for this item
+            const processedCount = processedKeywords.size;
+
+            // Apply diminishing returns based on how many keywords we've seen
+            if (processedCount <= 1) {
+              // First keyword
+              pointValue = 0.5;
+            } else if (processedCount <= 3) {
+              // 2-3 keywords
+              pointValue = 0.25;
+            } else {
+              // 4+ keywords
+              pointValue = 0.125;
+            }
+
+            // Extra points for important keywords (first few in the list)
+            if (item.keywords.indexOf(keyword) < 5) {
+              pointValue += 0.2;
+            }
+
+            // Add points to this item
+            newItemPoints[item.id] = (newItemPoints[item.id] || 0) + pointValue;
+          }
+        });
       }
-
-      // Check each keyword
-      item.keywords.forEach(keyword => {
-        const keywordLower = keyword.toLowerCase();
-
-        // Skip very common words that might cause false positives
-        if (['the', 'and', 'that', 'with', 'for', 'this', 'patient'].includes(keywordLower)) {
-          return;
-        }
-
-        // Only process keywords we haven't seen before in this session
-        if (!processedKeywords.has(keywordLower) && matchesWordVariation(transcriptLower, keywordLower)) {
-          // Add to detected and processed sets
-          detectedKeywords.add(keywordLower);
-          processedKeywords.add(keywordLower);
-
-          // Calculate point value
-          let pointValue: number;
-
-          // Count how many keywords we've already processed for this item
-          const processedCount = processedKeywords.size;
-
-          // Apply diminishing returns based on how many keywords we've seen
-          if (processedCount <= 1) {
-            // First keyword
-            pointValue = 0.5;
-          } else if (processedCount <= 3) {
-            // 2-3 keywords
-            pointValue = 0.25;
-          } else {
-            // 4+ keywords
-            pointValue = 0.125;
-          }
-
-          // Extra points for important keywords (first few in the list)
-          if (item.keywords.indexOf(keyword) < 5) {
-            pointValue += 0.2;
-          }
-
-          // Add points to this item
-          newItemPoints[item.id] = (newItemPoints[item.id] || 0) + pointValue;
-        }
-      });
 
       // Add diversity bonus if we detected multiple new keywords
       if (detectedKeywords.size >= 3) {
