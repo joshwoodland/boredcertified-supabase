@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { createClient } from '@/app/utils/supabase/client';
+import { Session } from '@supabase/supabase-js';
 
 interface AppSettings {
   darkMode: boolean;
@@ -91,6 +92,16 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
               
               if (refreshError) {
                 console.error('[AUTH DEBUG] Error refreshing session:', refreshError);
+                if (refreshError.message.includes('Auth session missing')) {
+                  console.log('[AUTH DEBUG] Session is missing, clearing any stale cookies');
+                  // Clear any stale cookies that might be causing issues
+                  document.cookie.split(';').forEach(cookie => {
+                    const name = cookie.split('=')[0].trim();
+                    if (name.startsWith('sb-') || name.startsWith('supabase-')) {
+                      document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT`;
+                    }
+                  });
+                }
                 return null;
               }
               
@@ -131,7 +142,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     if (!authChecked) return;
     
     console.log('[AUTH DEBUG] Setting up auth state change listener');
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
       console.log('[AUTH DEBUG] Auth state changed:', event);
       
       if (session?.user) {
