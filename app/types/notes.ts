@@ -4,7 +4,6 @@ export interface Note {
   transcript: string;
   content: string;
   summary: string | null;
-  audioFileUrl: string | null;
   isInitialVisit: boolean;
   createdAt: string | Date;
   updatedAt: string | Date;

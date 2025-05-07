@@ -318,7 +318,6 @@ export interface SupabaseNote {
   transcript: string;
   content: string;
   summary: string | null;
-  audio_file_url: string | null;
   is_initial_visit: boolean;
 }
 
@@ -355,7 +354,6 @@ export interface AppNote {
   transcript: string;
   content: string;
   summary: string | null;
-  audioFileUrl: string | null;
   isInitialVisit: boolean;
 }
 
@@ -406,7 +404,6 @@ export function convertToAppFormat(record: SupabaseRecord, type: 'patient' | 'no
       transcript: noteRecord.transcript,
       content: noteRecord.content,
       summary: noteRecord.summary,
-      audioFileUrl: noteRecord.audio_file_url,
       isInitialVisit: noteRecord.is_initial_visit
     } as AppNote;
   }
@@ -462,7 +459,6 @@ export function convertToSupabaseFormat(record: AppRecord, type: 'patient' | 'no
       transcript: noteRecord.transcript,
       content: noteRecord.content,
       summary: noteRecord.summary,
-      audio_file_url: noteRecord.audioFileUrl,
       is_initial_visit: noteRecord.isInitialVisit
     } as SupabaseNote;
   }

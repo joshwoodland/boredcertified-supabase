@@ -252,7 +252,6 @@ export async function POST(request: NextRequest) {
             content: responseContent,
             formattedContent
           }),
-          audio_file_url: audioFileUrl,
           is_initial_visit: isInitialVisit,
           created_at: now,
           updated_at: now

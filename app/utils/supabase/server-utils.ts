@@ -68,7 +68,6 @@ export async function convertServerRecordToApp(record: any, type: 'patient' | 'n
         transcript: record.transcript,
         content: record.content,
         summary: record.summary,
-        audioFileUrl: record.audio_file_url,
         isInitialVisit: record.is_initial_visit,
       } as AppNote;
     }

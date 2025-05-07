@@ -95,7 +95,6 @@ export default function SupabasePatientNotes({
             transcript: note.transcript,
             content: note.content,
             summary: note.summary,
-            audioFileUrl: note.audio_file_url,
             isInitialVisit: note.is_initial_visit
           } as Note;
         })
