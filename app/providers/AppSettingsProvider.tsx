@@ -198,7 +198,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                   id: userSettingsId,
                   user_id: userId,
                   email: email,
-                  dark_mode: defaultSettings?.dark_mode ?? true,
+                  dark_mode: true,
                   gpt_model: defaultSettings?.gpt_model ?? 'gpt-4o',
                   initial_visit_prompt: defaultSettings?.initial_visit_prompt ?? '',
                   follow_up_visit_prompt: defaultSettings?.follow_up_visit_prompt ?? '',

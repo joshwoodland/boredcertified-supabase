@@ -31,7 +31,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
     gptModel: 'gpt-4o',
     initialVisitPrompt: '',
     followUpVisitPrompt: '',
-    lowEchoCancellation: false,
+    lowEchoCancellation: true,
     email: null,
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -398,35 +398,6 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
               </div>
 
               <div className="space-y-6">
-                {/* Dark Mode Toggle */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-700 dark:text-gray-200">Dark Mode</span>
-                    {settings.darkMode ? <FiMoon /> : <FiSun />}
-                  </div>
-                  <div className="relative inline-block w-12 align-middle select-none">
-                    <button
-                      role="switch"
-                      aria-checked={settings.darkMode}
-                      onClick={() => handleChange({ darkMode: !settings.darkMode })}
-                      className={`
-                        relative block w-12 h-6 rounded-full
-                        ${settings.darkMode ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}
-                        transition-colors duration-200
-                      `}
-                    >
-                      <span
-                        className={`
-                          absolute top-1/2 left-1 -translate-y-1/2
-                          h-4 w-4 rounded-full bg-white shadow
-                          transform transition-transform duration-200 ease-in-out
-                          ${settings.darkMode ? 'translate-x-6' : ''}
-                        `}
-                      />
-                    </button>
-                  </div>
-                </div>
-
                 {/* Low Echo Cancellation Toggle */}
                 <div className="flex items-center justify-between">
                   <div>
