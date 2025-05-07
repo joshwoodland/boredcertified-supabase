@@ -3,6 +3,7 @@ import { serverSupabase, convertToAppFormat, AppSettings } from '@/app/lib/supab
 import OpenAI from 'openai';
 import { estimateTokenCount } from '@/app/utils/tokenEncoding';
 import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages';
+import { createClient } from '@/app/utils/supabase/server';
 
 // Initialize OpenAI client
 const openai = new OpenAI();
@@ -13,44 +14,86 @@ export async function POST(request: NextRequest) {
 
     // Validate required fields
     if (!transcript) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: 'Missing required field',
         details: 'Transcript is required'
       }, { status: 400 });
     }
 
     if (isInitialVisit === undefined) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: 'Missing required field',
         details: 'isInitialVisit flag is required'
       }, { status: 400 });
     }
 
-    // Get app settings
-    const { data: settings, error: settingsError } = await serverSupabase
-      .from('app_settings')
-      .select('*')
-      .eq('id', 'default')
-      .maybeSingle();
+    // Get user session to check for user-specific settings
+    const supabaseServer = await createClient();
+    const { data: { session } } = await supabaseServer.auth.getSession();
+    const userEmail = session?.user?.email;
+    const userId = session?.user?.id;
 
-    if (settingsError) {
-      console.error('Error fetching settings:', settingsError);
-      return NextResponse.json({ 
-        error: 'Failed to fetch app settings',
-        details: settingsError.message 
-      }, { status: 500 });
+    let appSettings: AppSettings | null = null;
+
+    // First try to get user-specific settings if user is logged in
+    if (userId && userEmail) {
+      console.log('Fetching user-specific settings for user:', userEmail);
+
+      // Try to get settings by user_id first
+      const { data: userSettings, error: userSettingsError } = await serverSupabase
+        .from('app_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!userSettingsError && userSettings) {
+        console.log('Found settings by user_id');
+        appSettings = convertToAppFormat(userSettings, 'settings') as AppSettings;
+      } else {
+        // If not found by user_id, try by email
+        console.log('No settings found by user_id, trying email');
+        const { data: emailSettings, error: emailSettingsError } = await serverSupabase
+          .from('app_settings')
+          .select('*')
+          .eq('email', userEmail)
+          .maybeSingle();
+
+        if (!emailSettingsError && emailSettings) {
+          console.log('Found settings by email');
+          appSettings = convertToAppFormat(emailSettings, 'settings') as AppSettings;
+        }
+      }
     }
 
-    if (!settings) {
-      return NextResponse.json({ 
-        error: 'Settings not found',
-        details: 'No default settings found in the database'
-      }, { status: 404 });
-    }
-
-    const appSettings = convertToAppFormat(settings, 'settings') as AppSettings;
+    // If no user-specific settings found, fall back to default settings
     if (!appSettings) {
-      return NextResponse.json({ 
+      console.log('No user-specific settings found, falling back to default settings');
+      const { data: defaultSettings, error: settingsError } = await serverSupabase
+        .from('app_settings')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+
+      if (settingsError) {
+        console.error('Error fetching default settings:', settingsError);
+        return NextResponse.json({
+          error: 'Failed to fetch app settings',
+          details: settingsError.message
+        }, { status: 500 });
+      }
+
+      if (!defaultSettings) {
+        return NextResponse.json({
+          error: 'Settings not found',
+          details: 'No default settings found in the database'
+        }, { status: 404 });
+      }
+
+      appSettings = convertToAppFormat(defaultSettings, 'settings') as AppSettings;
+    }
+
+    if (!appSettings) {
+      return NextResponse.json({
         error: 'Failed to convert settings data',
         details: 'Error converting settings format'
       }, { status: 500 });
@@ -102,4 +145,4 @@ export async function POST(request: NextRequest) {
     console.error('Error in OpenAI route:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-} 
+}

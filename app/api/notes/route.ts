@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { checkSupabaseConnection, supabase, serverSupabase, convertToAppFormat, SupabaseNote } from '@/app/lib/supabase'
+import { checkSupabaseConnection, supabase, serverSupabase, convertToAppFormat, SupabaseNote, AppSettings, AppPatient, AppNote } from '@/app/lib/supabase'
 import OpenAI from 'openai'
 import systemMessages from '@/app/config/systemMessages'
 import { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions'
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     // Check if Supabase is available
     const isSupabaseAvailable = await checkSupabaseConnection();
-    
+
     if (!isSupabaseAvailable) {
       return NextResponse.json({
         error: 'Database connection unavailable',
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
 
-    const patient = convertToAppFormat(patientData, 'patient');
+    const patient = convertToAppFormat(patientData, 'patient') as AppPatient;
     if (!patient) {
       return NextResponse.json({
         error: 'Failed to convert patient data',
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     if (!isInitialVisit) {
       try {
         console.log('Using Supabase to get previous note for patient:', normalizedPatientId);
-        
+
         // Try using serverSupabase instead of regular supabase to bypass RLS
         console.log('Attempting to fetch previous note using server role client');
         const { data: noteData, error: noteError } = await serverSupabase
@@ -140,19 +140,19 @@ export async function POST(request: NextRequest) {
           console.error('Error details:', JSON.stringify(noteError));
         } else {
           console.log(`Note data retrieved: ${noteData ? noteData.length : 0} notes found`);
-          
+
           if (noteData && noteData.length > 0) {
             console.log('Previous note found:', noteData[0].id, 'created at:', noteData[0].created_at);
             console.log('Content type:', typeof noteData[0].content);
             console.log('Content snippet:', noteData[0].content.substring(0, 100) + '...');
-            
+
             let previousContent = '';
             try {
               // Try to parse the content, which might be in JSON format
               console.log('Attempting to parse note content as JSON');
               const parsedContent = JSON.parse(noteData[0].content);
               console.log('Parsed content structure:', Object.keys(parsedContent));
-              
+
               // If it has a content property, use that, otherwise use the whole parsed object
               if (typeof parsedContent.content === 'string') {
                 console.log('Using parsedContent.content (string)');
@@ -186,23 +186,72 @@ export async function POST(request: NextRequest) {
 
     console.log('Visit type:', isInitialVisit ? 'Initial' : 'Follow-up');
 
-    // Get current settings
-    console.log('Using Supabase to get app settings');
-    const { data: settingsData, error: settingsError } = await supabase
-      .from('app_settings')
-      .select('*')
-      .eq('id', 'default')
-      .single();
+    // Get user session to check for user-specific settings
+    console.log('Getting user session to check for user-specific settings');
+    const supabaseServer = await createClient();
+    const { data: { session } } = await supabaseServer.auth.getSession();
+    const userEmail = session?.user?.email;
+    const userId = session?.user?.id;
 
-    if (settingsError) {
-      console.error('Error fetching settings from Supabase:', settingsError);
-      return NextResponse.json({
-        error: 'Failed to fetch settings',
-        details: settingsError.message
-      }, { status: 500 });
+    let settings: AppSettings | null = null;
+
+    // First try to get user-specific settings if user is logged in
+    if (userId && userEmail) {
+      console.log('Fetching user-specific settings for user:', userEmail);
+
+      // Try to get settings by user_id first
+      const { data: userSettings, error: userSettingsError } = await serverSupabase
+        .from('app_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!userSettingsError && userSettings) {
+        console.log('Found settings by user_id');
+        settings = convertToAppFormat(userSettings, 'settings') as AppSettings;
+      } else {
+        // If not found by user_id, try by email
+        console.log('No settings found by user_id, trying email');
+        const { data: emailSettings, error: emailSettingsError } = await serverSupabase
+          .from('app_settings')
+          .select('*')
+          .eq('email', userEmail)
+          .maybeSingle();
+
+        if (!emailSettingsError && emailSettings) {
+          console.log('Found settings by email');
+          settings = convertToAppFormat(emailSettings, 'settings') as AppSettings;
+        }
+      }
     }
 
-    const settings = convertToAppFormat(settingsData, 'settings');
+    // If no user-specific settings found, fall back to default settings
+    if (!settings) {
+      console.log('No user-specific settings found, falling back to default settings');
+      const { data: settingsData, error: settingsError } = await serverSupabase
+        .from('app_settings')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+
+      if (settingsError) {
+        console.error('Error fetching default settings:', settingsError);
+        return NextResponse.json({
+          error: 'Failed to fetch settings',
+          details: settingsError.message
+        }, { status: 500 });
+      }
+
+      if (!settingsData) {
+        return NextResponse.json({
+          error: 'Settings not found',
+          details: 'No default settings found in the database'
+        }, { status: 404 });
+      }
+
+      settings = convertToAppFormat(settingsData, 'settings') as AppSettings;
+    }
+
     if (!settings) {
       return NextResponse.json({
         error: 'Failed to convert settings data',
@@ -293,7 +342,7 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
 
-      const note = convertToAppFormat(noteData, 'note');
+      const note = convertToAppFormat(noteData, 'note') as AppNote;
       if (!note) {
         return NextResponse.json({
           error: 'Failed to convert note data',
@@ -318,9 +367,9 @@ export async function POST(request: NextRequest) {
           console.log('Using Supabase (Service Role) to update note summary');
           const { error: updateError } = await serverSupabase
             .from('notes')
-            .update({ 
-              summary, 
-              updated_at: new Date().toISOString() 
+            .update({
+              summary,
+              updated_at: new Date().toISOString()
             })
             .eq('id', note.id);
 
@@ -368,7 +417,7 @@ export async function GET(request: NextRequest) {
 
     // Check if Supabase is available
     const isSupabaseAvailable = await checkSupabaseConnection();
-    
+
     if (!isSupabaseAvailable) {
       return NextResponse.json({
         error: 'Database connection unavailable',
@@ -378,7 +427,7 @@ export async function GET(request: NextRequest) {
 
     // Log detailed information about the request
     console.log(`Fetching notes for patient ID: ${patientId} (${new Date().toISOString()})`);
-    
+
     // First try with normal client to see if there's any RLS issues
     console.log('Attempting to fetch notes with regular client first');
     const { data: regularData, error: regularError } = await supabase
@@ -386,14 +435,14 @@ export async function GET(request: NextRequest) {
       .select('id')
       .eq('patient_id', patientId)
       .order('created_at', { ascending: false });
-      
+
     if (regularError) {
       console.error('Error fetching notes with regular client:', regularError);
       console.log('Will try with service role client instead');
     } else {
       console.log(`Regular client found ${regularData?.length || 0} notes`);
     }
-    
+
     // Always use serverSupabase (service role) to ensure we bypass any RLS issues
     console.log('Using service role client to fetch notes');
     const { data: notesData, error: notesError } = await serverSupabase
@@ -416,7 +465,7 @@ export async function GET(request: NextRequest) {
     } else {
       console.log(`Found ${notesData.length} notes for patient ID: ${patientId}`);
       console.log(`First note ID: ${notesData[0].id}, created at: ${notesData[0].created_at}`);
-      
+
       // If we see a mismatch between regular and service client results, log it
       if (regularData && regularData.length !== notesData.length) {
         console.warn(`Note count mismatch! Regular client: ${regularData.length}, Service role: ${notesData.length}`);
@@ -428,7 +477,7 @@ export async function GET(request: NextRequest) {
     const notes = notesData
       .map((note: SupabaseNote) => {
         try {
-          return convertToAppFormat(note, 'note');
+          return convertToAppFormat(note, 'note') as AppNote;
         } catch (err) {
           console.error(`Error converting note ${note.id}:`, err);
           return null;
