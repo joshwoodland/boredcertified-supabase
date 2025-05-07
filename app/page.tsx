@@ -19,6 +19,7 @@ import { createBrowserSupabaseClient } from './lib/supabase';
 import type { AppPatient } from './lib/supabase';
 import type { Note } from './types/notes';
 import { extractContent } from './utils/safeJsonParse';
+import { toSafeISOString, toValidDate } from './utils/dateUtils';
 
 // Create a Supabase client for direct database access
 const supabase = createBrowserSupabaseClient();
@@ -921,6 +922,7 @@ export default function Home() {
                 selectedNoteId={currentNote?.id}
                 onNoteSelect={(note) => {
                   // Convert from the Supabase Note format to the format expected by page.tsx
+                  // Import the toSafeISOString utility at the top of the file
                   setCurrentNote({
                     id: note.id,
                     patientId: note.patientId,
@@ -928,10 +930,10 @@ export default function Home() {
                     content: note.content,
                     summary: note.summary,
                     isInitialVisit: note.isInitialVisit,
-                    createdAt: note.createdAt instanceof Date ? note.createdAt.toISOString() : note.createdAt,
-                    updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt
+                    createdAt: note.createdAt,
+                    updatedAt: note.updatedAt
                   });
-                  
+
                   // Set the lastVisitNote for the follow-up modal
                   setLastVisitNote(note.content);
                 }}

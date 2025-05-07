@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { checkSupabaseConnection, convertToAppFormat, supabase, SupabaseNote, AppNote } from '../lib/supabase';
 import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiZap, FiSend } from 'react-icons/fi';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
+import { formatDate, toValidDate } from '../utils/dateUtils';
 import Toast from './Toast';
 import type { Note } from '../types/notes';
 import AIMagicModal from './AIMagicModal';
@@ -14,18 +15,6 @@ interface SupabasePatientNotesProps {
   forceCollapse?: boolean;
   refreshTrigger?: number;
 }
-
-const formatDate = (date: string | Date): string => {
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
-  return dateObj.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: true
-  });
-};
 
 /**
  * Component that uses Supabase for patient notes
@@ -59,7 +48,7 @@ export default function SupabasePatientNotes({
     }
   }, [selectedNote]);
 
-  const loadNotes = async () => {
+  const loadNotes = useCallback(async () => {
     if (!patientId) {
       setNotes([]);
       setLoading(false);
@@ -71,7 +60,7 @@ export default function SupabasePatientNotes({
 
     try {
       console.log(`Fetching notes for patient ID: ${patientId}`);
-      
+
       // Use the API endpoint instead of direct Supabase access
       const response = await fetch(`/api/notes?patientId=${patientId}`, {
         // Ensure we're not getting a cached response
@@ -80,13 +69,13 @@ export default function SupabasePatientNotes({
           'Pragma': 'no-cache'
         }
       });
-      
+
       if (!response.ok) {
         const errorDetails = await response.text();
         console.error(`Failed to fetch notes: ${response.status} ${response.statusText}, Details:`, errorDetails);
         throw new Error(`Failed to fetch notes: ${response.status}`);
       }
-      
+
       const supabaseNotes = await response.json();
       console.log(`Retrieved ${supabaseNotes.length} notes from API`);
 
@@ -97,23 +86,29 @@ export default function SupabasePatientNotes({
             console.warn('Found null note in response');
             return null;
           }
-          
+
+          // The API returns data already converted to camelCase by convertToAppFormat
+          // But TypeScript still thinks it's SupabaseNote with snake_case
+          // Cast to any to avoid TypeScript errors
+          const noteData = note as any;
+
           // Ensure dates are properly converted
-          const createdAt = new Date(note.created_at);
-          const updatedAt = new Date(note.updated_at);
+          const createdAt = toValidDate(noteData.createdAt) || new Date();
+          const updatedAt = toValidDate(noteData.updatedAt) || new Date();
 
           // Log the note for debugging
-          console.log(`Processing note: ${note.id}, created: ${note.created_at}, isInitialVisit: ${note.is_initial_visit}`);
-          
+          console.log(`Processing note: ${noteData.id}, created: ${noteData.createdAt}, isInitialVisit: ${noteData.isInitialVisit}`);
+
+          // Handle both camelCase (from API) and snake_case (from direct Supabase)
           return {
-            id: note.id,
+            id: noteData.id,
             createdAt,
             updatedAt,
-            patientId: note.patient_id,
-            transcript: note.transcript,
-            content: note.content,
-            summary: note.summary,
-            isInitialVisit: note.is_initial_visit
+            patientId: noteData.patientId || noteData.patient_id,
+            transcript: noteData.transcript,
+            content: noteData.content,
+            summary: noteData.summary,
+            isInitialVisit: noteData.isInitialVisit !== undefined ? noteData.isInitialVisit : noteData.is_initial_visit
           } as Note;
         })
         .filter((note: Note | null): note is Note => note !== null)
@@ -125,7 +120,7 @@ export default function SupabasePatientNotes({
 
       console.log(`Processed ${formattedNotes.length} valid notes`);
       setNotes(formattedNotes);
-      
+
       // If there's a selectedNoteId, find and select that note
       if (selectedNoteId) {
         const selectedNote = formattedNotes.find((note: Note) => note.id === selectedNoteId);
@@ -139,11 +134,11 @@ export default function SupabasePatientNotes({
     } finally {
       setLoading(false);
     }
-  };
+  }, [patientId, selectedNoteId]);
 
   useEffect(() => {
     loadNotes();
-  }, [patientId, refreshTrigger, selectedNoteId]);
+  }, [loadNotes, refreshTrigger]);
 
   const handleNoteSelect = (note: Note) => {
     setSelectedNote(note);
@@ -166,7 +161,7 @@ export default function SupabasePatientNotes({
     try {
       // Format the content before saving
       const formattedContent = formatSoapNote(editedContent);
-      
+
       // Create the content object with both raw and formatted content
       const contentToSave = JSON.stringify({
         content: editedContent,
@@ -283,15 +278,15 @@ export default function SupabasePatientNotes({
   const handleSendWebhook = async (note: Note) => {
     try {
       const rawMarkdownNote = extractContent(note.content);
-      
+
       const response = await fetch('https://woodlandpsychiatry.app.n8n.cloud/webhook/boredcertified', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ soapNote: rawMarkdownNote }),
       });
-      
+
       if (!response.ok) throw new Error('Failed to send note');
-      
+
       setToastMessage('Note shipped successfully!');
       setToastType('success');
       setShowToast(true);
@@ -312,7 +307,7 @@ export default function SupabasePatientNotes({
       const response = await fetch(`/api/notes/${noteId}/summary`, {
         method: 'POST',
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setSummaries(prev => ({ ...prev, [noteId]: data.summary }));
@@ -330,12 +325,12 @@ export default function SupabasePatientNotes({
     try {
       const content = safeJsonParse<any>(noteContent);
       if (!content) return noteContent;
-      
+
       // If it's the simple format with just content
       if (content.content) {
         return typeof content.content === 'string' ? content.content : JSON.stringify(content.content);
       }
-      
+
       // If it's the complex SOAP format, combine all sections
       const sections = [];
       if (content.subjective) sections.push('Subjective:\n' + content.subjective);
