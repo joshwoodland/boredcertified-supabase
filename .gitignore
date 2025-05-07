@@ -20,6 +20,11 @@
 .DS_Store
 *.pem
 *.code-workspace
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # debug
 npm-debug.log*
