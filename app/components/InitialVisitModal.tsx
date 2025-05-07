@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../hooks/useAppSettings';
@@ -94,9 +94,20 @@ export default function InitialVisitModal({
     // If we had a parent onTranscriptUpdate handler we'd use it here
   }, [finalTranscript]);
 
+  // Add debug console log
+  useEffect(() => {
+    console.log('InitialVisitModal rendering:', {
+      hasManualTranscript: !!manualTranscript,
+      transcriptLength: manualTranscript?.length || 0,
+    });
+  }, [manualTranscript]);
+
   // Start recording function
   const startRecording = async (type: 'initial' | 'followup') => {
     try {
+      // Log visit type selection
+      console.log(`Visit type selected: ${type}`);
+      
       // Set visit type
       setVisitType(type);
 
@@ -263,7 +274,7 @@ export default function InitialVisitModal({
           // Visit type selection
           <div className="py-4">
             <p className="text-gray-600 dark:text-gray-300 mb-6">
-              This appears to be the first visit record in the system. Please select the appropriate visit type:
+              Please select the appropriate visit type for this recording:
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <button

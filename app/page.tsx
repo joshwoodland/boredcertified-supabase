@@ -18,6 +18,7 @@ import DynamicLogo from './components/DynamicLogo';
 import { createBrowserSupabaseClient } from './lib/supabase';
 import type { AppPatient } from './lib/supabase';
 import type { Note } from './types/notes';
+import { extractContent } from './utils/safeJsonParse';
 
 // Create a Supabase client for direct database access
 const supabase = createBrowserSupabaseClient();
@@ -352,7 +353,7 @@ export default function Home() {
 
     // Use the most recent note for follow-up items
     const lastNote = patientNotes[0];
-    setLastVisitNote(lastNote.content || '');
+    setLastVisitNote(extractContent(lastNote.content) || '');
     setShowFollowUpModal(true);
     setIsActiveRecordingSession(true);
   };
@@ -930,6 +931,9 @@ export default function Home() {
                     createdAt: note.createdAt instanceof Date ? note.createdAt.toISOString() : note.createdAt,
                     updatedAt: note.updatedAt instanceof Date ? note.updatedAt.toISOString() : note.updatedAt
                   });
+                  
+                  // Set the lastVisitNote for the follow-up modal
+                  setLastVisitNote(note.content);
                 }}
                 forceCollapse={forceCollapse}
                 refreshTrigger={notesRefreshTrigger} // Pass the refresh trigger

@@ -70,23 +70,41 @@ export default function SupabasePatientNotes({
     setError(null);
 
     try {
+      console.log(`Fetching notes for patient ID: ${patientId}`);
+      
       // Use the API endpoint instead of direct Supabase access
-      const response = await fetch(`/api/notes?patientId=${patientId}`);
+      const response = await fetch(`/api/notes?patientId=${patientId}`, {
+        // Ensure we're not getting a cached response
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
       if (!response.ok) {
-        throw new Error('Failed to fetch notes');
+        const errorDetails = await response.text();
+        console.error(`Failed to fetch notes: ${response.status} ${response.statusText}, Details:`, errorDetails);
+        throw new Error(`Failed to fetch notes: ${response.status}`);
       }
       
       const supabaseNotes = await response.json();
+      console.log(`Retrieved ${supabaseNotes.length} notes from API`);
 
       // Convert to App format and ensure dates are Date objects
       const formattedNotes = supabaseNotes
         .map((note: SupabaseNote) => {
-          if (!note) return null;
+          if (!note) {
+            console.warn('Found null note in response');
+            return null;
+          }
           
           // Ensure dates are properly converted
           const createdAt = new Date(note.created_at);
           const updatedAt = new Date(note.updated_at);
 
+          // Log the note for debugging
+          console.log(`Processing note: ${note.id}, created: ${note.created_at}, isInitialVisit: ${note.is_initial_visit}`);
+          
           return {
             id: note.id,
             createdAt,
@@ -105,6 +123,7 @@ export default function SupabasePatientNotes({
           return dateB.getTime() - dateA.getTime();
         });
 
+      console.log(`Processed ${formattedNotes.length} valid notes`);
       setNotes(formattedNotes);
       
       // If there's a selectedNoteId, find and select that note

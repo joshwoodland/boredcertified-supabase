@@ -87,10 +87,28 @@ export default function FollowUpModal({
   // Flag to indicate if we're in a resumed recording session
   const isResumedSessionRef = useRef<boolean>(false);
 
+  // Add debugging info for the lastVisitNote
+  useEffect(() => {
+    console.log('FollowUpModal rendering with:', {
+      hasLastVisitNote: !!lastVisitNote,
+      noteLength: lastVisitNote?.length || 0,
+      patientId,
+      noteId
+    });
+  }, [lastVisitNote, patientId, noteId]);
+
   // Fetch follow-up items on mount
   useEffect(() => {
     async function loadFollowUpItems() {
       setLoading(true);
+
+      // Log debugging info
+      console.log('Loading follow-up items:', {
+        hasLastVisitNote: !!lastVisitNote,
+        noteLength: lastVisitNote?.length || 0,
+        patientId,
+        noteId
+      });
 
       // First, try to get the checklist from cache
       let cachedItems = null;
