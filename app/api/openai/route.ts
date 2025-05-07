@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { serverSupabase } from '@/app/lib/supabase';
+import { serverSupabase, convertToAppFormat, AppSettings } from '@/app/lib/supabase';
 import OpenAI from 'openai';
 import { estimateTokenCount } from '@/app/utils/tokenEncoding';
 import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages';
@@ -16,11 +16,29 @@ export async function POST(request: NextRequest) {
       .from('app_settings')
       .select('*')
       .eq('id', 'default')
-      .single();
+      .maybeSingle();
 
     if (settingsError) {
       console.error('Error fetching settings:', settingsError);
-      return NextResponse.json({ error: 'Failed to fetch app settings' }, { status: 500 });
+      return NextResponse.json({ 
+        error: 'Failed to fetch app settings',
+        details: settingsError.message 
+      }, { status: 500 });
+    }
+
+    if (!settings) {
+      return NextResponse.json({ 
+        error: 'Settings not found',
+        details: 'No default settings found in the database'
+      }, { status: 404 });
+    }
+
+    const appSettings = convertToAppFormat(settings, 'settings') as AppSettings;
+    if (!appSettings) {
+      return NextResponse.json({ 
+        error: 'Failed to convert settings data',
+        details: 'Error converting settings format'
+      }, { status: 500 });
     }
 
     // Get existing notes count for rate limiting
@@ -40,24 +58,23 @@ export async function POST(request: NextRequest) {
 
     // Build messages for OpenAI
     const messages = buildOpenAIMessages({
-      transcript,
-      isInitialVisit,
-      initialVisitPrompt: settings.initial_visit_prompt,
-      followUpVisitPrompt: settings.follow_up_visit_prompt
+      currentTranscript: transcript,
+      soapTemplate: isInitialVisit ? appSettings.initialVisitPrompt : appSettings.followUpVisitPrompt,
+      patientName: 'Patient'
     });
 
     // Check token count
-    const totalTokens = estimateTokenCount(messages);
+    const totalTokens = estimateTokenCount(messages.map(m => m.content).join('\n'));
     if (totalTokens > 16000) {
       return NextResponse.json({ error: 'Input too long' }, { status: 400 });
     }
 
     // Call OpenAI API
     const completion = await openai.chat.completions.create({
-      model: settings.gpt_model,
+      model: appSettings.gptModel,
       messages,
       temperature: 0.2,
-      max_tokens: 2000
+      max_tokens: 4000
     });
 
     const content = completion.choices[0]?.message?.content;

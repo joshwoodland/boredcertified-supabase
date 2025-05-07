@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { getCurrentModel } from '@/app/utils/modelCache';
-import { checkSupabaseConnection, supabase, convertToAppFormat } from '@/app/lib/supabase';
+import { checkSupabaseConnection, supabase, convertToAppFormat, AppNote } from '@/app/lib/supabase';
 import { cookies } from 'next/headers';
 
 const openai = new OpenAI();
@@ -35,7 +35,7 @@ export async function POST(
       .from('notes')
       .select('*')
       .eq('id', noteId)
-      .single();
+      .maybeSingle();
 
     if (noteError) {
       console.error('Error fetching note from Supabase:', noteError);
@@ -46,10 +46,13 @@ export async function POST(
     }
 
     if (!noteData) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+      return NextResponse.json({ 
+        error: 'Note not found', 
+        details: `No note found with ID: ${noteId}` 
+      }, { status: 404 });
     }
 
-    const note = convertToAppFormat(noteData, 'note');
+    const note = convertToAppFormat(noteData, 'note') as AppNote;
     if (!note) {
       return NextResponse.json({ 
         error: 'Failed to convert note data', 

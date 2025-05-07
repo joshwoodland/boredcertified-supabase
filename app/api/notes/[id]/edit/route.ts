@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkSupabaseConnection, supabase, convertToAppFormat } from '@/app/lib/supabase';
+import { checkSupabaseConnection, supabase, convertToAppFormat, AppNote } from '@/app/lib/supabase';
 import OpenAI from 'openai';
 import { formatSoapNote } from '@/app/utils/formatSoapNote';
 import { safeJsonParse } from '@/app/utils/safeJsonParse';
@@ -17,7 +17,6 @@ export async function GET(
 ) {
   try {
     const noteId = params.id;
-    let note = null;
     
     // Check if Supabase is available
     const isSupabaseAvailable = await checkSupabaseConnection();
@@ -35,7 +34,7 @@ export async function GET(
       .from('notes')
       .select('*')
       .eq('id', noteId)
-      .single();
+      .maybeSingle();
       
     if (error) {
       console.error('Error fetching note from Supabase:', error);
@@ -46,10 +45,20 @@ export async function GET(
     }
     
     if (!data) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+      return NextResponse.json({ 
+        error: 'Note not found',
+        details: `No note found with ID: ${noteId}`
+      }, { status: 404 });
     }
 
-    note = convertToAppFormat(data, 'note');
+    const note = convertToAppFormat(data, 'note') as AppNote;
+    if (!note) {
+      return NextResponse.json({ 
+        error: 'Failed to convert note data', 
+        details: 'Error converting note format' 
+      }, { status: 500 });
+    }
+
     return NextResponse.json(note);
   } catch (error) {
     console.error('Error fetching note:', error);
@@ -92,7 +101,7 @@ export async function POST(
       .from('notes')
       .select('*')
       .eq('id', noteId)
-      .single();
+      .maybeSingle();
       
     if (noteError) {
       console.error('Error fetching note from Supabase:', noteError);
@@ -103,11 +112,14 @@ export async function POST(
     }
     
     if (!noteData) {
-      return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+      return NextResponse.json({ 
+        error: 'Note not found',
+        details: `No note found with ID: ${noteId}`
+      }, { status: 404 });
     }
 
-    const note = convertToAppFormat(noteData, 'note');
-    if (!note) {
+    const originalNote = convertToAppFormat(noteData, 'note') as AppNote;
+    if (!originalNote) {
       return NextResponse.json({ 
         error: 'Failed to convert note data', 
         details: 'Error converting note format' 
@@ -117,10 +129,10 @@ export async function POST(
     // Extract the original content from note
     let originalContent = '';
     try {
-      const parsedContent = JSON.parse(note.content || '');
-      originalContent = typeof parsedContent.content === 'string' ? parsedContent.content : String(note.content || '');
+      const parsedContent = JSON.parse(originalNote.content || '');
+      originalContent = typeof parsedContent.content === 'string' ? parsedContent.content : String(originalNote.content || '');
     } catch {
-      originalContent = String(note.content || '');
+      originalContent = String(originalNote.content || '');
     }
 
     // Prepare messages for OpenAI

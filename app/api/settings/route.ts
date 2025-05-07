@@ -2,7 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/app/utils/supabase/server';
-import { convertToAppFormat } from '@/app/lib/supabase';
+import { convertToAppFormat, AppSettings } from '@/app/lib/supabase';
 
 // Debug logging helper
 const debugLog = (message: string, data?: unknown) => {
@@ -36,11 +36,14 @@ export async function GET(request: NextRequest) {
       .from('app_settings')
       .select('*')
       .eq('email', userEmail)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Error fetching settings from Supabase:', error);
-      return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
+      return NextResponse.json({ 
+        error: 'Failed to fetch settings',
+        details: error.message 
+      }, { status: 500 });
     }
 
     // If no settings exist yet, create default settings
@@ -62,20 +65,42 @@ export async function GET(request: NextRequest) {
         .from('app_settings')
         .insert(defaultSettings)
         .select()
-        .single();
+        .maybeSingle();
 
       if (createError) {
         console.error('Error creating default settings in Supabase:', createError);
-        return NextResponse.json({ error: 'Failed to create default settings' }, { status: 500 });
+        return NextResponse.json({ 
+          error: 'Failed to create default settings',
+          details: createError.message 
+        }, { status: 500 });
+      }
+
+      if (!newSettings) {
+        return NextResponse.json({ 
+          error: 'Failed to create default settings',
+          details: 'No settings returned after creation'
+        }, { status: 500 });
       }
 
       // Convert to App format and return
-      const formattedSettings = convertToAppFormat(newSettings, 'settings');
+      const formattedSettings = convertToAppFormat(newSettings, 'settings') as AppSettings;
+      if (!formattedSettings) {
+        return NextResponse.json({ 
+          error: 'Failed to convert settings data',
+          details: 'Error converting settings format'
+        }, { status: 500 });
+      }
       return NextResponse.json(formattedSettings);
     }
 
     // Convert existing settings to App format and return
-    const formattedSettings = convertToAppFormat(data, 'settings');
+    const formattedSettings = convertToAppFormat(data, 'settings') as AppSettings;
+    if (!formattedSettings) {
+      return NextResponse.json({ 
+        error: 'Failed to convert settings data',
+        details: 'Error converting settings format'
+      }, { status: 500 });
+    }
     return NextResponse.json(formattedSettings);
   } catch (error) {
     console.error('Error getting settings:', error);
