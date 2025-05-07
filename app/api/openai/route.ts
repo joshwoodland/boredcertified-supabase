@@ -11,6 +11,21 @@ export async function POST(request: NextRequest) {
   try {
     const { patientId, transcript, isInitialVisit } = await request.json();
 
+    // Validate required fields
+    if (!transcript) {
+      return NextResponse.json({ 
+        error: 'Missing required field',
+        details: 'Transcript is required'
+      }, { status: 400 });
+    }
+
+    if (isInitialVisit === undefined) {
+      return NextResponse.json({ 
+        error: 'Missing required field',
+        details: 'isInitialVisit flag is required'
+      }, { status: 400 });
+    }
+
     // Get app settings
     const { data: settings, error: settingsError } = await serverSupabase
       .from('app_settings')
