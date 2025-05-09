@@ -99,7 +99,7 @@ export async function GET(
       const appNote = convertToAppFormat(note, 'note') as AppNote;
       return NextResponse.json(appNote);
     }
-    
+
     console.log(`[notes/[id]/route] No existing summary found for note ${noteId}. Generating new summary.`);
 
     // Generate summary using OpenAI
@@ -140,10 +140,10 @@ ${note.content}`;
   } catch (error) {
     console.error('[notes/[id]/route] Unexpected error:', error);
     return NextResponse.json(
-      { 
-        error: 'Server error', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
-      }, 
+      {
+        error: 'Server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
@@ -167,9 +167,10 @@ export async function PUT(
     }
 
     const body = await request.json().catch(() => ({}));
-    const { content, summary } = body as {
+    const { content, summary, aiMagicRequest } = body as {
       content?: unknown;
       summary?: unknown;
+      aiMagicRequest?: string;
     };
 
     // Check if Supabase is available
@@ -198,7 +199,55 @@ export async function PUT(
       updated_at: new Date().toISOString(),
     };
 
-    if (content !== undefined) {
+    // If this is an AI Magic request, process it with OpenAI
+    if (aiMagicRequest && typeof content === 'string') {
+      try {
+        console.log('[notes/[id]/route] Processing AI Magic request');
+
+        // Create a prompt for OpenAI that includes both the edit request and original content
+        const prompt = `Please use these edit requests and apply them to the entire SOAP note.
+Return the full SOAP note in edited form without any extra words or comments.
+
+Edit Request: ${aiMagicRequest}
+
+Original SOAP Note:
+${content}`;
+
+        // Call OpenAI API to process the edit
+        const response = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3,
+          max_tokens: 2000,
+        });
+
+        // Get the edited content from OpenAI
+        const editedContent = response.choices[0]?.message?.content?.trim() || '';
+
+        // Format the content before saving
+        const formattedContent = editedContent; // We'll use the raw content as is
+
+        // Create the content object with both raw and formatted content
+        const contentToSave = JSON.stringify({
+          content: editedContent,
+          formattedContent
+        });
+
+        // Use the edited content as the new content
+        updateData.content = contentToSave;
+
+        console.log('[notes/[id]/route] AI Magic processing complete');
+      } catch (error) {
+        console.error('[notes/[id]/route] Error processing AI Magic request:', error);
+        return NextResponse.json(
+          {
+            error: 'Failed to process AI Magic request',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          },
+          { status: 500 }
+        );
+      }
+    } else if (content !== undefined) {
       updateData.content = content;
     }
 
@@ -228,10 +277,10 @@ export async function PUT(
   } catch (error) {
     console.error('[notes/[id]/route] Unexpected error:', error);
     return NextResponse.json(
-      { 
-        error: 'Server error', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
-      }, 
+      {
+        error: 'Server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
@@ -296,7 +345,7 @@ export async function POST(
       const appNote = convertToAppFormat(note, 'note') as AppNote;
       return NextResponse.json(appNote);
     }
-    
+
     console.log(`[notes/[id]/route] No existing summary found for note ${noteId}. Generating new summary.`);
 
     // Generate summary using OpenAI
@@ -337,10 +386,10 @@ ${note.content}`;
   } catch (error) {
     console.error('[notes/[id]/route] Unexpected error:', error);
     return NextResponse.json(
-      { 
-        error: 'Server error', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
-      }, 
+      {
+        error: 'Server error',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

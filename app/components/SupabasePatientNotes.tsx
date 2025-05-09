@@ -228,13 +228,23 @@ export default function SupabasePatientNotes({
   const handleAIMagicSubmit = async (noteId: string, editRequest: string) => {
     setIsAIMagicLoading(true);
     try {
+      // Find the original note content
+      const originalNote = notes.find(note => note.id === noteId);
+      if (!originalNote) {
+        throw new Error('Note not found');
+      }
+
+      // Extract the actual content from the note
+      const originalContent = extractContent(originalNote.content);
+
       const response = await fetch(`/api/notes/${noteId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          content: editRequest,
+          content: originalContent,
+          aiMagicRequest: editRequest,
         }),
       });
 
@@ -413,10 +423,14 @@ export default function SupabasePatientNotes({
                         e.stopPropagation();
                         setShowAIModal(true);
                       }}
-                      className="px-4 py-2 text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] flex items-center transition transform hover:scale-105 active:scale-95"
+                      className="px-4 py-2 text-sm font-medium flex items-center transition transform hover:scale-105 active:scale-95"
                     >
-                      <LuWandSparkles className="mr-2" />
-                      AI Magic
+                      <span className="inline-block mr-2">
+                        <LuWandSparkles size={16} color="#a855f7" />
+                      </span>
+                      <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]">
+                        AI Magic
+                      </span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -429,7 +443,7 @@ export default function SupabasePatientNotes({
                     </button>
                   </div>
                 )}
-                
+
                 {isEditing && selectedNote?.id === note.id ? (
                   <div className="space-y-4">
                     <textarea
