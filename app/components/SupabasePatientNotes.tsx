@@ -405,7 +405,7 @@ export default function SupabasePatientNotes({
                       }}
                       className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                     >
-                      <FiCopy />
+                      <FiCopy className="text-green-600 dark:text-green-500" />
                     </button>
                     <button
                       onClick={(e) => {
@@ -424,7 +424,7 @@ export default function SupabasePatientNotes({
                       }}
                       className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                     >
-                      <FiSend />
+                      <FiSend className="text-blue-600 dark:text-blue-500" />
                     </button>
                   </div>
                 )}
