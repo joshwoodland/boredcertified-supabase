@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiZap, FiSend } from 'react-icons/fi';
+import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiSend } from 'react-icons/fi';
+import { LuWandSparkles } from 'react-icons/lu';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
 import Toast from './Toast';
@@ -414,7 +415,7 @@ export default function SupabasePatientNotes({
                       }}
                       className="px-4 py-2 text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] flex items-center transition transform hover:scale-105 active:scale-95"
                     >
-                      <FiZap className="mr-2" />
+                      <LuWandSparkles className="mr-2" />
                       AI Magic
                     </button>
                     <button
