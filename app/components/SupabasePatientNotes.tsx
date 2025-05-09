@@ -1,9 +1,7 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { checkSupabaseConnection, convertToAppFormat, supabase, SupabaseNote, AppNote } from '../lib/supabase';
+import React, { useEffect, useState, useMemo } from 'react';
 import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiZap, FiSend } from 'react-icons/fi';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
-import { formatDate, toValidDate } from '../utils/dateUtils';
 import Toast from './Toast';
 import type { Note } from '../types/notes';
 import AIMagicModal from './AIMagicModal';
@@ -15,6 +13,18 @@ interface SupabasePatientNotesProps {
   forceCollapse?: boolean;
   refreshTrigger?: number;
 }
+
+const formatDate = (date: string | Date): string => {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  return dateObj.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: true
+  });
+};
 
 /**
  * Component that uses Supabase for patient notes
@@ -48,7 +58,7 @@ export default function SupabasePatientNotes({
     }
   }, [selectedNote]);
 
-  const loadNotes = useCallback(async () => {
+  const loadNotes = async () => {
     if (!patientId) {
       setNotes([]);
       setLoading(false);
@@ -79,37 +89,26 @@ export default function SupabasePatientNotes({
       const supabaseNotes = await response.json();
       console.log(`Retrieved ${supabaseNotes.length} notes from API`);
 
-      // Convert to App format and ensure dates are Date objects
+      // Notes are already in App format, just ensure dates are properly converted to Date objects
       const formattedNotes = supabaseNotes
-        .map((note: SupabaseNote) => {
+        .map((note: Note) => {
           if (!note) {
             console.warn('Found null note in response');
             return null;
           }
 
-          // The API returns data already converted to camelCase by convertToAppFormat
-          // But TypeScript still thinks it's SupabaseNote with snake_case
-          // Cast to any to avoid TypeScript errors
-          const noteData = note as any;
-
           // Ensure dates are properly converted
-          const createdAt = toValidDate(noteData.createdAt) || new Date();
-          const updatedAt = toValidDate(noteData.updatedAt) || new Date();
+          const createdAt = new Date(note.createdAt);
+          const updatedAt = new Date(note.updatedAt);
 
           // Log the note for debugging
-          console.log(`Processing note: ${noteData.id}, created: ${noteData.createdAt}, isInitialVisit: ${noteData.isInitialVisit}`);
+          console.log(`Processing note: ${note.id}, created: ${note.createdAt}, isInitialVisit: ${note.isInitialVisit}`);
 
-          // Handle both camelCase (from API) and snake_case (from direct Supabase)
           return {
-            id: noteData.id,
+            ...note,
             createdAt,
-            updatedAt,
-            patientId: noteData.patientId || noteData.patient_id,
-            transcript: noteData.transcript,
-            content: noteData.content,
-            summary: noteData.summary,
-            isInitialVisit: noteData.isInitialVisit !== undefined ? noteData.isInitialVisit : noteData.is_initial_visit
-          } as Note;
+            updatedAt
+          };
         })
         .filter((note: Note | null): note is Note => note !== null)
         .sort((a: Note, b: Note) => {
@@ -134,11 +133,11 @@ export default function SupabasePatientNotes({
     } finally {
       setLoading(false);
     }
-  }, [patientId, selectedNoteId]);
+  };
 
   useEffect(() => {
     loadNotes();
-  }, [loadNotes, refreshTrigger]);
+  }, [patientId, refreshTrigger, selectedNoteId]);
 
   const handleNoteSelect = (note: Note) => {
     setSelectedNote(note);
@@ -168,7 +167,7 @@ export default function SupabasePatientNotes({
         formattedContent
       });
 
-      const response = await fetch(`/api/notes/${note.id}/edit`, {
+      const response = await fetch(`/api/notes/${note.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -228,7 +227,7 @@ export default function SupabasePatientNotes({
   const handleAIMagicSubmit = async (noteId: string, editRequest: string) => {
     setIsAIMagicLoading(true);
     try {
-      const response = await fetch(`/api/notes/${noteId}/edit`, {
+      const response = await fetch(`/api/notes/${noteId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -304,7 +303,7 @@ export default function SupabasePatientNotes({
 
     setIsFetchingSummary(prev => ({ ...prev, [noteId]: true }));
     try {
-      const response = await fetch(`/api/notes/${noteId}/summary`, {
+      const response = await fetch(`/api/notes/${noteId}`, {
         method: 'POST',
       });
 
@@ -376,54 +375,60 @@ export default function SupabasePatientNotes({
                     <div className="text-xs text-gray-500 dark:text-gray-400">
                       {note.isInitialVisit ? 'Initial Visit' : 'Follow-up Visit'}
                     </div>
-                    {selectedNote?.id !== note.id && (
-                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-1 mt-1">
-                        {summaries[note.id] || (isFetchingSummary[note.id] ? 'Loading summary...' : getParsedContent(note.content).split('\n')[0])}
-                      </p>
-                    )}
+                    {/* Display summary when collapsed, regardless of selection state */}
+                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mt-1 pr-4">
+                      {summaries[note.id] || (isFetchingSummary[note.id] ? 'Loading summary...' : getParsedContent(note.content).split('\n')[0])}
+                    </p>
                   </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditClick(note);
-                    }}
-                    className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  >
-                    <FiEdit />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCopy(note);
-                    }}
-                    className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  >
-                    <FiCopy />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowAIModal(true);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] flex items-center transition transform hover:scale-105 active:scale-95"
-                  >
-                    <FiZap className="mr-2" />
-                    AI Magic
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSendWebhook(note);
-                    }}
-                    className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  >
-                    <FiSend />
-                  </button>
+                <div className="flex items-center">
+                  {/* Always show expand/collapse indicator */}
+                  <FiChevronDown className="text-gray-500 dark:text-gray-400" />
                 </div>
               </summary>
               <div className="p-4 border-t dark:border-gray-700">
+                {selectedNote?.id === note.id && (
+                  <div className="flex items-center justify-end space-x-2 mb-4">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditClick(note);
+                      }}
+                      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      <FiEdit />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopy(note);
+                      }}
+                      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      <FiCopy />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowAIModal(true);
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 hover:drop-shadow-[0_0_8px_rgba(168,85,247,0.5)] flex items-center transition transform hover:scale-105 active:scale-95"
+                    >
+                      <FiZap className="mr-2" />
+                      AI Magic
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSendWebhook(note);
+                      }}
+                      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      <FiSend />
+                    </button>
+                  </div>
+                )}
+                
                 {isEditing && selectedNote?.id === note.id ? (
                   <div className="space-y-4">
                     <textarea
