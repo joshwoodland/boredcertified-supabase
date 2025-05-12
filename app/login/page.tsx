@@ -6,6 +6,7 @@ import { loginWithGoogle } from './actions';
 import DynamicLogo from '../components/DynamicLogo';
 import { useRouter } from 'next/navigation';
 import { Session } from '@supabase/supabase-js';
+import { debugClientCookies } from '@/app/utils/cookies';
 
 export default function LoginPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -20,10 +21,28 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     try {
+      setIsLoading(true);
+      setError(null);
+
+      console.log('[LOGIN] Starting Google OAuth login flow');
+
+      // Get the current origin for the redirect URL
+      const origin = window.location.origin;
+      const redirectUrl = `${origin}/auth/callback`;
+
+      console.log('[LOGIN] Using redirect URL:', redirectUrl);
+
+      // Check if Supabase client is initialized
+      if (!supabase) {
+        const errorMsg = 'Supabase client not initialized';
+        console.error(`[LOGIN] ${errorMsg}`);
+        throw new Error(errorMsg);
+      }
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -31,26 +50,82 @@ export default function LoginPage() {
         },
       });
 
-      if (error) throw error;
-      
+      if (error) {
+        console.error('[LOGIN] OAuth error:', error);
+        throw error;
+      }
+
       // Redirect to OAuth provider URL
       if (data?.url) {
+        console.log('[LOGIN] Redirecting to OAuth provider URL');
         window.location.href = data.url;
+      } else {
+        console.error('[LOGIN] No URL returned from OAuth provider');
+        throw new Error('No URL returned from OAuth provider');
       }
     } catch (error) {
+      console.error('[LOGIN] Error during Google login:', error);
       setError(error instanceof Error ? error.message : 'Failed to login with Google');
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
+        console.log('[LOGIN] Checking for existing session');
+
+        // Check for auth cookies in the browser using standardized function
+        const hasAuthCookies = debugClientCookies('LOGIN');
+
+        // Check if Supabase client is initialized
+        if (!supabase) {
+          const errorMsg = 'Supabase client not initialized';
+          console.error(`[LOGIN] ${errorMsg}`);
+          setError(errorMsg);
+          setIsCheckingSession(false);
+          return;
+        }
+
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        if (error) {
+          console.error('[LOGIN] Error checking session:', error);
+          throw error;
+        }
+
         if (session) {
+          console.log('[LOGIN] Session found for user:', session.user.email);
+
+          // Set the email for display while redirecting
+          setUserEmail(session.user.email || null);
+
+          // Redirect to home page
           router.push('/');
+        } else {
+          console.log('[LOGIN] No session found');
+
+          // If we have auth cookies but no session, try to refresh
+          if (hasAuthCookies) {
+            console.log('[LOGIN] Auth cookies present but no session, attempting refresh');
+            try {
+              const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+
+              if (refreshError) {
+                console.error('[LOGIN] Error refreshing session:', refreshError);
+              } else if (refreshData.session) {
+                console.log('[LOGIN] Session refreshed successfully for user:', refreshData.session.user.email);
+                setUserEmail(refreshData.session.user.email || null);
+                router.push('/');
+                return;
+              }
+            } catch (refreshError) {
+              console.error('[LOGIN] Exception during session refresh:', refreshError);
+            }
+          }
         }
       } catch (error) {
+        console.error('[LOGIN] Error checking session:', error);
         setError(error instanceof Error ? error.message : 'Failed to check session');
       } finally {
         setIsCheckingSession(false);
@@ -58,17 +133,34 @@ export default function LoginPage() {
     };
 
     checkSession();
-  }, [router]);
+  }, [router, supabase]);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
+    console.log('[LOGIN] Setting up auth state change listener');
+
+    // Check if Supabase client is initialized
+    if (!supabase) {
+      console.error('[LOGIN] Cannot set up auth listener - Supabase client not initialized');
+      return () => {}; // Return empty cleanup function
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: any) => {
+      console.log(`[LOGIN] Auth state changed: ${event}`);
+
       if (session) {
+        console.log('[LOGIN] User authenticated in auth change listener:', session.user.email);
+        setUserEmail(session.user.email || null);
         router.push('/');
+      } else {
+        console.log('[LOGIN] User logged out or session expired');
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, [router]);
+    return () => {
+      console.log('[LOGIN] Cleaning up auth state change listener');
+      subscription.unsubscribe();
+    };
+  }, [router, supabase]);
 
   useEffect(() => {
     const videoElement = videoRef.current;
@@ -102,7 +194,7 @@ export default function LoginPage() {
     <main className="flex flex-col items-center justify-center min-h-screen p-8 bg-[#1B2025] relative overflow-hidden">
       {/* Video Background */}
       <div className="video-background absolute inset-0 w-full h-full z-0">
-        <video 
+        <video
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-cover opacity-30"
           preload="auto"
@@ -117,9 +209,9 @@ export default function LoginPage() {
         </video>
         <div className="absolute inset-0 bg-gradient-to-t from-[#1B2025] via-transparent to-transparent opacity-70"></div>
       </div>
-      
+
       <div className="flex flex-col items-center relative z-10">
-        <DynamicLogo 
+        <DynamicLogo
           className="h-96 w-auto mb-4"
           forceWhite={true}
         />

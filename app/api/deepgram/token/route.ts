@@ -1,27 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Deepgram } from '@deepgram/sdk';
 
 /**
- * API route to generate a short-lived Deepgram API token
- * This is more secure than exposing the API key directly to the client
- * Compatible with Deepgram SDK v3
+ * GET /api/deepgram/token
+ *
+ * Returns a short-lived Deepgram token (15 minutes) so the browser
+ * never sees your master API key.
  */
-export async function GET(request: NextRequest) {
+export async function GET(_req: NextRequest) {
   try {
-    if (!process.env.DEEPGRAM_API_KEY) {
+    const masterKey = process.env.DEEPGRAM_API_KEY;
+    if (!masterKey) {
+      console.error('DEEPGRAM_API_KEY environment variable is not set');
       throw new Error('DEEPGRAM_API_KEY environment variable is not set');
     }
 
-    // For SDK v3, we'll use the direct API key in the client
-    // This is a simplified approach for the demo
-    // In production, you should implement proper token generation
-    // using the Deepgram API directly
-
-    // Return the API key as a token (not recommended for production)
-    return NextResponse.json({
-      token: process.env.DEEPGRAM_API_KEY,
-      message: 'Using direct API key for demo purposes'
+    // Make a POST request to Deepgram's API to create a temporary key
+    const response = await fetch('https://api.deepgram.com/v1/keys', {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${masterKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        comment: 'temporary-client-key',
+        scopes: ['usage:write'],
+        expires_in: 900, // seconds
+      }),
     });
+
+    if (!response.ok) {
+      throw new Error(`Failed to create Deepgram key: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    return NextResponse.json(
+      { token: data.key, expiresIn: 900 },
+      { status: 200 }
+    );
   } catch (error) {
     console.error('Error generating Deepgram token:', error);
     return NextResponse.json(

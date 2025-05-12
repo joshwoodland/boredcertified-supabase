@@ -5,6 +5,6 @@ export interface Note {
   content: string;
   summary: string | null;
   isInitialVisit: boolean;
-  createdAt: string | Date;
-  updatedAt: string | Date;
-} 
+  createdAt: Date;
+  updatedAt: Date;
+}

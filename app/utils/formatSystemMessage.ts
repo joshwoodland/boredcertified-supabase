@@ -1,4 +1,4 @@
-import type { ChatCompletionMessageParam } from 'openai/resources/chat'; // Adjust the import if needed based on your OpenAI client version
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 /**
  * Formats a plain-English system message for the ChatGPT API.
@@ -13,4 +13,4 @@ export function formatSystemMessage(plainText: string): ChatCompletionMessagePar
     role: "system",
     content,
   };
-} 
+}

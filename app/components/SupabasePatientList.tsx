@@ -1,6 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { checkSupabaseConnection, getClientSupabasePatients, convertToAppFormat, supabase, SupabasePatient, AppPatient } from '../lib/supabase';
+import { createBrowserSupabaseClient, getClientSupabasePatients, convertToAppFormat, supabaseBrowser } from '@/app/lib/supabase';
+import type { AppPatient, SupabasePatient } from '@/app/lib/supabase';
 import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
+
+// Use the singleton browser client
+const supabase = supabaseBrowser;
+
+// Helper function to check Supabase connection
+async function checkSupabaseConnection(): Promise<boolean> {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase.from('patients').select('id').limit(1);
+    if (error && error.code !== '42P01') {
+      console.error('Supabase connection error:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Failed to connect to Supabase:', error);
+    return false;
+  }
+}
 
 // Use AppPatient as the primary type for the list after conversion
 interface Patient extends AppPatient {}
@@ -92,13 +113,13 @@ export default function SupabasePatientList({
             return patient.isDeleted === showTrash;
           })
           .sort((a: AppPatient, b: AppPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
-        
+
         setPatients(formattedPatients);
         setDataSource('supabase');
-        
+
         // Call the callback with loaded patients
         onPatientsLoaded?.(formattedPatients);
-        
+
         return formattedPatients;
       } else {
         console.error('Supabase connection unavailable. Please check your connection settings.');
@@ -121,6 +142,10 @@ export default function SupabasePatientList({
   // Function to add a new patient
   const addPatient = async (name: string) => {
     try {
+      if (!supabase) {
+        throw new Error('Supabase client not initialized');
+      }
+
       let newPatientId = '';
 
       // Get current user's session to access their email
@@ -174,6 +199,10 @@ export default function SupabasePatientList({
 
     try {
       if (dataSource === 'supabase') {
+        if (!supabase) {
+          throw new Error('Supabase client not initialized');
+        }
+
         // Update in Supabase
         const now = new Date().toISOString();
         const { error } = await supabase
@@ -219,6 +248,10 @@ export default function SupabasePatientList({
 
     try {
       if (dataSource === 'supabase') {
+        if (!supabase) {
+          throw new Error('Supabase client not initialized');
+        }
+
         // Update in Supabase
         const now = new Date().toISOString();
         const { error } = await supabase
@@ -249,6 +282,10 @@ export default function SupabasePatientList({
 
     try {
       if (dataSource === 'supabase') {
+        if (!supabase) {
+          throw new Error('Supabase client not initialized');
+        }
+
         // Update in Supabase
         const now = new Date().toISOString();
         const { error } = await supabase
@@ -331,6 +368,7 @@ export default function SupabasePatientList({
           width: 4px; /* Match the original border-l-4 width */
           height: 100%;
           background: linear-gradient(to bottom, #9333ea, #3b82f6); /* Deeper purple to blue */
+          opacity: 0.8; /* Slightly faded for better visual balance */
           z-index: 10;
         }
       `}</style>
@@ -348,7 +386,7 @@ export default function SupabasePatientList({
               {!isAddingPatient ? (
                 <button
                   onClick={() => setIsAddingPatient(true)}
-                  className="w-full px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all shadow-md hover:shadow-lg"
+                  className="w-full px-4 py-2.5 text-base font-semibold tracking-wide text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl transition-all shadow-md hover:shadow-lg"
                   type="button"
                 >
                   Add New Patient
@@ -409,6 +447,8 @@ export default function SupabasePatientList({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              autoFocus={!isAddingPatient}
+              onKeyDown={(e) => e.key === 'Escape' && setSearchQuery('')}
               className="w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-0 dark:text-white"
               placeholder="Search patients..."
             />
@@ -418,7 +458,8 @@ export default function SupabasePatientList({
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                 type="button"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" role="img">
+                  <title>Clear search</title>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -434,7 +475,7 @@ export default function SupabasePatientList({
           </div>
         ) : searchQuery && filteredPatients.length === 0 ? (
           <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-            No patients found matching "{searchQuery}"
+            No patients on this date—try another search
           </div>
         ) : (
           // Group patients by date and display with date headers
@@ -455,12 +496,13 @@ export default function SupabasePatientList({
               {/* Patients for this date */}
               <div className="divide-y dark:divide-gray-700">
                 {group.patients.map(patient => (
-                  <div
+                  <button
                     key={patient.id}
-                    className={`p-4 cursor-pointer transition-all group ${
+                    type="button"
+                    className={`w-full text-left pl-4 pr-2 py-3.5 cursor-pointer transition-colors group relative ${
                       selectedPatientId === patient.id
-                        ? 'gradient-border-left bg-gray-100 dark:bg-gray-800 shadow-inner shadow-black/30 dark:shadow-black/60 font-medium'
-                        : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
+                        ? 'bg-zinc-700/80 dark:bg-zinc-700/80 gradient-border-left'
+                        : 'bg-white dark:bg-gray-800 hover:bg-zinc-800/60 dark:hover:bg-zinc-800/60 focus:bg-zinc-800/60 dark:focus:bg-zinc-800/60 focus:outline-none'
                     }`}
                     onClick={() => {
                       if (isEditing === patient.id) return;
@@ -469,7 +511,10 @@ export default function SupabasePatientList({
                   >
                     {isEditing === patient.id ? (
                       // Editing mode
-                      <div onClick={(e) => e.stopPropagation()} className="flex items-center">
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        className="flex items-center">
                         <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
                           <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                         </div>
@@ -498,7 +543,8 @@ export default function SupabasePatientList({
                                 }}
                                 className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
                               >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" role="img">
+                                  <title>Cancel editing</title>
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                               </button>
@@ -510,7 +556,8 @@ export default function SupabasePatientList({
                                 {isProcessing === patient.id ? (
                                   <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                                 ) : (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" role="img">
+                                    <title>Save changes</title>
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                   </svg>
                                 )}
@@ -527,7 +574,7 @@ export default function SupabasePatientList({
                             <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h3 className="font-medium dark:text-white truncate">
+                            <h3 className="text-sm font-medium dark:text-white truncate">
                               {patient.name}
                             </h3>
                           </div>
@@ -557,7 +604,7 @@ export default function SupabasePatientList({
                         </div>
                       </div>
                     )}
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { FiLogOut, FiUser, FiChevronDown } from 'react-icons/fi';
-import { createClient } from '../utils/supabase/client';
+import { supabaseBrowser } from '@/app/lib/supabase';
+import { createLogger } from '@/app/lib/supabase/logger';
+import type { Session } from '@supabase/supabase-js';
+
+// Initialize logger for this component
+const logger = createLogger('user-profile');
 
 export default function UserProfile() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -13,32 +18,37 @@ export default function UserProfile() {
     email: null,
     avatarUrl: null,
   });
-  const supabase = createClient();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Get current session
     const fetchUserData = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      // Add null checking for Supabase client
+      if (!supabaseBrowser) {
+        logger.error('Supabase client not initialized');
+        return;
+      }
+
+      const { data: { session } } = await supabaseBrowser.auth.getSession();
       if (session?.user) {
         // Add debugging for user metadata and avatar URL
-        console.log('User metadata:', session.user.user_metadata);
-        console.log('Avatar URL:', session.user.user_metadata?.avatar_url);
-        console.log('Email:', session.user.email);
-        
+        logger.debug('User metadata:', { metadata: session.user.user_metadata });
+        logger.debug('Avatar URL:', { avatarUrl: session.user.user_metadata?.avatar_url });
+        logger.debug('Email:', { email: session.user.email });
+
         // Check if the avatar URL exists and fix potential CORS issues
-        let fixedAvatarUrl = session.user.user_metadata?.avatar_url || null;
-        
+        let fixedAvatarUrl = session.user?.user_metadata?.avatar_url || null;
+
         // Google image URLs sometimes have CORS issues, try to fix them if needed
-        if (fixedAvatarUrl && fixedAvatarUrl.includes('googleusercontent.com')) {
+        if (fixedAvatarUrl?.includes('googleusercontent.com')) {
           // Make sure the URL has the correct parameter to avoid CORS issues
           if (!fixedAvatarUrl.includes('=s96-c')) {
             // This is a common size parameter for Google profile images
-            fixedAvatarUrl = fixedAvatarUrl.split('=')[0] + '=s96-c';
-            console.log('Fixed Google avatar URL:', fixedAvatarUrl);
+            fixedAvatarUrl = `${fixedAvatarUrl.split('=')[0]}=s96-c`;
+            logger.debug('Fixed Google avatar URL:', { url: fixedAvatarUrl });
           }
         }
-        
+
         setUser({
           email: session.user.email || null,
           avatarUrl: fixedAvatarUrl,
@@ -49,23 +59,28 @@ export default function UserProfile() {
     fetchUserData();
 
     // Listen for auth changes
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (!supabaseBrowser) {
+      logger.error('Cannot set up auth listener - Supabase client not initialized');
+      return;
+    }
+    
+    const { data: authListener } = supabaseBrowser.auth.onAuthStateChange((_event: string, session: Session | null) => {
       if (session?.user) {
         // Also log during auth state changes
-        console.log('Auth change - User metadata:', session.user.user_metadata);
-        console.log('Auth change - Avatar URL:', session.user.user_metadata?.avatar_url);
-        console.log('Auth change - Email:', session.user.email);
-        
+        logger.debug('Auth change - User metadata:', { metadata: session.user.user_metadata });
+        logger.debug('Auth change - Avatar URL:', { avatarUrl: session.user.user_metadata?.avatar_url });
+        logger.debug('Auth change - Email:', { email: session.user.email });
+
         // Apply the same fix for Google avatar URLs during auth state changes
-        let fixedAvatarUrl = session.user.user_metadata?.avatar_url || null;
-        
-        if (fixedAvatarUrl && fixedAvatarUrl.includes('googleusercontent.com')) {
+        let fixedAvatarUrl = session.user?.user_metadata?.avatar_url || null;
+
+        if (fixedAvatarUrl?.includes('googleusercontent.com')) {
           if (!fixedAvatarUrl.includes('=s96-c')) {
-            fixedAvatarUrl = fixedAvatarUrl.split('=')[0] + '=s96-c';
-            console.log('Auth change - Fixed Google avatar URL:', fixedAvatarUrl);
+            fixedAvatarUrl = `${fixedAvatarUrl.split('=')[0]}=s96-c`;
+            logger.debug('Auth change - Fixed Google avatar URL:', { url: fixedAvatarUrl });
           }
         }
-        
+
         setUser({
           email: session.user.email || null,
           avatarUrl: fixedAvatarUrl,
@@ -88,18 +103,26 @@ export default function UserProfile() {
     document.addEventListener('mousedown', handleClickOutside);
 
     return () => {
-      authListener.subscription.unsubscribe();
+      if (authListener?.subscription) {
+        authListener.subscription.unsubscribe();
+      }
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      if (!supabaseBrowser) {
+        logger.error('Cannot logout - Supabase client not initialized');
+        return;
+      }
+      
+      await supabaseBrowser.auth.signOut();
       // Redirect to login page
       window.location.href = '/login';
+      logger.info('User logged out successfully');
     } catch (error) {
-      console.error('Error during logout:', error);
+      logger.error('Error during logout:', error);
     }
   };
 
@@ -112,6 +135,7 @@ export default function UserProfile() {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+        type="button"
         className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
         aria-label="User profile"
       >
@@ -121,8 +145,10 @@ export default function UserProfile() {
             alt="User profile"
             className="w-8 h-8 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
             onError={(e) => {
-              console.error('Avatar image failed to load:', user.avatarUrl);
-              console.log('Email of user with failed avatar:', user.email);
+              logger.error('Avatar image failed to load', { 
+                avatarUrl: user.avatarUrl, 
+                email: user.email 
+              });
               // Replace with the fallback icon
               e.currentTarget.style.display = 'none';
               const parent = e.currentTarget.parentElement;
@@ -150,8 +176,10 @@ export default function UserProfile() {
                   alt="User profile"
                   className="w-10 h-10 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
                   onError={(e) => {
-                    console.error('Dropdown avatar image failed to load:', user.avatarUrl);
-                    console.log('Email of user with failed dropdown avatar:', user.email);
+                    logger.error('Dropdown avatar image failed to load', { 
+                      avatarUrl: user.avatarUrl, 
+                      email: user.email 
+                    });
                     // Replace with the fallback icon
                     e.currentTarget.style.display = 'none';
                     const parent = e.currentTarget.parentElement;
@@ -176,6 +204,7 @@ export default function UserProfile() {
           <div className="px-2 py-1">
             <button
               onClick={handleLogout}
+              type="button"
               className="flex w-full items-center px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors"
             >
               <FiLogOut className="mr-2" />
@@ -188,7 +217,7 @@ export default function UserProfile() {
   );
 }
 
-// Add keyframe animation 
+// Add keyframe animation
 if (typeof document !== 'undefined') {
   if (!document.querySelector('#user-profile-animations')) {
     const style = document.createElement('style');

@@ -1,64 +1,111 @@
-'use server';
-
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createClient } from '@/app/utils/supabase/server';
-import { convertToAppFormat, AppSettings } from '@/app/lib/supabase';
+import { cookies } from 'next/headers';
+import { AppSettings, SupabaseSettings } from '@/app/lib/supabaseTypes';
+import {
+  supabaseToAppSettings,
+  appToSupabaseSettings,
+  applyDefaultSettings,
+  generateUserSettingsId
+} from '@/app/utils/settingsConverter';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_SETTINGS_ID
+} from '@/app/lib/defaultSettings';
 
-// Debug logging helper
-const debugLog = (message: string, data?: unknown) => {
-  if (process.env.NODE_ENV === 'development') {
-    if (data) {
-      console.log(`[SETTINGS DEBUG] ${message}`, data);
-    } else {
-      console.log(`[SETTINGS DEBUG] ${message}`);
-    }
-  }
-};
-
-/**
- * GET handler for settings
- */
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   try {
-    const supabaseServer = await createClient();
+    const supabaseServer = createClient();
 
-    // Get the user's email from their session
-    const { data: { session } } = await supabaseServer.auth.getSession();
-    const userEmail = session?.user?.email;
+    // Get user session
+    const { data: { session }, error: sessionError } = await supabaseServer.auth.getSession();
 
-    if (!userEmail) {
-      console.warn('No user email found in session for fetching settings');
-      return NextResponse.json({ error: 'User not authenticated' }, { status: 401 });
+    if (sessionError) {
+      console.error('Error getting session:', sessionError);
+      return NextResponse.json({ error: 'Authentication error' }, { status: 401 });
     }
 
-    // Get settings from Supabase
-    const { data, error } = await supabaseServer
-      .from('app_settings')
-      .select('*')
-      .eq('email', userEmail)
-      .maybeSingle();
+    let userEmail = session?.user?.email || null;
+    let userId = session?.user?.id || null;
+    let source = 'none';
+    let data = null;
 
-    if (error) {
-      console.error('Error fetching settings from Supabase:', error);
-      return NextResponse.json({ 
-        error: 'Failed to fetch settings',
-        details: error.message 
-      }, { status: 500 });
+    // First try to get settings by user_id if available
+    if (userId) {
+      console.log('Fetching settings by user_id:', userId);
+      const { data: userSettings, error: userSettingsError } = await supabaseServer
+        .from('app_settings')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (userSettingsError && userSettingsError.code !== 'PGRST116') {
+        console.error('Error fetching settings by user_id:', userSettingsError);
+      }
+
+      if (userSettings) {
+        console.log('Found settings by user_id');
+        data = userSettings;
+        source = 'user_id';
+      }
+    }
+
+    // If no settings found by user_id, try by email
+    if (!data && userEmail) {
+      console.log('Fetching settings by email:', userEmail);
+      const { data: emailSettings, error: emailSettingsError } = await supabaseServer
+        .from('app_settings')
+        .select('*')
+        .eq('email', userEmail)
+        .maybeSingle();
+
+      if (emailSettingsError && emailSettingsError.code !== 'PGRST116') {
+        console.error('Error fetching settings by email:', emailSettingsError);
+      }
+
+      if (emailSettings) {
+        console.log('Found settings by email');
+        data = emailSettings;
+        source = 'email';
+      }
+    }
+
+    // If still no settings, get default settings
+    if (!data) {
+      console.log('Fetching default settings');
+      const { data: defaultSettings, error: defaultSettingsError } = await supabaseServer
+        .from('app_settings')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+
+      if (defaultSettingsError) {
+        console.error('Error fetching default settings:', defaultSettingsError);
+        return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
+      }
+
+      if (defaultSettings) {
+        console.log('Found default settings');
+        data = defaultSettings;
+        source = 'default';
+      } else {
+        return NextResponse.json({ error: 'No settings found' }, { status: 404 });
+      }
     }
 
     // If no settings exist yet, create default settings
     if (!data) {
       const defaultSettings = {
-        id: userEmail,
+        id: userEmail || 'default',
         dark_mode: false,
-        gpt_model: 'gpt-4',
+        gpt_model: 'gpt-4o',
         initial_visit_prompt: 'Please summarize this initial visit note.',
         follow_up_visit_prompt: 'Please summarize this follow-up visit note.',
         auto_save: true,
         low_echo_cancellation: false,
         email: userEmail,
-        user_id: session.user.id,
-        updated_at: new Date().toISOString()
+        user_id: userId,
+        updated_at: new Date().toISOString(),
       };
 
       const { data: newSettings, error: createError } = await supabaseServer
@@ -68,96 +115,130 @@ export async function GET(request: NextRequest) {
         .maybeSingle();
 
       if (createError) {
-        console.error('Error creating default settings in Supabase:', createError);
-        return NextResponse.json({ 
-          error: 'Failed to create default settings',
-          details: createError.message 
-        }, { status: 500 });
+        console.error('Error creating default settings:', createError);
+        return NextResponse.json({ error: 'Failed to create settings' }, { status: 500 });
       }
 
-      if (!newSettings) {
-        return NextResponse.json({ 
-          error: 'Failed to create default settings',
-          details: 'No settings returned after creation'
-        }, { status: 500 });
-      }
-
-      // Convert to App format and return
-      const formattedSettings = convertToAppFormat(newSettings, 'settings') as AppSettings;
-      if (!formattedSettings) {
-        return NextResponse.json({ 
-          error: 'Failed to convert settings data',
-          details: 'Error converting settings format'
-        }, { status: 500 });
-      }
-      return NextResponse.json(formattedSettings);
+      data = newSettings;
+      source = 'newly_created';
     }
 
-    // Convert existing settings to App format and return
-    const formattedSettings = convertToAppFormat(data, 'settings') as AppSettings;
-    if (!formattedSettings) {
-      return NextResponse.json({ 
-        error: 'Failed to convert settings data',
-        details: 'Error converting settings format'
-      }, { status: 500 });
-    }
-    return NextResponse.json(formattedSettings);
+    // Convert snake_case to camelCase for client using our utility
+    const appSettings = supabaseToAppSettings(data);
+
+    // Add source information for debugging
+    const clientSettings = {
+      ...appSettings,
+      source
+    };
+
+    return NextResponse.json(clientSettings);
+
   } catch (error) {
-    console.error('Error getting settings:', error);
-    return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
+    console.error('Unexpected error in settings API:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-/**
- * POST handler for settings
- */
-export async function POST(request: NextRequest) {
-  debugLog('Starting POST request for settings');
-
+export async function POST(request: Request) {
   try {
+    const supabaseServer = createClient();
     const body = await request.json();
-    debugLog('Request body:', body);
 
-    const supabaseServer = await createClient();
+    // Get user session
+    const { data: { session }, error: sessionError } = await supabaseServer.auth.getSession();
 
-    // Get the user's email from their session
-    const { data: { session } } = await supabaseServer.auth.getSession();
-    const userEmail = session?.user?.email;
-
-    if (!userEmail) {
-      console.warn('No user email found in session for updating settings');
-      return NextResponse.json({ error: 'User not authenticated' }, { status: 401 });
+    if (sessionError || !session) {
+      console.error('Error getting session:', sessionError);
+      return NextResponse.json({ error: 'Authentication error' }, { status: 401 });
     }
 
-    // Convert camelCase to snake_case for Supabase
-    const updateData = {
-      dark_mode: body.darkMode,
-      gpt_model: body.gptModel,
-      initial_visit_prompt: body.initialVisitPrompt,
-      follow_up_visit_prompt: body.followUpVisitPrompt,
-      auto_save: body.autoSave,
-      low_echo_cancellation: body.lowEchoCancellation,
-      updated_at: new Date().toISOString()
+    const userEmail = session.user.email;
+    const userId = session.user.id;
+
+    // Check if settings exist for this user
+    const { data: existingSettings, error: fetchError } = await supabaseServer
+      .from('app_settings')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error checking existing settings:', fetchError);
+      return NextResponse.json({ error: 'Failed to check settings' }, { status: 500 });
+    }
+
+    // If settings don't exist, create them
+    if (!existingSettings) {
+      const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+      // Create app settings with defaults and convert to Supabase format
+      const userSettings = applyDefaultSettings({
+        id: userSettingsId,
+        darkMode: body.darkMode,
+        gptModel: body.gptModel,
+        initialVisitPrompt: body.initialVisitPrompt,
+        followUpVisitPrompt: body.followUpVisitPrompt,
+        autoSave: body.autoSave,
+        lowEchoCancellation: body.lowEchoCancellation,
+        email: userEmail,
+        userId: userId,
+        updatedAt: new Date()
+      });
+
+      // Convert to Supabase format
+      const newSettings = appToSupabaseSettings(userSettings);
+
+      const { data: createdSettings, error: createError } = await supabaseServer
+        .from('app_settings')
+        .insert(newSettings)
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('Error creating settings:', createError);
+        return NextResponse.json({ error: 'Failed to create settings' }, { status: 500 });
+      }
+
+      // Convert snake_case to camelCase for client using our utility
+      const clientSettings = supabaseToAppSettings(createdSettings);
+
+      return NextResponse.json(clientSettings);
+    }
+
+    // First convert existing settings to app format
+    const existingAppSettings = supabaseToAppSettings(existingSettings);
+
+    // Merge with new settings
+    const updatedSettings = {
+      ...existingAppSettings,
+      ...body,
+      updatedAt: new Date()
     };
+
+    // Convert back to Supabase format for storage
+    const updateData = appToSupabaseSettings(updatedSettings);
 
     // Update settings in Supabase
     const { data, error } = await supabaseServer
       .from('app_settings')
       .update(updateData)
-      .eq('email', userEmail)
+      .eq('user_id', userId)
       .select()
       .single();
 
     if (error) {
-      console.error('Error updating settings in Supabase:', error);
+      console.error('Error updating settings:', error);
       return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
     }
 
-    // Convert to App format and return
-    const formattedSettings = convertToAppFormat(data, 'settings');
-    return NextResponse.json(formattedSettings);
+    // Convert snake_case to camelCase for client using our utility
+    const clientSettings = supabaseToAppSettings(data);
+
+    return NextResponse.json(clientSettings);
+
   } catch (error) {
-    console.error('Error updating settings:', error);
-    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
+    console.error('Unexpected error in settings API:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

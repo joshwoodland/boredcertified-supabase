@@ -2,18 +2,18 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { createClient } from '@/app/utils/supabase/client';
-import { Session } from '@supabase/supabase-js';
-
-interface AppSettings {
-  darkMode: boolean;
-  gptModel: string;
-  initialVisitPrompt: string;
-  followUpVisitPrompt: string;
-  lowEchoCancellation: boolean;
-  autoSave: boolean;
-  email?: string | null;
-  userId?: string | null;
-}
+import { debugClientCookies } from '@/app/utils/cookies';
+import { AppSettings } from '@/app/lib/supabaseTypes';
+import {
+  supabaseToAppSettings,
+  appToSupabaseSettings,
+  applyDefaultSettings,
+  generateUserSettingsId
+} from '@/app/utils/settingsConverter';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_SETTINGS_ID
+} from '@/app/lib/defaultSettings';
 
 interface AppSettingsContextType {
   settings: AppSettings | null;
@@ -26,17 +26,8 @@ interface AppSettingsContextType {
 const AppSettingsContext = createContext<AppSettingsContextType | undefined>(undefined);
 
 // Add this function to help with debugging
-const debugCookies = () => {
-  try {
-    const cookies = document.cookie.split(';').map(c => c.trim());
-    const authCookies = cookies.filter(c => c.includes('-auth-token'));
-    console.log('[AUTH DEBUG] Client-side cookies:', cookies);
-    console.log('[AUTH DEBUG] Auth cookies found:', authCookies);
-    return authCookies.length > 0;
-  } catch (e) {
-    console.error('[AUTH DEBUG] Error checking cookies:', e);
-    return false;
-  }
+const checkAuthCookies = () => {
+  return debugClientCookies('AUTH DEBUG');
 };
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
@@ -46,14 +37,26 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<Error | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  
+
   // Add a function to refresh settings that can be exposed to consumers
   const refreshSettings = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      await fetchOrInitSettings(session.user.id, session.user.email || null);
-    } else {
-      await fetchOrInitSettings(null, null);
+    // Check if Supabase client is initialized
+    if (!supabase) {
+      console.error('[AUTH DEBUG] Cannot refresh settings - Supabase client not initialized');
+      setError(new Error('Unable to initialize authentication client'));
+      return;
+    }
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await fetchOrInitSettings(session.user.id, session.user.email || null);
+      } else {
+        await fetchOrInitSettings(null, null);
+      }
+    } catch (error) {
+      console.error('[AUTH DEBUG] Error refreshing settings:', error);
+      setError(error instanceof Error ? error : new Error('Failed to refresh settings'));
     }
   };
 
@@ -62,19 +65,25 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     const checkAuth = async () => {
       try {
         console.log('[AUTH DEBUG] Performing initial auth check');
-        
+
+        // Check if Supabase client is initialized
+        if (!supabase) {
+          console.error('[AUTH DEBUG] Cannot check auth - Supabase client not initialized');
+          return null;
+        }
+
         // Check cookies first
-        const hasAuthCookies = debugCookies();
+        const hasAuthCookies = checkAuthCookies();
         console.log('[AUTH DEBUG] Auth cookies present in browser:', hasAuthCookies);
-        
+
         // Get session from Supabase
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
+
         if (sessionError) {
           console.error('[AUTH DEBUG] Error getting session:', sessionError);
           return null;
         }
-        
+
         if (session?.user) {
           console.log('[AUTH DEBUG] Session found:', {
             id: session.user.id,
@@ -84,27 +93,17 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           return session;
         } else {
           console.log('[AUTH DEBUG] No session found, but cookies present:', hasAuthCookies);
-          
+
           if (hasAuthCookies) {
             console.log('[AUTH DEBUG] Attempting to refresh session due to cookie mismatch');
             try {
               const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-              
+
               if (refreshError) {
                 console.error('[AUTH DEBUG] Error refreshing session:', refreshError);
-                if (refreshError.message.includes('Auth session missing')) {
-                  console.log('[AUTH DEBUG] Session is missing, clearing any stale cookies');
-                  // Clear any stale cookies that might be causing issues
-                  document.cookie.split(';').forEach(cookie => {
-                    const name = cookie.split('=')[0].trim();
-                    if (name.startsWith('sb-') || name.startsWith('supabase-')) {
-                      document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT`;
-                    }
-                  });
-                }
                 return null;
               }
-              
+
               if (refreshData.session) {
                 console.log('[AUTH DEBUG] Session refreshed successfully:', {
                   id: refreshData.session.user.id,
@@ -116,7 +115,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
               console.error('[AUTH DEBUG] Exception during session refresh:', refreshErr);
             }
           }
-          
+
           console.log('[AUTH DEBUG] No session available after refresh attempt');
           return null;
         }
@@ -127,7 +126,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         setAuthChecked(true);
       }
     };
-    
+
     checkAuth().then(session => {
       if (session?.user) {
         fetchOrInitSettings(session.user.id, session.user.email || null);
@@ -140,11 +139,17 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   // Listen for auth state changes
   useEffect(() => {
     if (!authChecked) return;
-    
+
+    // Check if Supabase client is initialized
+    if (!supabase) {
+      console.error('[AUTH DEBUG] Cannot set up auth listener - Supabase client not initialized');
+      return;
+    }
+
     console.log('[AUTH DEBUG] Setting up auth state change listener');
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session) => {
       console.log('[AUTH DEBUG] Auth state changed:', event);
-      
+
       if (session?.user) {
         const { id, email } = session.user;
         console.log('[AUTH DEBUG] User authenticated:', { id, email });
@@ -154,7 +159,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         fetchOrInitSettings(null, null);
       }
     });
-    
+
     return () => {
       console.log('[AUTH DEBUG] Unsubscribing from auth changes');
       subscription.unsubscribe();
@@ -165,10 +170,18 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       console.log('[AUTH DEBUG] fetchOrInitSettings called with:', { userId, email });
-      
+
+      // Check if Supabase client is initialized
+      if (!supabase) {
+        console.error('[AUTH DEBUG] Cannot fetch settings - Supabase client not initialized');
+        setError(new Error('Unable to initialize database client'));
+        setIsLoading(false);
+        return;
+      }
+
       let userSettings = null;
       let apiBackoff = false;
-      
+
       // If user is logged in, try to fetch their settings
       if (userId) {
         console.log('[AUTH DEBUG] User is logged in, fetching user settings');
@@ -178,7 +191,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             .select('*')
             .eq('user_id', userId)
             .single();
-          
+
           if (!fetchError && data) {
             console.log('[AUTH DEBUG] Found existing user settings');
             userSettings = data;
@@ -186,7 +199,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             console.log('[AUTH DEBUG] No settings found for user, creating new settings');
             // No settings found for this user, create new settings
             const userSettingsId = `user_id_${userId.replace(/[^a-zA-Z0-9]/g, '_')}`;
-            
+
             try {
               // First, get default settings to use as base
               const { data: defaultSettings, error: defaultError } = await supabase
@@ -194,15 +207,15 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                 .select('*')
                 .eq('id', 'default')
                 .single();
-              
+
               if (defaultError) {
                 console.error('[AUTH DEBUG] Error fetching default settings:', defaultError);
                 throw defaultError;
               }
-              
+
               console.log('[AUTH DEBUG] Using default settings as template for new user settings');
               const now = new Date().toISOString();
-              
+
               const { data: newSettings, error: insertError } = await supabase
                 .from('app_settings')
                 .insert({
@@ -219,12 +232,12 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                 })
                 .select()
                 .single();
-              
+
               if (insertError) {
                 console.error('[AUTH DEBUG] Error creating user settings:', insertError);
                 throw insertError;
               }
-              
+
               console.log('[AUTH DEBUG] Successfully created new user settings');
               userSettings = newSettings;
             } catch (settingsError) {
@@ -248,7 +261,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             .select('*')
             .eq('id', 'default')
             .single();
-          
+
           if (defaultError) {
             console.error('[AUTH DEBUG] Error fetching default settings:', defaultError);
             apiBackoff = true;
@@ -260,25 +273,18 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           apiBackoff = true;
         }
       }
-      
+
       // If we have settings, set them
       if (userSettings) {
-        // Convert from snake_case to camelCase
-        setSettings({
-          darkMode: userSettings.dark_mode,
-          gptModel: userSettings.gpt_model,
-          initialVisitPrompt: userSettings.initial_visit_prompt,
-          followUpVisitPrompt: userSettings.follow_up_visit_prompt,
-          lowEchoCancellation: userSettings.low_echo_cancellation,
-          autoSave: userSettings.auto_save,
-          email: userSettings.email,
-          userId: userSettings.user_id
-        });
-        
-        setError(null);
-        return;
+        // Convert from snake_case to camelCase using our utility
+        const appSettings = supabaseToAppSettings(userSettings);
+        if (appSettings) {
+          setSettings(appSettings);
+          setError(null);
+          return;
+        }
       }
-      
+
       // If we haven't returned yet, we need to try the API fallback
       if (apiBackoff) {
         // Fall back to API endpoint which has additional fallback mechanisms
@@ -288,37 +294,34 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           if (response.ok) {
             const data = await response.json();
             console.log('[AUTH DEBUG] API fallback successful');
-            setSettings({
-              darkMode: data.darkMode ?? true,
-              gptModel: data.gptModel ?? 'gpt-4o',
-              initialVisitPrompt: data.initialVisitPrompt ?? '',
-              followUpVisitPrompt: data.followUpVisitPrompt ?? '',
-              lowEchoCancellation: data.lowEchoCancellation ?? false,
-              autoSave: data.autoSave ?? false,
-              email: data.email ?? null,
-              userId: data.userId ?? null,
-            });
+            // Apply default settings to ensure all required properties are present
+            setSettings(applyDefaultSettings({
+              id: 'api_fallback',
+              darkMode: data.darkMode,
+              gptModel: data.gptModel,
+              initialVisitPrompt: data.initialVisitPrompt,
+              followUpVisitPrompt: data.followUpVisitPrompt,
+              lowEchoCancellation: data.lowEchoCancellation,
+              autoSave: data.autoSave,
+              email: data.email,
+              userId: data.userId,
+              updatedAt: new Date()
+            }));
             setError(null);
           } else {
             throw new Error(`API responded with ${response.status}`);
           }
         } catch (apiErr) {
           console.error('[AUTH DEBUG] API fallback also failed:', apiErr);
-          
+
           // If we reach here, both Supabase and API failed, so use some default settings as a last resort
-          setSettings({
-            darkMode: true,
-            gptModel: 'gpt-4o',
-            initialVisitPrompt: '',
-            followUpVisitPrompt: '',
-            lowEchoCancellation: false,
-            autoSave: false,
-            email: null,
-            userId: null,
-          });
-          
+          setSettings(applyDefaultSettings({
+            id: 'fallback_default',
+            updatedAt: new Date()
+          }));
+
           setError(new Error('Failed to load settings from both Supabase and API. Using defaults.'));
-          
+
           // If we've retried less than 3 times, try again in a second
           if (retryCount < 3) {
             setTimeout(() => {
@@ -330,18 +333,12 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error('[AUTH DEBUG] Error in fetchOrInitSettings:', err);
       setError(err instanceof Error ? err : new Error('Unknown error'));
-      
+
       // Set default settings as fallback
-      setSettings({
-        darkMode: true,
-        gptModel: 'gpt-4o',
-        initialVisitPrompt: '',
-        followUpVisitPrompt: '',
-        lowEchoCancellation: false,
-        autoSave: false,
-        email: null,
-        userId: null,
-      });
+      setSettings(applyDefaultSettings({
+        id: 'error_fallback',
+        updatedAt: new Date()
+      }));
     } finally {
       setIsLoading(false);
     }
@@ -350,28 +347,32 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
     try {
       setIsLoading(true);
-      
+
+      // Check if Supabase client is initialized
+      if (!supabase) {
+        console.error('[AUTH DEBUG] Cannot update settings - Supabase client not initialized');
+        setError(new Error('Unable to initialize database client'));
+        setIsLoading(false);
+        return;
+      }
+
       // Get current session to ensure we have the latest auth state
       const { data: { session } } = await supabase.auth.getSession();
       const userId = session?.user?.id || null;
-      
+
       console.log('[AUTH DEBUG] updateSettings called with user:', userId);
-      
-      // Convert camelCase to snake_case for Supabase
-      const updateData: any = {};
-      if (newSettings.darkMode !== undefined) updateData.dark_mode = newSettings.darkMode;
-      if (newSettings.gptModel !== undefined) updateData.gpt_model = newSettings.gptModel;
-      if (newSettings.initialVisitPrompt !== undefined) updateData.initial_visit_prompt = newSettings.initialVisitPrompt;
-      if (newSettings.followUpVisitPrompt !== undefined) updateData.follow_up_visit_prompt = newSettings.followUpVisitPrompt;
-      if (newSettings.lowEchoCancellation !== undefined) updateData.low_echo_cancellation = newSettings.lowEchoCancellation;
-      if (newSettings.autoSave !== undefined) updateData.auto_save = newSettings.autoSave;
-      updateData.updated_at = new Date().toISOString();
-      
+
+      // Convert camelCase to snake_case for Supabase using our utility
+      const updateData = appToSupabaseSettings({
+        ...newSettings,
+        updatedAt: new Date()
+      });
+
       let success = false;
-      
+
       if (userId) {
         console.log('[AUTH DEBUG] Updating user-specific settings for user:', userId);
-        
+
         try {
           // First check if user settings exist
           const { data: existingSettings, error: checkError } = await supabase
@@ -379,12 +380,12 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             .select('id')
             .eq('user_id', userId)
             .single();
-          
+
           if (checkError && checkError.code === 'PGRST116') {
             console.log('[AUTH DEBUG] No user settings found, creating new settings first');
             // No settings exist yet, need to create them first
             await fetchOrInitSettings(userId, session?.user?.email || null);
-            
+
             // Try again after creating settings
             try {
               const { data: retrySettings, error: retryError } = await supabase
@@ -392,30 +393,30 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                 .select('id')
                 .eq('user_id', userId)
                 .single();
-                
+
               if (retryError) {
                 console.error('[AUTH DEBUG] Failed to create user settings:', retryError);
                 throw new Error('Failed to create user settings');
               }
-              
+
               console.log('[AUTH DEBUG] Created user settings, now updating with new values');
             } catch (retryError) {
               console.error('[AUTH DEBUG] Error on retry check:', retryError);
               throw new Error('Failed to verify user settings were created');
             }
           }
-          
+
           // Update user-specific settings
           const { error } = await supabase
             .from('app_settings')
             .update(updateData)
             .eq('user_id', userId);
-            
+
           if (error) {
             console.error('[AUTH DEBUG] Error updating user settings:', error);
             throw error;
           }
-          
+
           console.log('[AUTH DEBUG] Successfully updated user settings');
           success = true;
         } catch (updateError) {
@@ -430,12 +431,12 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
             .from('app_settings')
             .update(updateData)
             .eq('id', 'default');
-            
+
           if (error) {
             console.error('[AUTH DEBUG] Error updating default settings:', error);
             throw error;
           }
-          
+
           console.log('[AUTH DEBUG] Updated default settings');
           success = true;
         } catch (defaultUpdateError) {
@@ -443,14 +444,14 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           // We'll fall through to API fallback
         }
       }
-      
+
       // If direct Supabase update was successful, update local state
       if (success) {
         setSettings(prev => prev ? { ...prev, ...newSettings } : null);
         setError(null);
         return;
       }
-      
+
       // If we get here, we need to try the API fallback
       console.log('[AUTH DEBUG] Attempting API fallback for settings update');
       try {
@@ -459,7 +460,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newSettings)
         });
-        
+
         if (response.ok) {
           const data = await response.json();
           setSettings(prev => ({ ...prev, ...data }));
@@ -471,14 +472,14 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       } catch (apiErr) {
         console.error('[AUTH DEBUG] API fallback also failed:', apiErr);
         setError(new Error('Failed to update settings through both Supabase and API'));
-        
+
         // Still update local settings for a smoother UX, but they won't persist
         setSettings(prev => prev ? { ...prev, ...newSettings } : null);
       }
     } catch (err) {
       console.error('[AUTH DEBUG] Error updating settings:', err);
       setError(err instanceof Error ? err : new Error('Failed to update settings'));
-      
+
       // Still update local settings for a smoother UX, but they won't persist
       setSettings(prev => prev ? { ...prev, ...newSettings } : null);
     } finally {

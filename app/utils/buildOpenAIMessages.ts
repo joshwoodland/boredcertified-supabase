@@ -1,10 +1,11 @@
-import { ChatCompletionMessageParam } from "openai/resources/chat";
+import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { INITIAL_EVALUATION_TEMPLATE, FOLLOW_UP_VISIT_TEMPLATE } from "./soapTemplates";
 
 /**
  * Builds a structured array of messages for OpenAI API requests
  * using a more clinically focused approach with separate messages
  * for previous notes and current transcript.
- * 
+ *
  * @param params Configuration parameters
  * @returns Array of messages for OpenAI chat completion
  */
@@ -12,16 +13,25 @@ export const buildOpenAIMessages = ({
   previousSoapNote,
   currentTranscript,
   soapTemplate,
-  patientName
+  patientName,
+  isInitialEvaluation = false
 }: {
   previousSoapNote?: string;
   currentTranscript: string;
-  soapTemplate: string;
+  soapTemplate: string; // User preferences from settings
   patientName: string;
+  isInitialEvaluation?: boolean;
 }): ChatCompletionMessageParam[] => {
   console.log('======= BUILDING STRUCTURED MESSAGES =======');
   console.log(`Previous note provided: ${!!previousSoapNote}`);
   console.log(`Current transcript length: ${currentTranscript.length} chars`);
+  console.log(`Visit type: ${isInitialEvaluation ? 'Initial Evaluation' : 'Follow-up Visit'}`);
+
+  // Select the appropriate hardcoded template based on visit type
+  const hardcodedTemplate = isInitialEvaluation
+    ? INITIAL_EVALUATION_TEMPLATE
+    : FOLLOW_UP_VISIT_TEMPLATE;
+
   // Create system message with clinical focus
   const systemMessage = {
     role: "system" as const,
@@ -35,8 +45,17 @@ Prioritize clarity, medical accuracy, and professional language. If new diagnose
 
 IMPORTANT: The patient's name is "${patientName}". Always use this exact name throughout the note, regardless of any other names mentioned in the transcript.
 
+FORMATTING INSTRUCTIONS:
+- Use clean section headers like "Subjective", "Objective", "Assessment", "Plan" without any prefixes
+- Do NOT use "S-", "O-", "A-", "P-" prefixes before section headers
+- Use proper markdown formatting with ## for main sections
+- Keep section headers simple and consistent
+
 Follow this format strictly:
 
+${hardcodedTemplate}
+
+Additional provider preferences:
 ${soapTemplate}`
   };
 
@@ -60,7 +79,7 @@ ${soapTemplate}`
   // Log message structure for debugging
   console.log('Message structure:');
   messages.forEach((msg, index) => {
-    const content = typeof msg.content === 'string' 
+    const content = typeof msg.content === 'string'
       ? msg.content.substring(0, 50) + '...'
       : '[Complex content structure]';
     console.log(`[${index}] ${msg.role}: ${content}`);

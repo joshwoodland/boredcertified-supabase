@@ -27,13 +27,9 @@ export interface SystemMessageUpdate {
   description?: string;
 }
 
-export interface AppSettings {
-  darkMode: boolean;
-  gptModel: string;
-  initialVisitPrompt: string;
-  followUpVisitPrompt: string;
-  autoSave?: boolean;
-}
+// Import AppSettings from the central location
+import type { AppSettings } from '@/app/lib/supabaseTypes';
+export type { AppSettings };
 
 // Visit Types
-export type VisitType = 'Initial Evaluation' | 'Follow-Up Visit'; 
+export type VisitType = 'Initial Evaluation' | 'Follow-Up Visit';

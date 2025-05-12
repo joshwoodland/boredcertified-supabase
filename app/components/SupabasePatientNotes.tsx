@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { FiCalendar, FiFileText, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiSend } from 'react-icons/fi';
+import { FiCalendar, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiSend, FiTrash2 } from 'react-icons/fi';
 import { LuWandSparkles } from 'react-icons/lu';
 import { formatSoapNote } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
 import Toast from './Toast';
 import type { Note } from '../types/notes';
 import AIMagicModal from './AIMagicModal';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 
 interface SupabasePatientNotesProps {
   patientId?: string;
@@ -13,6 +14,7 @@ interface SupabasePatientNotesProps {
   onNoteSelect?: (note: Note) => void;
   forceCollapse?: boolean;
   refreshTrigger?: number;
+  onDeleteNote?: (noteId: string) => void;
 }
 
 const formatDate = (date: string | Date): string => {
@@ -35,7 +37,8 @@ export default function SupabasePatientNotes({
   selectedNoteId,
   onNoteSelect,
   forceCollapse,
-  refreshTrigger = 0
+  refreshTrigger = 0,
+  onDeleteNote
 }: SupabasePatientNotesProps) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +54,8 @@ export default function SupabasePatientNotes({
   const [isAIMagicLoading, setIsAIMagicLoading] = useState(false);
   const [summaries, setSummaries] = useState<Record<string, string | null>>({});
   const [isFetchingSummary, setIsFetchingSummary] = useState<Record<string, boolean>>({});
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
 
   // Initialize editedContent when selectedNote changes
   useEffect(() => {
@@ -308,6 +313,49 @@ export default function SupabasePatientNotes({
     }
   };
 
+  const handleDeleteNote = (note: Note) => {
+    if (!onDeleteNote) return;
+
+    // Show the custom delete confirmation modal
+    setNoteToDelete(note);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteNote = () => {
+    if (!noteToDelete || !onDeleteNote) return;
+
+    try {
+      // Call the parent component's delete handler
+      onDeleteNote(noteToDelete.id);
+
+      // Remove the note from the local state
+      setNotes(prevNotes => prevNotes.filter(n => n.id !== noteToDelete.id));
+
+      // If the deleted note was selected, clear the selection
+      if (selectedNote?.id === noteToDelete.id) {
+        setSelectedNote(null);
+      }
+
+      setToastMessage('Note deleted successfully');
+      setToastType('success');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error deleting note:', error);
+      setToastMessage('Failed to delete note');
+      setToastType('error');
+      setShowToast(true);
+    } finally {
+      // Close the modal and clear the note to delete
+      setShowDeleteModal(false);
+      setNoteToDelete(null);
+    }
+  };
+
+  const cancelDeleteNote = () => {
+    setShowDeleteModal(false);
+    setNoteToDelete(null);
+  };
+
   // Fetch summary for a note if not available
   const fetchNoteSummary = async (noteId: string) => {
     if (summaries[noteId] !== undefined || isFetchingSummary[noteId]) return;
@@ -361,6 +409,74 @@ export default function SupabasePatientNotes({
 
   return (
     <div className="space-y-4">
+      {/* Custom CSS for the gradient border and compact note styling */}
+      <style jsx>{`
+        .gradient-border {
+          position: relative;
+        }
+        .gradient-border::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          padding: 2px; /* Controls the border width */
+          border-radius: 0.5rem; /* Match the rounded-lg class */
+          background: conic-gradient(
+            from 0deg at 50% 50%,
+            #9333ea, /* Purple */
+            #3b82f6, /* Blue */
+            #9333ea, /* Purple */
+            #3b82f6, /* Blue */
+            #9333ea, /* Purple */
+            #3b82f6, /* Blue */
+            #9333ea, /* Purple */
+            #3b82f6, /* Blue */
+            #9333ea  /* Purple */
+          );
+
+          -webkit-mask:
+            linear-gradient(#fff 0 0) content-box,
+            linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: 10;
+        }
+
+        /* Compact SOAP Note Styling */
+        .compact-soap-note :global(p) {
+          margin-top: 0.25rem;
+          margin-bottom: 0.25rem;
+        }
+        .compact-soap-note :global(ul) {
+          margin-top: 0.25rem;
+          margin-bottom: 0.25rem;
+          padding-left: 1rem;
+        }
+        .compact-soap-note :global(li) {
+          margin-top: 0;
+          margin-bottom: 0;
+          line-height: 1.2;
+          padding-left: 0;
+        }
+        .compact-soap-note :global(br + br) {
+          display: none;
+        }
+        .compact-soap-note :global(*) {
+          line-height: 1.3;
+        }
+
+        /* Mono-column layout */
+        .mono-column {
+          max-width: 800px;
+          margin: 0 auto;
+        }
+        @media (max-width: 768px) {
+          .mono-column {
+            width: 100%;
+          }
+        }
+      `}</style>
+
       {notes.map((note) => {
         // Fetch summary if not available
         if (!summaries[note.id] && !isFetchingSummary[note.id]) {
@@ -371,20 +487,22 @@ export default function SupabasePatientNotes({
           <div
             key={note.id}
             className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${
-              selectedNote?.id === note.id ? 'ring-2 ring-blue-500 dark:ring-blue-400' : ''
+              selectedNote?.id === note.id ? 'gradient-border' : ''
             }`}
             onClick={() => handleNoteSelect(note)}
           >
             <details open={!isCollapsed && selectedNote?.id === note.id}>
               <summary className="flex items-center justify-between p-4 cursor-pointer">
-                <div className="flex items-center space-x-4">
-                  <FiFileText className="text-gray-500 dark:text-gray-400" />
-                  <div>
+                <div className="flex items-center">
+                  <div className="pl-1">
                     <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                       {formatDate(note.createdAt)}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {note.isInitialVisit ? 'Initial Visit' : 'Follow-up Visit'}
+                    <div className="text-xs">
+                      {note.isInitialVisit ?
+                        <span className="text-green-600 dark:text-green-400 font-medium">Initial Evaluation</span> :
+                        <span className="text-blue-600 dark:text-blue-400 font-medium">Follow-up Visit</span>
+                      }
                     </div>
                     {/* Display summary when collapsed, regardless of selection state */}
                     <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mt-1 pr-4">
@@ -401,24 +519,27 @@ export default function SupabasePatientNotes({
                 {selectedNote?.id === note.id && (
                   <div className="flex items-center justify-end space-x-2 mb-4">
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleEditClick(note);
                       }}
-                      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      className="p-2 transition transform hover:scale-105 active:scale-95"
                     >
-                      <FiEdit className="text-purple-600 dark:text-purple-500" />
+                      <FiEdit className="text-purple-600 dark:text-purple-500 hover:drop-shadow-[0_0_8px_rgba(147,51,234,0.5)]" />
                     </button>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleCopy(note);
                       }}
-                      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      className="p-2 transition transform hover:scale-105 active:scale-95"
                     >
-                      <FiCopy className="text-green-600 dark:text-green-500" />
+                      <FiCopy className="text-green-600 dark:text-green-500 hover:drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
                     </button>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowAIModal(true);
@@ -433,13 +554,24 @@ export default function SupabasePatientNotes({
                       </span>
                     </button>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleSendWebhook(note);
                       }}
-                      className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      className="p-2 transition transform hover:scale-105 active:scale-95"
                     >
-                      <FiSend className="text-blue-600 dark:text-blue-500" />
+                      <FiSend className="text-blue-600 dark:text-blue-500 hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteNote(note);
+                      }}
+                      className="p-2 transition transform hover:scale-105 active:scale-95"
+                    >
+                      <FiTrash2 className="text-red-600 dark:text-red-500 hover:drop-shadow-[0_0_8px_rgba(220,38,38,0.5)]" />
                     </button>
                   </div>
                 )}
@@ -453,12 +585,14 @@ export default function SupabasePatientNotes({
                     />
                     <div className="flex justify-end space-x-2">
                       <button
+                        type="button"
                         onClick={() => setIsEditing(false)}
                         className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 dark:text-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600"
                       >
                         Cancel
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleSave(note)}
                         className="px-4 py-2 text-sm font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600"
                       >
@@ -467,7 +601,7 @@ export default function SupabasePatientNotes({
                     </div>
                   </div>
                 ) : (
-                  <div className="prose dark:prose-invert max-w-none">
+                  <div className="prose dark:prose-invert max-w-none compact-soap-note mono-column">
                     <div dangerouslySetInnerHTML={{ __html: formatSoapNote(extractContent(note.content)) }} />
                   </div>
                 )}
@@ -493,6 +627,16 @@ export default function SupabasePatientNotes({
           onClose={() => setShowAIModal(false)}
           onSubmit={(editRequest) => handleAIMagicSubmit(selectedNote.id, editRequest)}
           isLoading={isAIMagicLoading}
+        />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && noteToDelete && (
+        <DeleteConfirmationModal
+          isOpen={true}
+          onConfirm={confirmDeleteNote}
+          onCancel={cancelDeleteNote}
+          noteDate={formatDate(noteToDelete.createdAt)}
         />
       )}
     </div>

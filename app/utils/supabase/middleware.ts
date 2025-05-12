@@ -1,79 +1,172 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
 
-// Helper to debug cookie issues
-function debugCookies(cookies: string[], prefix: string = 'DEBUG') {
+// Helper to debug cookies
+function debugCookies(cookieStore: ReturnType<typeof cookies>, prefix: string = 'DEBUG') {
   // Only log in development
-  if (process.env.NODE_ENV !== 'development') return;
-  
-  const authCookies = cookies.filter(c => c.startsWith('sb-'));
-  if (process.env.NODE_ENV === 'development' && authCookies.length > 0) {
-    authCookies.forEach(cookie => {
-      const [name, value] = cookie.split('=');
-      const valuePreview = value.length > 20 ? `${value.substring(0, 20)}...` : value;
-    });
+  if (process.env.NODE_ENV !== 'development') return false;
+
+  const allCookies = Array.from(cookieStore).map(([name]) => name);
+  const authCookies = allCookies.filter(name => name.startsWith('sb-'));
+
+  console.log(`[${prefix}] All cookies:`, allCookies);
+  if (authCookies.length > 0) {
+    console.log(`[${prefix}] Auth cookies found:`, authCookies.length);
+    authCookies.forEach(name => console.log(`[${prefix}] Auth cookie: ${name}`));
+  } else {
+    console.log(`[${prefix}] No auth cookies found`);
   }
+
+  return authCookies.length > 0;
 }
 
 export async function updateSession(request: NextRequest) {
   try {
+    // Log the current path for debugging
+    console.log(`[MIDDLEWARE] Processing request for: ${request.nextUrl.pathname}`);
+
+    // Get cookie store for debugging and Supabase client
+    const cookieStore = cookies(); // Synchronous in Next.js 14
+    const hasAuthCookies = debugCookies(cookieStore, 'MIDDLEWARE');
+
     // Create an unmodified response
-    let response = NextResponse.next({
+    const response = NextResponse.next({
       request: {
         headers: request.headers,
       },
     });
 
+    // Check if Supabase environment variables are available
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error(
+        `[MIDDLEWARE] Missing Supabase environment variables: ${!supabaseUrl ? 'NEXT_PUBLIC_SUPABASE_URL' : ''} ${
+          !supabaseAnonKey ? 'NEXT_PUBLIC_SUPABASE_ANON_KEY' : ''
+        }`.trim()
+      );
+      throw new Error('Missing Supabase environment variables');
+    }
+
+    // Note: For middleware, we need to use createServerClient directly with cookie handlers
+    // instead of the standard createClient() because middleware requires special cookie handling
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      supabaseUrl,
+      supabaseAnonKey,
       {
         cookies: {
           get(name: string) {
-            return request.cookies.get(name)?.value;
+            try {
+              const cookie = cookieStore.get(name);
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`[MIDDLEWARE] Reading cookie: ${name}, exists: ${!!cookie}`);
+              }
+              return cookie?.value;
+            } catch (error) {
+              console.error(`[MIDDLEWARE] Error getting cookie ${name}:`, error);
+              return undefined;
+            }
           },
           set(name: string, value: string, options: CookieOptions) {
-            // Only log in development
-            if (process.env.NODE_ENV === 'development') {
-              if (value.startsWith('eyJ')) {
-                // Base64 encoded JWT token detected
-                debugCookies([`${name}=${value}`], 'MIDDLEWARE-COOKIE');
+            try {
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`[MIDDLEWARE] Setting cookie: ${name}, options:`, options);
+                if (value.startsWith('eyJ')) {
+                  console.log(`[MIDDLEWARE] Setting JWT cookie: ${name}`);
+                }
               }
+              response.cookies.set(name, value, {
+                ...options,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                path: '/',
+              });
+            } catch (error) {
+              console.error(`[MIDDLEWARE] Failed to set cookie ${name}:`, error);
             }
-            response.cookies.set(name, value, options);
           },
           remove(name: string, options: CookieOptions) {
-            response.cookies.set(name, '', options);
+            try {
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`[MIDDLEWARE] Removing cookie: ${name}`);
+              }
+              response.cookies.set(name, '', {
+                ...options,
+                maxAge: 0,
+                path: '/',
+              });
+            } catch (error) {
+              console.error(`[MIDDLEWARE] Failed to remove cookie ${name}:`, error);
+            }
           },
         },
       }
     );
 
     // Refresh session if it exists
-    const { data: { session } } = await supabase.auth.getSession();
+    console.log('[MIDDLEWARE] Attempting to get session');
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error('[MIDDLEWARE] Error getting session:', error);
+      throw error;
+    }
+
+    const session = data.session;
+
+    if (session) {
+      console.log('[MIDDLEWARE] Session found for user:', session.user.email);
+    } else {
+      console.log('[MIDDLEWARE] No session found');
+
+      // If we have auth cookies but no session, try to refresh the session
+      if (hasAuthCookies) {
+        console.log('[MIDDLEWARE] Auth cookies present but no session, attempting refresh');
+        try {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+
+          if (refreshError) {
+            console.error('[MIDDLEWARE] Error refreshing session:', refreshError);
+          } else if (refreshData.session) {
+            console.log('[MIDDLEWARE] Session refreshed successfully for user:', refreshData.session.user.email);
+          } else {
+            console.log('[MIDDLEWARE] No session after refresh attempt');
+          }
+        } catch (refreshError) {
+          console.error('[MIDDLEWARE] Exception during session refresh:', refreshError);
+        }
+      }
+    }
 
     // Handle authentication for protected routes
     const isAuthRoute = request.nextUrl.pathname === '/login';
-    const isProtectedRoute = !request.nextUrl.pathname.startsWith('/_next') && 
-                           !request.nextUrl.pathname.startsWith('/static') &&
-                           !isAuthRoute;
+    const isProtectedRoute =
+      !request.nextUrl.pathname.startsWith('/_next') &&
+      !request.nextUrl.pathname.startsWith('/static') &&
+      !isAuthRoute;
 
     if (isProtectedRoute && !session) {
-      // Redirect unauthenticated users to login
+      console.log(`[MIDDLEWARE] Redirecting unauthenticated user to login from: ${request.nextUrl.pathname}`);
       return NextResponse.redirect(new URL('/login', request.url));
     }
 
     if (isAuthRoute && session) {
-      // Redirect authenticated users to home
+      console.log(`[MIDDLEWARE] Redirecting authenticated user to home from: ${request.nextUrl.pathname}`);
       return NextResponse.redirect(new URL('/', request.url));
+    }
+
+    // Check response cookies for debugging
+    const responseCookies = response.cookies.getAll();
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[MIDDLEWARE] Response cookies:', responseCookies.map(c => c.name));
     }
 
     return response;
   } catch (error) {
     // Log error and redirect to login for safety
-    if (process.env.NODE_ENV === 'development') {
-      console.error('[MIDDLEWARE] Auth check error:', error);
-    }
+    console.error('[MIDDLEWARE] Auth check error:', error);
     return NextResponse.redirect(new URL('/login', request.url));
   }
-} 
+}

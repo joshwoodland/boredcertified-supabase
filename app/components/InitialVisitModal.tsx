@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
-import { useAppSettings } from '../hooks/useAppSettings';
+import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
 
 const LiveTranscription = dynamic(
@@ -107,7 +107,7 @@ export default function InitialVisitModal({
     try {
       // Log visit type selection
       console.log(`Visit type selected: ${type}`);
-      
+
       // Set visit type
       setVisitType(type);
 

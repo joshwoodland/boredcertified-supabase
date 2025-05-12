@@ -4,9 +4,10 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { FollowUpItem, fetchFollowUps, getCategoryEmoji, getCategoryName } from "../utils/fetchFollowUps";
 import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
-import { useAppSettings } from '../hooks/useAppSettings';
+import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
 import { saveChecklistToCache, getChecklistFromCache, getMostRecentChecklist } from '../utils/checklistCache';
+import { formatSoapNote } from '../utils/formatSoapNote';
 
 const LiveTranscription = dynamic(
   () => import('./LiveTranscription'),
@@ -17,7 +18,6 @@ interface FollowUpModalProps {
   lastVisitNote: string;
   patientId: string;
   noteId: string;
-  onRecordingComplete: (blob: Blob, transcript: string) => void;
   onClose: () => void;
 }
 
@@ -25,7 +25,6 @@ export default function FollowUpModal({
   lastVisitNote,
   patientId,
   noteId,
-  onRecordingComplete,
   onClose
 }: FollowUpModalProps) {
   const { settings } = useAppSettings();
@@ -527,8 +526,11 @@ export default function FollowUpModal({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isRecording]);
 
+  // State for loading status during SOAP note generation
+  const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
+
   // Function to generate SOAP note with edited transcript
-  const generateSoapNote = () => {
+  const generateSoapNote = async () => {
     if (!editableTranscript.trim()) {
       setError('Transcript cannot be empty');
       return;
@@ -540,11 +542,95 @@ export default function FollowUpModal({
     // Reset the preserve transcript flag
     setPreserveTranscript(false);
 
-    // Send the recording and edited transcript to the parent component
-    onRecordingComplete(audioBlob.current || new Blob([], { type: 'audio/wav' }), editableTranscript);
+    // Set loading state
+    setIsGeneratingSoapNote(true);
 
-    // Automatically close the modal after submission
-    onClose();
+    try {
+      // First check if this is an initial visit for the patient (it's not, since this is a follow-up modal)
+      const isInitialVisit = false;
+
+      // We already have the previous note from props
+      const previousNote = lastVisitNote;
+
+      // Get the patient's name for proper formatting in the note
+      let patientName = "Patient";
+      try {
+        const patientResponse = await fetch(`/api/patients?id=${patientId}`);
+        if (patientResponse.ok) {
+          const patientData = await patientResponse.json();
+          if (patientData && patientData.length > 0) {
+            patientName = patientData[0].name;
+          }
+        }
+      } catch (error) {
+        console.warn('Error fetching patient name', error);
+      }
+
+      // Use the full transcript without deduplication
+      const fullTranscript = editableTranscript;
+
+      // Get the appropriate template based on visit type (follow-up)
+      const soapTemplate = settings?.followUpVisitPrompt || 'S:\nO:\nA:\nP:';
+
+      // Use the API endpoint with explicit visit type, patient name, and previous note
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          patientId,
+          transcript: fullTranscript,
+          useStructuredPrompt: true, // Always use the structured prompt approach
+          isInitialEvaluation: isInitialVisit, // Explicitly pass visit type
+          patientName: patientName, // Pass patient name for proper formatting
+          previousNote: previousNote, // Pass the previous note for context
+          soapTemplate: soapTemplate // Pass the appropriate template
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.details || errorData.error || 'Failed to generate SOAP note'
+        );
+      }
+
+      // Process the generated note to ensure proper formatting
+      const noteData = await response.json();
+
+      // Ensure the note is formatted properly by formatting it explicitly if needed
+      if (noteData && typeof noteData.content === 'string') {
+        try {
+          // Parse the content to check if it's JSON
+          const contentObj = JSON.parse(noteData.content);
+
+          // If content is in JSON format, ensure it's formatted properly
+          if (typeof contentObj === 'object' && contentObj !== null) {
+            // Format the note using formatSoapNote (which will be applied in the Note component)
+            const formattedContent = formatSoapNote(JSON.stringify(contentObj));
+
+            // Update the note content to include both raw and formatted content
+            noteData.content = JSON.stringify({
+              content: JSON.stringify(contentObj), // Keep original content
+              formattedContent // Add formatted content
+            });
+          }
+        } catch (e) {
+          // If it's not JSON, just ensure it's a string
+          console.log("Note content is not in JSON format, keeping as is");
+        }
+      }
+
+      // Just close the modal after successful submission
+      // We don't need to call onRecordingComplete since we've already generated the note directly
+      onClose();
+    } catch (error) {
+      console.error('Error generating SOAP note:', error);
+      setError(error instanceof Error ? error.message : 'Error generating SOAP note');
+    } finally {
+      setIsGeneratingSoapNote(false);
+    }
   };
 
   return (
@@ -865,13 +951,26 @@ export default function FollowUpModal({
               </button>
               <button
                 onClick={generateSoapNote}
-                disabled={!editableTranscript.trim()}
+                disabled={!editableTranscript.trim() || isGeneratingSoapNote}
                 className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
+                type="button"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Generate SOAP Note
+                {isGeneratingSoapNote ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating SOAP Note...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Generate SOAP Note
+                  </>
+                )}
               </button>
             </>
           ) : !isRecording ? (

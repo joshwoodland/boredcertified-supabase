@@ -14,24 +14,18 @@ interface SettingsProps {
   onClose: () => void;
 }
 
-interface AppSettings {
-  darkMode: boolean;
-  gptModel: string;
-  initialVisitPrompt: string;
-  followUpVisitPrompt: string;
-  lowEchoCancellation?: boolean;
-  email?: string | null;
-}
+import { AppSettings } from '@/app/lib/supabaseTypes';
 
 type SaveButtonState = 'hidden' | 'unsaved' | 'saved' | 'saving' | 'error';
 
 export default function Settings({ isOpen, onClose }: SettingsProps) {
-  const [settings, setSettings] = useState<AppSettings>({
+  const [settings, setSettings] = useState<Partial<AppSettings>>({
     darkMode: true,
     gptModel: 'gpt-4o',
     initialVisitPrompt: '',
     followUpVisitPrompt: '',
     lowEchoCancellation: true,
+    autoSave: true,
     email: null,
   });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -41,7 +35,7 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const initialRender = useRef(true);
-  const initialSettings = useRef<AppSettings | null>(null);
+  const initialSettings = useRef<Partial<AppSettings> | null>(null);
   const saveTimeoutId = useRef<NodeJS.Timeout | undefined>(undefined);
   const savePromiseRef = useRef<Promise<void> | null>(null);
   const mouseDownTime = useRef<number>(0);
@@ -54,20 +48,20 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
 
   const handleSave = async () => {
     setSaveButtonState('saving');
-    
+
     // Clear any pending save timeout
     if (saveTimeoutId.current) {
       clearTimeout(saveTimeoutId.current);
       saveTimeoutId.current = undefined;
     }
-    
+
     try {
       // Store the save operation in the ref so we can track it
       const savePromise = (async () => {
         const currentSettings = settingsRef.current;
-        
+
         debugLog('Saving settings:', currentSettings);
-        
+
         const response = await fetch('/api/settings', {
           method: 'POST',
           headers: {
@@ -109,27 +103,27 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
           setSaveButtonState('hidden');
         }, 2000);
       })();
-      
+
       savePromiseRef.current = savePromise;
-      
+
       // Wait for the save to complete
       await savePromise;
-      
+
       // Clear the promise ref when done
       savePromiseRef.current = null;
     } catch (error) {
       console.error('Error saving settings:', error);
       setSaveButtonState('error');
-      setToast({ 
-        message: error instanceof Error ? error.message : 'Failed to save settings', 
-        type: 'error' 
+      setToast({
+        message: error instanceof Error ? error.message : 'Failed to save settings',
+        type: 'error'
       });
-      
+
       // Clear the promise ref on error
       savePromiseRef.current = null;
     }
   };
-  
+
   // Helper function for logging
   const debugLog = (message: string, data?: any) => {
     if (process.env.NODE_ENV === 'development') {
@@ -471,17 +465,23 @@ export default function Settings({ isOpen, onClose }: SettingsProps) {
                   </div>
                 </div>
 
-                {/* SOAP Note Templates */}
+                {/* SOAP Note Additional Preferences */}
                 <div className="space-y-4">
+                  <div className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+                    <p>The application uses standardized SOAP note templates. You can add your additional preferences below to customize the notes further.</p>
+                    <p className="mt-1">These preferences will be included alongside the standard template structure.</p>
+                  </div>
                   <SystemMessageEditor
-                    label="Initial Visit SOAP Note Template"
-                    value={settings.initialVisitPrompt}
+                    label="Initial Visit Additional Preferences"
+                    value={settings.initialVisitPrompt || ''}
                     onChange={(value) => handleChange({ initialVisitPrompt: value })}
+                    placeholder="Add any specific preferences for Initial Evaluation notes here..."
                   />
                   <SystemMessageEditor
-                    label="Follow-up Visit SOAP Note Template"
-                    value={settings.followUpVisitPrompt}
+                    label="Follow-up Visit Additional Preferences"
+                    value={settings.followUpVisitPrompt || ''}
                     onChange={(value) => handleChange({ followUpVisitPrompt: value })}
+                    placeholder="Add any specific preferences for Follow-up Visit notes here..."
                   />
                 </div>
               </div>

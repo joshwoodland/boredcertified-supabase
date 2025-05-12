@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
-import { FiX, FiCheck, FiAlertCircle } from 'react-icons/fi';
+import { FiX, FiCheck, FiAlertCircle, FiInfo } from 'react-icons/fi';
 
 interface ToastProps {
   message: string;
-  type: 'success' | 'error';
+  type: 'success' | 'error' | 'info';
   onClose: () => void;
 }
 
@@ -16,8 +16,16 @@ export default function Toast({ message, type, onClose }: ToastProps) {
     return () => clearTimeout(timer);
   }, [onClose]);
 
-  const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
-  const Icon = type === 'success' ? FiCheck : FiAlertCircle;
+  let bgColor = 'bg-blue-500'; // Default for info
+  let Icon = FiInfo;
+
+  if (type === 'success') {
+    bgColor = 'bg-green-500';
+    Icon = FiCheck;
+  } else if (type === 'error') {
+    bgColor = 'bg-red-500';
+    Icon = FiAlertCircle;
+  }
 
   return (
     <div className="fixed bottom-4 right-4 z-50">
@@ -33,4 +41,4 @@ export default function Toast({ message, type, onClose }: ToastProps) {
       </div>
     </div>
   );
-} 
+}

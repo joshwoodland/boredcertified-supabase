@@ -6,15 +6,16 @@ interface SystemMessageEditorProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }
 
 function detectFormatting(content: string): { headings: Map<string, number>, cleanContent: string } {
   // Remove any existing format strings
   const cleanedContent = content.replace(/^format:\{[^}]*\}\n/gm, '');
-  
+
   const lines = cleanedContent.split('\n');
   const headings = new Map<string, number>();
-  
+
   lines.forEach(line => {
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
     if (headingMatch) {
@@ -27,7 +28,7 @@ function detectFormatting(content: string): { headings: Map<string, number>, cle
   return { headings, cleanContent: cleanedContent };
 }
 
-export default function SystemMessageEditor({ label, value, onChange }: SystemMessageEditorProps) {
+export default function SystemMessageEditor({ label, value, onChange, placeholder }: SystemMessageEditorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [localValue, setLocalValue] = useState('');
   const [isDirty, setIsDirty] = useState(false);
@@ -75,22 +76,22 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
     // Update the display value without format string
     setLocalValue(newValue);
     setIsDirty(true);
-    
+
     // Debounce the onChange callback
     if (changeTimeoutRef.current) {
       clearTimeout(changeTimeoutRef.current);
     }
-    
+
     changeTimeoutRef.current = setTimeout(() => {
       try {
         const { headings, cleanContent } = detectFormatting(newValue);
         const formatGuide = Object.fromEntries(headings);
-        
+
         // Only add format string if there are headings
-        const formattedContent = Object.keys(formatGuide).length > 0 
+        const formattedContent = Object.keys(formatGuide).length > 0
           ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
           : cleanContent;
-        
+
         onChange(formattedContent);
       } catch (error) {
         console.error('Error formatting content:', error);
@@ -104,16 +105,16 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
     try {
       if (textareaRef.current) {
         const finalValue = textareaRef.current.value;
-        
+
         // Process in next tick to avoid UI freeze with large text
         setTimeout(() => {
           try {
             const { headings, cleanContent } = detectFormatting(finalValue);
             const formatGuide = Object.fromEntries(headings);
-            const formattedContent = Object.keys(formatGuide).length > 0 
+            const formattedContent = Object.keys(formatGuide).length > 0
               ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
               : cleanContent;
-            
+
             onChange(formattedContent);
             setIsDirty(false);
             setIsExpanded(false);
@@ -128,10 +129,10 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
       } else {
         const { headings, cleanContent } = detectFormatting(localValue);
         const formatGuide = Object.fromEntries(headings);
-        const formattedContent = Object.keys(formatGuide).length > 0 
+        const formattedContent = Object.keys(formatGuide).length > 0
           ? `format:${JSON.stringify(formatGuide)}\n${cleanContent}`
           : cleanContent;
-        
+
         onChange(formattedContent);
         setIsDirty(false);
         setIsExpanded(false);
@@ -150,7 +151,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
       <label className="block text-sm font-medium mb-2 dark:text-dark-text">
         {label}
       </label>
-      
+
       <div className="relative">
         <textarea
           value={localValue}
@@ -160,7 +161,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
             handleChange(e.target.value);
           }}
           className="w-full h-32 p-2 border rounded-md resize-none dark:bg-dark-accent dark:border-dark-border dark:text-dark-text focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:!bg-dark-accent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500/50 [&::-webkit-scrollbar-corner]:!bg-dark-accent"
-          placeholder={`Enter the template for ${label.toLowerCase()}...`}
+          placeholder={placeholder || `Enter the template for ${label.toLowerCase()}...`}
         />
         <button
           onClick={() => setIsExpanded(true)}
@@ -176,9 +177,9 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
         <>
           {/* Dimming overlay */}
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-40" onClick={handleClickOutside} />
-          
+
           {/* Modal */}
-          <div 
+          <div
             className="fixed inset-4 z-50 flex items-center justify-center"
             onClick={handleClickOutside}
           >
@@ -204,7 +205,7 @@ export default function SystemMessageEditor({ label, value, onChange }: SystemMe
                   value={localValue}
                   onChange={(e) => handleChange(e.target.value)}
                   className="w-full h-full p-6 border rounded-lg resize-none dark:bg-dark-accent dark:border-dark-border dark:text-dark-text focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:!bg-dark-accent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500/50 [&::-webkit-scrollbar-corner]:!bg-dark-accent"
-                  placeholder={`Enter the template for ${label.toLowerCase()}...`}
+                  placeholder={placeholder || `Enter the template for ${label.toLowerCase()}...`}
                   spellCheck={false}
                 />
               </div>

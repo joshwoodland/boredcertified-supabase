@@ -1,11 +1,8 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@/app/utils/supabase/server';
+import { createClient as createClientClient } from '@/app/utils/supabase/client';
 
-console.log('--- Loading app/lib/db.ts ---');
-console.log('process.env.NEXT_PUBLIC_SUPABASE_URL (in db.ts):', process.env.NEXT_PUBLIC_SUPABASE_URL);
-console.log('process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY (in db.ts):', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
-console.log('-----------------------------');
-
-// Check if we're running in the browser or on the server
+// Check if we're in a browser environment
 const isClient = typeof window !== 'undefined';
 
 // Environment variables
@@ -21,6 +18,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.error('db.ts - Supabase URL or Anon Key is missing!');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+/**
+ * DEPRECATED: Use standardized client initialization methods instead.
+ * For client-side: import { createClient } from '@/app/utils/supabase/client'
+ * For server-side: import { createClient } from '@/app/utils/supabase/server'
+ */
+export const supabase = isClient
+  ? createClientClient()
+  : createClient();
 
-
+/**
+ * Get a Supabase client using the standardized method.
+ * @returns A Supabase client appropriate for the current environment
+ */
+export function getSupabaseClient() {
+  console.warn('db.ts - getSupabaseClient is deprecated. Use standardized client initialization methods instead.');
+  return isClient
+    ? createClientClient()
+    : createClient();
+}

@@ -4,10 +4,15 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 
 export async function login(formData: FormData) {
-  const supabase = await createClient();
+  const supabaseServerOrNull = createServerClient();
+  if (!supabaseServerOrNull) {
+    console.error('[login/actions] Failed to initialize Supabase server client');
+    redirect('/error');
+  }
+  const supabase = supabaseServerOrNull;
 
   // type-casting here for convenience
   // in practice, you should validate your inputs
@@ -27,7 +32,12 @@ export async function login(formData: FormData) {
 }
 
 export async function signup(formData: FormData) {
-  const supabase = await createClient();
+  const supabaseServerOrNull = createServerClient();
+  if (!supabaseServerOrNull) {
+    console.error('[signup/actions] Failed to initialize Supabase server client');
+    redirect('/error');
+  }
+  const supabase = supabaseServerOrNull;
 
   // type-casting here for convenience
   // in practice, you should validate your inputs
@@ -47,7 +57,12 @@ export async function signup(formData: FormData) {
 }
 
 export async function loginWithGoogle() {
-  const supabase = await createClient();
+  const supabaseServerOrNull = createServerClient();
+  if (!supabaseServerOrNull) {
+    console.error('[loginWithGoogle/actions] Failed to initialize Supabase server client');
+    return { error: 'Failed to initialize auth client' };
+  }
+  const supabase = supabaseServerOrNull;
 
   // Determine the redirect URL dynamically
   // Use environment variable if available, otherwise construct from request
@@ -97,4 +112,4 @@ export async function loginWithGoogle() {
     console.error('[AUTH] Unexpected error in loginWithGoogle:', err);
     return { error: err instanceof Error ? err.message : 'Unknown error during authentication' };
   }
-} 
+}

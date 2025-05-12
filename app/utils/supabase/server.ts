@@ -1,58 +1,71 @@
-'use server';
+// app/utils/supabase/server.ts
+// Standard server-side client (no service-role key)
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-export async function createClient() {
+// Environment variables
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+// Validate environment variables
+if (!supabaseUrl || !supabaseAnon) {
+  console.error(
+    '[utils/supabase/server] Missing environment variables:',
+    !supabaseUrl ? 'NEXT_PUBLIC_SUPABASE_URL' : '',
+    !supabaseAnon ? 'NEXT_PUBLIC_SUPABASE_ANON_KEY' : ''
+  );
+  throw new Error(
+    '[utils/supabase/server] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY'
+  );
+}
+
+/**
+ * Returns a Supabase client that **does respect** RLS.
+ * Safe for generic server actions & API routes.
+ */
+export function createClient(): SupabaseClient {
   const cookieStore = cookies();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  
-  // Check if environment variables are available
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('Supabase environment variables are missing on server');
-    // Return a dummy client to prevent application crashes
-    return {
-      from: () => ({
-        select: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-        insert: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-        update: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-        delete: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-        eq: () => ({ data: null, error: new Error('Supabase configuration missing') }),
-      }),
-      auth: {
-        getSession: async () => ({ data: { session: null }, error: null }),
-        getUser: async () => ({ data: { user: null }, error: null }),
-        signOut: async () => ({ error: null }),
-      },
-    } as any;
-  }
-
-  // Clean up URL and key to prevent any space/newline issues
-  const cleanUrl = supabaseUrl.trim();
-  const cleanKey = supabaseAnonKey.trim();
-  console.log('Creating server-side Supabase client with URL:', cleanUrl);
 
   return createServerClient(
-    cleanUrl,
-    cleanKey,
+    supabaseUrl,
+    supabaseAnon,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
+        get(name: string) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
-          } catch {
-            // The `setAll` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            const cookie = cookieStore.get(name);
+            return cookie?.value;
+          } catch (error) {
+            console.error(`[SERVER] Error getting cookie ${name}:`, error);
+            return undefined;
+          }
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set(name, value, {
+              ...options,
+              secure: process.env.NODE_ENV === 'production',
+              sameSite: 'lax',
+              path: '/'
+            });
+          } catch (error) {
+            console.error(`[SERVER] Error setting cookie ${name}:`, error);
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set(name, '', {
+              ...options,
+              maxAge: 0,
+              path: '/'
+            });
+          } catch (error) {
+            console.error(`[SERVER] Error removing cookie ${name}:`, error);
           }
         },
       },
     }
   );
-} 
+}

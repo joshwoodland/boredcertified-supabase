@@ -6,7 +6,7 @@ const CACHE_TTL = 5000; // 5 seconds
 
 export async function getCurrentModel(): Promise<string> {
   const now = Date.now();
-  
+
   // If we have a cached model and it's not expired, return it
   if (cachedModel && (now - lastFetchTime) < CACHE_TTL) {
     return cachedModel;
@@ -14,7 +14,7 @@ export async function getCurrentModel(): Promise<string> {
 
   // Otherwise fetch the current model
   try {
-    const model = await getModelFromSettings();
+    const model = await getModelFromSettings(null);
     cachedModel = model;
     lastFetchTime = now;
     return model;
@@ -31,4 +31,4 @@ export async function getCurrentModel(): Promise<string> {
 export function invalidateModelCache() {
   cachedModel = null;
   lastFetchTime = 0;
-} 
+}

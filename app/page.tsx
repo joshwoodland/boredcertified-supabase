@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useAppSettings } from './hooks/useAppSettings';
-// Import SupabasePatientList component instead of the regular PatientList
+import { useAppSettings } from './providers/AppSettingsProvider';
 import SupabasePatientList from './components/SupabasePatientList';
 import AudioRecorder from './components/AudioRecorder';
 import SupabasePatientNotes from './components/SupabasePatientNotes';
@@ -15,11 +14,10 @@ import { FiSettings, FiTrash2, FiPlayCircle, FiSearch, FiUser } from 'react-icon
 import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 import DynamicLogo from './components/DynamicLogo';
-import { createBrowserSupabaseClient } from './lib/supabase';
-import type { AppPatient } from './lib/supabase';
+import { createBrowserSupabaseClient } from '@/app/lib/supabase';
+import type { AppPatient } from './lib/supabaseTypes';
 import type { Note } from './types/notes';
 import { extractContent } from './utils/safeJsonParse';
-import { toSafeISOString, toValidDate } from './utils/dateUtils';
 
 // Create a Supabase client for direct database access
 const supabase = createBrowserSupabaseClient();
@@ -58,7 +56,7 @@ function normalizePatientId(id: any): string {
 }
 
 export default function Home() {
-  const { settings, loading: settingsLoading, error: settingsError, fetchSettings } = useAppSettings();
+  const { settings, isLoading: settingsLoading, error: settingsError, refreshSettings } = useAppSettings();
   const [patients, setPatients] = useState<AppPatient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>();
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
@@ -172,7 +170,7 @@ export default function Home() {
     try {
       // Fetch settings and patients in parallel
       await Promise.all([
-        fetchSettings(),
+        refreshSettings(),
         // We'll get patients through the SupabasePatientList component's callback
         Promise.resolve()
       ]);
@@ -481,6 +479,12 @@ export default function Home() {
     // Validate patient existence directly with Supabase before proceeding
     try {
       console.log('Validating patient ID with Supabase:', patientId);
+
+      // Check if Supabase client is initialized
+      if (!supabase) {
+        throw new Error('Unable to initialize database client');
+      }
+
       const { data: patientData, error: patientError } = await supabase
         .from('patients')
         .select('id, name')
@@ -506,11 +510,60 @@ export default function Home() {
     setAbortController(controller);
 
     try {
-      // Create the request body and log it
+      // Get patient name for proper formatting
+      let patientName = "Patient";
+      try {
+        // First try to get from the patients array
+        const selectedPatient = patients.find(p => p.id === patientId);
+        if (selectedPatient) {
+          patientName = selectedPatient.name;
+        } else {
+          // Fallback to API if not found in the array
+          const patientResponse = await fetch(`/api/patients?id=${patientId}`);
+          if (patientResponse.ok) {
+            const patientData = await patientResponse.json();
+            if (patientData && patientData.length > 0) {
+              patientName = patientData[0].name;
+            }
+          }
+        }
+        console.log('Using patient name:', patientName);
+      } catch (error) {
+        console.warn('Error fetching patient name, using default', error);
+      }
+
+      // For follow-up visits, get the previous note for context
+      let previousNote = null;
+      if (!isInitialEvaluation) {
+        try {
+          const notesResponse = await fetch(`/api/notes?patientId=${patientId}`);
+          if (notesResponse.ok) {
+            const existingNotes = await notesResponse.json();
+            if (existingNotes.length > 0) {
+              previousNote = existingNotes[0].content;
+              console.log('Previous note found for context');
+            }
+          }
+        } catch (error) {
+          console.warn('Error fetching previous notes', error);
+        }
+      }
+
+      // Get the appropriate provider preferences from settings
+      // These are additional instructions that will be combined with hardcoded templates in the API
+      const providerPreferences = isInitialEvaluation
+        ? settings?.initialVisitPrompt || 'Please include detailed medication side effects when mentioned. Use bullet points for medication lists.'
+        : settings?.followUpVisitPrompt || 'Focus on changes since the last visit. Highlight any medication adjustments with "CHANGED" label.';
+
+      // Create the request body with all required parameters
       const requestBody = {
         patientId: patientId,
         transcript,
+        useStructuredPrompt: true, // Always use the structured prompt approach
         isInitialEvaluation,
+        patientName,
+        previousNote,
+        soapTemplate: providerPreferences // Pass provider preferences to be combined with hardcoded templates in the API
       };
 
       console.log('DEBUG - Request body to be sent:', JSON.stringify(requestBody));
@@ -589,7 +642,30 @@ export default function Home() {
       // Use the complete transcript without additional processing
       const fullTranscript = transcript;
 
-      // Generate SOAP note
+      // Get patient name for proper formatting
+      const selectedPatient = patients.find(p => p.id === selectedPatientId);
+      const patientName = selectedPatient?.name || 'Patient';
+
+      // For follow-up visits, get the previous note for context
+      let previousNote = null;
+      if (!isInitialEvaluation && patientNotes.length > 0) {
+        previousNote = patientNotes[0].content;
+      }
+
+      // Get the appropriate provider preferences from settings
+      // These are additional instructions that will be combined with hardcoded templates in the API
+      const providerPreferences = isInitialEvaluation
+        ? settings?.initialVisitPrompt || 'Please include detailed medication side effects when mentioned. Use bullet points for medication lists.'
+        : settings?.followUpVisitPrompt || 'Focus on changes since the last visit. Highlight any medication adjustments with "CHANGED" label.';
+
+      console.log('Generating SOAP note with structured prompt approach:', {
+        isInitialVisit: isInitialEvaluation,
+        hasPreviousNote: !!previousNote,
+        patientName,
+        templateLength: providerPreferences.length
+      });
+
+      // Generate SOAP note with structured prompt approach
       const soapResponse = await fetch('/api/notes', {
         method: 'POST',
         headers: {
@@ -597,8 +673,12 @@ export default function Home() {
         },
         body: JSON.stringify({
           patientId: selectedPatientId,
-          transcript,
-          isInitialEvaluation,
+          transcript: fullTranscript,
+          useStructuredPrompt: true, // Use the structured prompt approach
+          isInitialEvaluation, // Pass visit type
+          patientName, // Pass patient name for proper formatting
+          previousNote, // Pass the previous note for context
+          soapTemplate: providerPreferences // Pass provider preferences to be combined with hardcoded templates in the API
         }),
         signal: controller.signal
       });
@@ -754,7 +834,7 @@ export default function Home() {
 
         {(error || settingsError) && (
           <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
-            {error || settingsError}
+            {typeof error === 'string' ? error : (typeof settingsError === 'string' ? settingsError : 'An error occurred')}
           </div>
         )}
 
@@ -846,7 +926,18 @@ export default function Home() {
                           patientId={selectedPatientId}
                           transcript={manualTranscript}
                           onNoteGenerated={(note) => {
-                            setCurrentNote(note);
+                            // Convert the note to match the expected Note type
+                            const typedNote: Note = {
+                              id: note.id,
+                              patientId: note.patientId,
+                              transcript: note.transcript || '', // Ensure transcript is not undefined
+                              content: note.content,
+                              summary: note.summary || null,
+                              isInitialVisit: note.isInitialVisit || false,
+                              createdAt: note.createdAt ? new Date(note.createdAt) : new Date(),
+                              updatedAt: note.updatedAt ? new Date(note.updatedAt) : new Date()
+                            };
+                            setCurrentNote(typedNote);
                             setManualTranscript('');
                             setIsManualInput(false);
                             setForceCollapse(prev => !prev);
@@ -882,13 +973,6 @@ export default function Home() {
                           >
                             Cancel
                           </button>
-                          <button
-                            onClick={handleManualTranscriptSubmit}
-                            disabled={!manualTranscript.trim() || isProcessing}
-                            className="ml-2 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Process Transcript
-                          </button>
                         </div>
                       </div>
                     )}
@@ -909,9 +993,7 @@ export default function Home() {
                       </div>
                     )}
                   </div>
-                ) : (
-                  <p className="text-gray-600 dark:text-dark-muted p-6">Please select a patient to start recording</p>
-                )}
+                ) : null}
               </div>
             </div>
 
@@ -922,7 +1004,6 @@ export default function Home() {
                 selectedNoteId={currentNote?.id}
                 onNoteSelect={(note) => {
                   // Convert from the Supabase Note format to the format expected by page.tsx
-                  // Import the toSafeISOString utility at the top of the file
                   setCurrentNote({
                     id: note.id,
                     patientId: note.patientId,
@@ -935,10 +1016,35 @@ export default function Home() {
                   });
 
                   // Set the lastVisitNote for the follow-up modal
-                  setLastVisitNote(note.content);
+                  setLastVisitNote(extractContent(note.content));
                 }}
                 forceCollapse={forceCollapse}
                 refreshTrigger={notesRefreshTrigger} // Pass the refresh trigger
+                onDeleteNote={async (noteId) => {
+                  try {
+                    // Call the API to delete the note
+                    const response = await fetch(`/api/notes/${noteId}`, {
+                      method: 'DELETE',
+                    });
+
+                    if (!response.ok) {
+                      throw new Error('Failed to delete note');
+                    }
+
+                    // If the deleted note was the current note, clear it
+                    if (currentNote?.id === noteId) {
+                      setCurrentNote(null);
+                    }
+
+                    // Refresh the notes list
+                    if (selectedPatientId) {
+                      fetchPatientNotes(selectedPatientId);
+                    }
+                  } catch (error) {
+                    console.error('Error deleting note:', error);
+                    setError(error instanceof Error ? error.message : 'Failed to delete note');
+                  }
+                }}
               />
             )}
           </div>
@@ -972,11 +1078,15 @@ export default function Home() {
           lastVisitNote={lastVisitNote}
           patientId={selectedPatientId}
           noteId={patientNotes[0].id} // Use the most recent note's ID
-          onRecordingComplete={handleRecordingComplete}
           onClose={() => {
             setShowFollowUpModal(false);
             setIsRecordingFromModal(false);
             setIsActiveRecordingSession(false);
+
+            // Refresh notes after closing the modal to show the newly generated note
+            if (selectedPatientId) {
+              fetchPatientNotes(selectedPatientId);
+            }
           }}
         />
       )}

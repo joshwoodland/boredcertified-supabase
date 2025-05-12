@@ -1,20 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { checkSupabaseConnection, supabase, convertToAppFormat, convertToSupabaseFormat, SupabaseNote } from '@/app/lib/supabase';
+import { createClient } from '@/app/utils/supabase/server';
+import {
+  convertToAppFormat,
+  convertToSupabaseFormat,
+  type SupabaseNote
+} from '@/app/lib/supabaseTypes';
 
+// Define types for sync request and response
 interface SyncRequest {
   deviceId: string;
   lastSyncTime?: string;
-  notes?: Array<{
-    id: string;
-    remote_id?: string;
-    patient_id: string;
-    content: string;
-    transcript: string;
-    summary?: string;
-    is_initial_visit: number;
-    created_at: string;
-    updated_at: string;
-  }>;
+  notes: any[];
+}
+
+interface SyncResponse {
+  notes: any[];
+  conflicts: any[];
+}
+
+// Helper function to check Supabase connection
+async function checkSupabaseConnection(): Promise<boolean> {
+  try {
+    const supabase = createClient();
+    if (!supabase) {
+      console.error('[sync/notes/route] Failed to initialize Supabase client');
+      return false;
+    }
+
+    const { data, error } = await supabase.from('notes').select('id').limit(1);
+    if (error && error.code !== '42P01') { // 42P01 means table doesn't exist, which is fine
+      console.error('[sync/notes/route] Supabase connection error:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('[sync/notes/route] Failed to connect to Supabase:', error);
+    return false;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -29,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     // Check if Supabase is available
     const isSupabaseAvailable = await checkSupabaseConnection();
-    
+
     if (!isSupabaseAvailable) {
       return NextResponse.json({
         error: 'Database connection unavailable',
@@ -44,6 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get notes from server that were modified since last sync
+    const supabase = createClient();
     const { data: serverNotes, error: fetchError } = await supabase
       .from('notes')
       .select('*')
@@ -51,9 +74,9 @@ export async function POST(request: NextRequest) {
 
     if (fetchError) {
       console.error('Error fetching notes from Supabase:', fetchError);
-      return NextResponse.json({ 
-        error: 'Failed to fetch notes', 
-        details: fetchError.message 
+      return NextResponse.json({
+        error: 'Failed to fetch notes',
+        details: fetchError.message
       }, { status: 500 });
     }
 
