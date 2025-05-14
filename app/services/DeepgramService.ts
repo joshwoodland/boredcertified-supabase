@@ -32,6 +32,19 @@ export class DeepgramService {
   ) {}
 
   /**
+   * Gets a temporary token from our API endpoint
+   */
+  private async getToken(): Promise<string> {
+    const response = await fetch('/api/deepgram/token');
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to get Deepgram token: ${error}`);
+    }
+    const data = await response.json();
+    return data.token;
+  }
+
+  /**
    * Starts the transcription service
    * - Requests microphone access (or specific audio device if provided)
    * - Establishes WebSocket connection to Deepgram
@@ -62,11 +75,8 @@ export class DeepgramService {
 
       this.stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
 
-      // Get API key from environment
-      const apiKey = process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY;
-      if (!apiKey) {
-        throw new Error('Deepgram API key not found');
-      }
+      // Get temporary token from our API
+      const token = await this.getToken();
 
       // Create WebSocket connection to Deepgram
       // Using direct WebSocket connection instead of SDK for browser compatibility
@@ -83,10 +93,10 @@ export class DeepgramService {
         .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
         .join('&');
 
-      // Create WebSocket with API key in header
+      // Create WebSocket with temporary token
       this.socket = new WebSocket(
         `wss://api.deepgram.com/v1/listen?${queryParams}`,
-        ['token', apiKey]
+        ['token', token]
       );
 
       // Set up WebSocket event handlers
