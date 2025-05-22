@@ -80,7 +80,7 @@ export async function loginWithGoogle() {
     redirectUrl = process.env.NEXT_PUBLIC_APP_URL;
   } else {
     // Fallback for production if no URL is configured
-    redirectUrl = 'https://boredcertified.com';
+    redirectUrl = 'https://boredcertfour-77e3qn9na-joshs-projects-4345bed7.vercel.app';
   }
 
   // Add debugging
