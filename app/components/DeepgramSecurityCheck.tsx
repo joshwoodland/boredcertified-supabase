@@ -11,7 +11,7 @@ export default function DeepgramSecurityCheck() {
   const [securityViolation, setSecurityViolation] = useState(false);
 
   useEffect(() => {
-    // Check for any attempts to use the deprecated NEXT_PUBLIC_DEEPGRAM_API_KEY
+    // Check for any existing NEXT_PUBLIC_DEEPGRAM_API_KEY in environment variables
     if (typeof process !== 'undefined' &&
         process.env &&
         'NEXT_PUBLIC_DEEPGRAM_API_KEY' in process.env) {
@@ -32,31 +32,40 @@ export default function DeepgramSecurityCheck() {
       'color: green; font-weight: bold;'
     );
 
-    // Monitor for any attempts to access NEXT_PUBLIC_DEEPGRAM_API_KEY
-    const originalGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
-    Object.getOwnPropertyDescriptor = function(obj, prop) {
-      if (obj === process?.env && prop === 'NEXT_PUBLIC_DEEPGRAM_API_KEY') {
-        console.error(
-          '%c[SECURITY VIOLATION] Attempted to access NEXT_PUBLIC_DEEPGRAM_API_KEY. ' +
-          'This is a security risk and should not be used.',
-          'color: red; font-weight: bold;'
-        );
-        console.trace('Stack trace for NEXT_PUBLIC_DEEPGRAM_API_KEY access attempt:');
+    // Check for any scripts or code that might be trying to access the deprecated variable
+    // This is a safer approach that doesn't interfere with normal property access
+    const checkForDeprecatedUsage = () => {
+      try {
+        // Check if there are any global references that might indicate old code
+        if (typeof window !== 'undefined' && window.console) {
+          // Override console.error temporarily to catch any Deepgram-related errors
+          const originalError = window.console.error;
+          window.console.error = function(...args) {
+            const message = args.join(' ');
+            if (message.includes('NEXT_PUBLIC_DEEPGRAM_API_KEY') || 
+                message.includes('Deepgram API key not found')) {
+              console.warn(
+                '%c[SECURITY NOTICE] Detected potential use of deprecated Deepgram pattern. ' +
+                'Please ensure you are using the secure server-side implementation.',
+                'color: orange; font-weight: bold;'
+              );
+              setSecurityViolation(true);
+            }
+            originalError.apply(this, args);
+          };
 
-        setSecurityViolation(true);
-
-        // Dispatch a custom event that can be caught by other components
-        const event = new CustomEvent('deepgram-security-violation');
-        window.dispatchEvent(event);
+          // Restore original after a short delay
+          setTimeout(() => {
+            window.console.error = originalError;
+          }, 5000);
+        }
+      } catch (error) {
+        // Fail silently to avoid interfering with app functionality
+        console.debug('Security check setup failed:', error);
       }
-      // Fix TypeScript error by explicitly passing the arguments as an array
-      return originalGetOwnPropertyDescriptor.call(this, obj, prop);
     };
 
-    return () => {
-      // Restore original method when component unmounts
-      Object.getOwnPropertyDescriptor = originalGetOwnPropertyDescriptor;
-    };
+    checkForDeprecatedUsage();
   }, []);
 
   return securityViolation ? <DeepgramSecurityError /> : null;
