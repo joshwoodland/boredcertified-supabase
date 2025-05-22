@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 import { cookies } from 'next/headers';
 import { AppSettings, SupabaseSettings } from '@/app/lib/supabaseTypes';
 import {
@@ -15,7 +15,10 @@ import {
 
 export async function GET(request: Request) {
   try {
-    const supabaseServer = createClient();
+    const supabaseServer = createServerClient();
+    if (!supabaseServer) {
+      return NextResponse.json({ error: 'Database connection error' }, { status: 503 });
+    }
 
     // Get user session
     const { data: { session }, error: sessionError } = await supabaseServer.auth.getSession();
@@ -142,7 +145,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const supabaseServer = createClient();
+    const supabaseServer = createServerClient();
+    if (!supabaseServer) {
+      return NextResponse.json({ error: 'Database connection error' }, { status: 503 });
+    }
     const body = await request.json();
 
     // Get user session

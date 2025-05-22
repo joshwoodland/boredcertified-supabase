@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 import { convertToAppFormat, AppSettings } from '@/app/lib/supabaseTypes';
 
 // Initialize OpenAI client
@@ -12,7 +12,7 @@ const openai = new OpenAI({
 // Helper function to check Supabase connection
 async function checkSupabaseConnection(): Promise<boolean> {
   try {
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       console.error('[chat/route] Failed to initialize Supabase client');
       return false;
@@ -34,7 +34,7 @@ async function checkSupabaseConnection(): Promise<boolean> {
 async function getAppSettings(): Promise<AppSettings | null> {
   try {
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       console.error('[chat/route] Failed to initialize Supabase client');
       return null;

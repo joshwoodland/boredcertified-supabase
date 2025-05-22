@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createBrowserSupabaseClient } from '@/app/lib/supabase';
+import { supabaseBrowser } from '@/app/lib/supabase';
 
 export default function SettingsDebugPage() {
   const [clientSettings, setClientSettings] = useState<any>(null);
@@ -15,7 +15,7 @@ export default function SettingsDebugPage() {
       setLoading(true);
       try {
         // 1. Get user session info
-        const supabase = createBrowserSupabaseClient();
+        const supabase = supabaseBrowser;
         if (!supabase) {
           throw new Error('Failed to create Supabase client');
         }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 import {
   convertToAppFormat,
   type AppNote
@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 async function checkSupabaseConnection(): Promise<boolean> {
   try {
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       console.error('[notes/route] Failed to initialize Supabase client');
       return false;
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },

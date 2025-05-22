@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 import {
   convertToAppFormat,
   convertToSupabaseFormat,
@@ -21,7 +21,7 @@ interface SyncResponse {
 // Helper function to check Supabase connection
 async function checkSupabaseConnection(): Promise<boolean> {
   try {
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       console.error('[sync/patients/route] Failed to initialize Supabase client');
       return false;
@@ -50,7 +50,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Get all patients for this provider
-    const supabase = createClient();
+    const supabase = createServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Database connection error' }, { status: 503 });
+    }
     const { data: serverPatients, error: patientsError } = await supabase
       .from('patients')
       .select('*')
@@ -91,7 +94,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },

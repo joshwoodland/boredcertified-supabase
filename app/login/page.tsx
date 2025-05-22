@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { createBrowserSupabaseClient } from '@/app/lib/supabase';
+import { supabaseBrowser } from '@/app/lib/supabase';
 import { loginWithGoogle } from './actions';
 import DynamicLogo from '../components/DynamicLogo';
 import { useRouter } from 'next/navigation';
@@ -16,7 +16,7 @@ export default function LoginPage() {
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [canAutoplay, setCanAutoplay] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const supabase = createBrowserSupabaseClient();
+  const supabase = supabaseBrowser;
   const router = useRouter();
 
   const handleGoogleLogin = async () => {

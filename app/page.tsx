@@ -14,13 +14,13 @@ import { FiSettings, FiTrash2, FiPlayCircle, FiSearch, FiUser } from 'react-icon
 import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 import DynamicLogo from './components/DynamicLogo';
-import { createBrowserSupabaseClient } from '@/app/lib/supabase';
+import { supabaseBrowser } from '@/app/lib/supabase';
 import type { AppPatient } from './lib/supabaseTypes';
 import type { Note } from './types/notes';
 import { extractContent } from './utils/safeJsonParse';
 
-// Create a Supabase client for direct database access
-const supabase = createBrowserSupabaseClient();
+// Use the singleton browser client for direct database access
+const supabase = supabaseBrowser;
 
 interface Patient {
   id: string;

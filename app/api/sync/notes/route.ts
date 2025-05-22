@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 import {
   convertToAppFormat,
   convertToSupabaseFormat,
@@ -21,7 +21,7 @@ interface SyncResponse {
 // Helper function to check Supabase connection
 async function checkSupabaseConnection(): Promise<boolean> {
   try {
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       console.error('[sync/notes/route] Failed to initialize Supabase client');
       return false;
@@ -66,7 +66,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Get notes from server that were modified since last sync
-    const supabase = createClient();
+    const supabase = createServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Database connection error' }, { status: 503 });
+    }
     const { data: serverNotes, error: fetchError } = await supabase
       .from('notes')
       .select('*')

@@ -39,14 +39,13 @@ export {
 /**
  * Admin client exports
  * 
- * Admin client for operations that need to bypass RLS (service role key):
- * - createAdminClient: Factory function for administrative operations
+ * Note: Admin client is NOT exported from the main index to prevent
+ * client-side bundles from including server-only code that requires
+ * the SUPABASE_SERVICE_ROLE_KEY environment variable.
  * 
- * Note: No singleton is exported for security reasons.
+ * To use the admin client, import directly from the admin module:
+ * import { createAdminClient } from '@/app/lib/supabase/admin';
  */
-export { 
-  createAdminClient
-} from './admin';
 
 /**
  * Default export for backward compatibility

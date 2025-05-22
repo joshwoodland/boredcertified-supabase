@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { createBrowserSupabaseClient } from '@/app/lib/supabase';
+import { supabaseBrowser } from '@/app/lib/supabase';
 import { debugClientCookies } from '@/app/utils/cookies';
 import { AppSettings } from '@/app/lib/supabaseTypes';
 import type { Session } from '@supabase/supabase-js';
@@ -32,7 +32,7 @@ const checkAuthCookies = () => {
 };
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
-  const supabase = createBrowserSupabaseClient();
+  const supabase = supabaseBrowser;
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);

@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { createClient } from '@/app/utils/supabase/server';
+import { createServerClient } from '@/app/lib/supabase';
 import { convertToAppFormat, type AppNote } from '@/app/lib/supabaseTypes';
 
 // Initialize OpenAI client
@@ -20,7 +20,7 @@ const openai = new OpenAI({
 // Helper function to check Supabase connection
 async function checkSupabaseConnection(): Promise<boolean> {
   try {
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       console.error('[notes/[id]/route] Failed to initialize Supabase client');
       return false;
@@ -51,10 +51,7 @@ export async function GET(
     const noteId = params.id;
 
     if (!noteId) {
-      return NextResponse.json(
-        { error: 'Note ID not found in URL' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Note ID not found in URL' }, { status: 400 });
     }
 
     // Check if Supabase is available
@@ -70,7 +67,7 @@ export async function GET(
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -187,7 +184,7 @@ export async function PUT(
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -316,7 +313,7 @@ export async function POST(
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -409,10 +406,7 @@ export async function DELETE(
     const noteId = params.id;
 
     if (!noteId) {
-      return NextResponse.json(
-        { error: 'Note ID not found in URL' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Note ID not found in URL' }, { status: 400 });
     }
 
     // Check if Supabase is available
@@ -428,7 +422,7 @@ export async function DELETE(
     }
 
     // Use standardized client initialization
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },

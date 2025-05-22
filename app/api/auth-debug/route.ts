@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createClient } from '@/app/utils/supabase/server';
-import { createAdminClient } from '@/app/lib/supabase';
+import { createServerClient } from '@/app/lib/supabase';
+import { createAdminClient } from '@/app/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ export async function GET(_req: NextRequest) {
 
     /* ───────────── Supabase clients ─────────── */
     // Use standardized client initialization with error handling
-    const supabase = createClient();
+    const supabase = createServerClient();
     if (!supabase) {
       throw new Error('Failed to initialize Supabase client');
     }
