@@ -78,9 +78,14 @@ export async function loginWithGoogle() {
     console.log('[AUTH] Development mode detected, using localhost URL:', redirectUrl);
   } else if (process.env.NEXT_PUBLIC_APP_URL) {
     redirectUrl = process.env.NEXT_PUBLIC_APP_URL;
+  } else if (process.env.VERCEL_URL) {
+    // Use Vercel's automatically provided URL
+    redirectUrl = `https://${process.env.VERCEL_URL}`;
+    console.log('[AUTH] Using Vercel URL:', redirectUrl);
   } else {
-    // Fallback for production if no URL is configured
-    redirectUrl = 'https://boredcertfour-77e3qn9na-joshs-projects-4345bed7.vercel.app';
+    // Dynamically construct URL from request headers as final fallback
+    redirectUrl = `https://${host}`;
+    console.log('[AUTH] Using dynamic URL from headers:', redirectUrl);
   }
 
   // Add debugging
