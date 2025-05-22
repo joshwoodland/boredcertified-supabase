@@ -1,9 +1,10 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { createClient } from '@/app/utils/supabase/client';
+import { createBrowserSupabaseClient } from '@/app/lib/supabase';
 import { debugClientCookies } from '@/app/utils/cookies';
 import { AppSettings } from '@/app/lib/supabaseTypes';
+import type { Session } from '@supabase/supabase-js';
 import {
   supabaseToAppSettings,
   appToSupabaseSettings,
@@ -31,7 +32,7 @@ const checkAuthCookies = () => {
 };
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
-  const supabase = createClient();
+  const supabase = createBrowserSupabaseClient();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -147,7 +148,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     }
 
     console.log('[AUTH DEBUG] Setting up auth state change listener');
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
       console.log('[AUTH DEBUG] Auth state changed:', event);
 
       if (session?.user) {

@@ -2,9 +2,10 @@ import './styles/globals.css'
 import { Inter, Montserrat } from 'next/font/google'
 import ThemeProvider from './components/ThemeProvider'
 import { AppSettingsProvider } from './providers/AppSettingsProvider'
+import DeepgramSecurityCheck from './components/DeepgramSecurityCheck'
 
 const inter = Inter({ subsets: ['latin'] })
-const montserrat = Montserrat({ 
+const montserrat = Montserrat({
   subsets: ['latin'],
   weight: ['700', '800', '900'],
   variable: '--font-montserrat'
@@ -34,36 +35,36 @@ export default function RootLayout({
             pointer-events: auto;
             filter: none !important;
           }
-          
+
           /* Modern scrollbar */
           ::-webkit-scrollbar {
             width: 8px;
             height: 8px;
           }
-          
+
           ::-webkit-scrollbar-track {
             background: rgba(0, 0, 0, 0.05);
             border-radius: 8px;
           }
-          
+
           ::-webkit-scrollbar-thumb {
             background: rgba(0, 0, 0, 0.15);
             border-radius: 8px;
           }
-          
+
           ::-webkit-scrollbar-thumb:hover {
             background: rgba(0, 0, 0, 0.25);
           }
-          
+
           /* Dark mode scrollbar */
           .dark ::-webkit-scrollbar-track {
             background: rgba(255, 255, 255, 0.05);
           }
-          
+
           .dark ::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.15);
           }
-          
+
           .dark ::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.25);
           }
@@ -72,6 +73,7 @@ export default function RootLayout({
       <body className={`${inter.className} ${montserrat.variable} min-h-screen dark:bg-dark-main bg-gray-50`}>
         <AppSettingsProvider>
           <ThemeProvider />
+          <DeepgramSecurityCheck />
           <main className="min-h-screen">
             {children}
           </main>
@@ -79,4 +81,4 @@ export default function RootLayout({
       </body>
     </html>
   )
-} 
+}

@@ -19,20 +19,20 @@ export async function GET(request: NextRequest) {
   if (code) {
     try {
       const cookieStore = cookies();
-      
+
       // Log all cookies for debugging
       const allCookies = cookieStore.getAll();
       console.log('[AUTH CALLBACK] Cookies before exchange:', allCookies.map(c => c.name));
 
       // Clear any existing auth cookies before setting new ones
-      const authCookies = allCookies.filter(cookie => 
-        cookie.name.includes('sb-') || 
+      const authCookies = allCookies.filter(cookie =>
+        cookie.name.includes('sb-') ||
         cookie.name.includes('-auth-token') ||
         cookie.name.includes('supabase')
       );
 
       console.log('[AUTH CALLBACK] Clearing existing auth cookies:', authCookies.map(c => c.name));
-      
+
       // Remove all existing auth cookies
       authCookies.forEach(cookie => {
         cookieStore.delete(cookie.name);
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
         const { data: sessionCheck } = await supabase.auth.getSession();
         if (sessionCheck.session) {
           console.log('[AUTH CALLBACK] Session verification successful');
-          
+
           // Double check the user matches
           if (sessionCheck.session.user.id !== data.session.user.id) {
             console.warn('[AUTH CALLBACK] Session user mismatch - clearing cookies and retrying');
@@ -141,10 +141,12 @@ export async function GET(request: NextRequest) {
   }
 
   // Create a response that redirects to the home page
-  const response = NextResponse.redirect(new URL('/', request.url));
+  // Always use the original request URL's origin to ensure we stay on the same host
+  // We already have the origin from the beginning of this function
+  const response = NextResponse.redirect(new URL('/', origin));
 
   // Log the response headers for debugging
-  console.log('[AUTH CALLBACK] Redirect response created, redirecting to home page');
+  console.log('[AUTH CALLBACK] Redirect response created, redirecting to home page:', origin);
 
   return response;
 }

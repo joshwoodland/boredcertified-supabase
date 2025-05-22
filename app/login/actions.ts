@@ -65,24 +65,27 @@ export async function loginWithGoogle() {
   const supabase = supabaseServerOrNull;
 
   // Determine the redirect URL dynamically
-  // Use environment variable if available, otherwise construct from request
+  // Always use the current host in development mode to prevent redirects to production
   let redirectUrl;
-  if (process.env.NEXT_PUBLIC_APP_URL) {
+
+  // Get the host from request headers to determine the correct port
+  const headersList = headers();
+  const host = headersList.get('host') || 'localhost:3000';
+
+  // Force localhost URL in development mode, otherwise use the configured URL
+  if (process.env.NODE_ENV === 'development') {
+    redirectUrl = `http://${host}`;
+    console.log('[AUTH] Development mode detected, using localhost URL:', redirectUrl);
+  } else if (process.env.NEXT_PUBLIC_APP_URL) {
     redirectUrl = process.env.NEXT_PUBLIC_APP_URL;
   } else {
-    // Get the host from request headers to determine the correct port
-    const headersList = headers();
-    const host = headersList.get('host') || 'localhost:3000';
-    
-    // This is a fallback if the env var is not available
-    redirectUrl = process.env.NODE_ENV === 'development' 
-      ? `http://${host}`
-      : 'https://yourdomain.com'; // Replace with your production domain
+    // Fallback for production if no URL is configured
+    redirectUrl = 'https://boredcertified.com';
   }
 
   // Add debugging
   console.log('[AUTH] Initiating Google OAuth login with redirect URL:', redirectUrl);
-  
+
   try {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',

@@ -6,6 +6,8 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    // Add build timestamp to help track deployments
+    NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
     // DEEPGRAM_API_KEY should NOT be exposed to the client
   },
   // Explicitly include DEEPGRAM_API_KEY in serverRuntimeConfig

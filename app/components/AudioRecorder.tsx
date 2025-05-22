@@ -84,7 +84,7 @@ export default function AudioRecorder({
   isProcessing,
   isRecordingFromModal = false,
   onTranscriptUpdate,
-  lowEchoCancellation = false
+  lowEchoCancellation = true
 }: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');

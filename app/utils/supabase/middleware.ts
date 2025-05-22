@@ -21,6 +21,25 @@ function debugCookies(cookieStore: ReturnType<typeof cookies>, prefix: string = 
   return authCookies.length > 0;
 }
 
+// Helper function to clear all auth cookies
+export function clearAuthCookies(response: NextResponse): NextResponse {
+  const cookieStore = cookies();
+  const allCookies = Array.from(cookieStore).map(([name]) => name);
+  const authCookies = allCookies.filter(name => name.startsWith('sb-'));
+
+  console.log(`[MIDDLEWARE] Clearing ${authCookies.length} auth cookies`);
+
+  authCookies.forEach(name => {
+    console.log(`[MIDDLEWARE] Forcibly removing auth cookie: ${name}`);
+    response.cookies.set(name, '', {
+      maxAge: 0,
+      path: '/',
+    });
+  });
+
+  return response;
+}
+
 export async function updateSession(request: NextRequest) {
   try {
     // Log the current path for debugging
@@ -111,6 +130,27 @@ export async function updateSession(request: NextRequest) {
 
     if (error) {
       console.error('[MIDDLEWARE] Error getting session:', error);
+
+      // If we have an invalid refresh token error, clear all auth cookies
+      if (error.message?.includes('Invalid Refresh Token') || error.code === 'refresh_token_not_found') {
+        console.log('[MIDDLEWARE] Invalid refresh token detected, clearing all auth cookies');
+
+        // Find all auth cookies and remove them
+        const allCookies = Array.from(cookieStore).map(([name]) => name);
+        const authCookies = allCookies.filter(name => name.startsWith('sb-'));
+
+        authCookies.forEach(name => {
+          console.log(`[MIDDLEWARE] Forcibly removing invalid auth cookie: ${name}`);
+          response.cookies.set(name, '', {
+            maxAge: 0,
+            path: '/',
+          });
+        });
+
+        // Redirect to login page to force a clean login
+        return NextResponse.redirect(new URL('/login', request.url));
+      }
+
       throw error;
     }
 
@@ -129,6 +169,27 @@ export async function updateSession(request: NextRequest) {
 
           if (refreshError) {
             console.error('[MIDDLEWARE] Error refreshing session:', refreshError);
+
+            // If refresh fails with token error, clear all auth cookies
+            if (refreshError.message?.includes('Invalid Refresh Token') ||
+                refreshError.code === 'refresh_token_not_found') {
+              console.log('[MIDDLEWARE] Invalid refresh token during refresh, clearing all auth cookies');
+
+              // Find all auth cookies and remove them
+              const allCookies = Array.from(cookieStore).map(([name]) => name);
+              const authCookies = allCookies.filter(name => name.startsWith('sb-'));
+
+              authCookies.forEach(name => {
+                console.log(`[MIDDLEWARE] Forcibly removing invalid auth cookie: ${name}`);
+                response.cookies.set(name, '', {
+                  maxAge: 0,
+                  path: '/',
+                });
+              });
+
+              // Redirect to login page to force a clean login
+              return NextResponse.redirect(new URL('/login', request.url));
+            }
           } else if (refreshData.session) {
             console.log('[MIDDLEWARE] Session refreshed successfully for user:', refreshData.session.user.email);
           } else {

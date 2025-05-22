@@ -33,10 +33,11 @@ export class DeepgramService {
   ) {}
 
   /**
-   * Gets WebSocket connection details from our API endpoint
+   * Gets WebSocket connection details using our token API
    */
   private async getConnectionDetails() {
     try {
+      // Define transcription options
       const options = {
         language: 'en-US',
         model: 'nova-2',
@@ -45,7 +46,111 @@ export class DeepgramService {
         smart_format: true,
       };
 
-      console.log('Requesting Deepgram connection details from server...');
+      console.log('Requesting Deepgram token from server...', {
+        environment: process.env.NODE_ENV,
+        buildTime: process.env.NEXT_PUBLIC_BUILD_TIME || 'not set',
+        tokenApiUrl: `/api/deepgram/token?ttl=3600&t=${new Date().getTime()}`
+      });
+
+      // Step 1: Get a temporary token from our secure API endpoint
+      // Add a timestamp to avoid caching issues
+      const timestamp = new Date().getTime();
+      const tokenResponse = await fetch(`/api/deepgram/token?ttl=3600&t=${timestamp}`, {
+        method: 'GET',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+      });
+
+      console.log(`Token API response status: ${tokenResponse.status}`, {
+        ok: tokenResponse.ok,
+        statusText: tokenResponse.statusText,
+        headers: Object.fromEntries([...tokenResponse.headers.entries()])
+      });
+
+      // Parse the token response
+      let tokenData;
+      let responseText;
+      try {
+        // First get the raw text for logging
+        responseText = await tokenResponse.text();
+        console.log('Token API raw response:', responseText.substring(0, 200) + (responseText.length > 200 ? '...' : ''));
+
+        // Then parse it as JSON
+        try {
+          tokenData = JSON.parse(responseText);
+          console.log('Token data structure:', Object.keys(tokenData));
+        } catch (jsonError) {
+          console.error('Failed to parse token response as JSON:', jsonError, 'Raw response:', responseText);
+          throw new Error(`Failed to parse token response: ${jsonError instanceof Error ? jsonError.message : 'Unknown error'}`);
+        }
+      } catch (textError) {
+        console.error('Failed to get token response text:', textError);
+        throw new Error(`Failed to read token response: ${textError instanceof Error ? textError.message : 'Unknown error'}`);
+      }
+
+      // Check if the token request was successful
+      if (!tokenResponse.ok) {
+        console.error('Server returned an error for token request:', {
+          status: tokenResponse.status,
+          statusText: tokenResponse.statusText,
+          data: tokenData
+        });
+        const errorMessage = tokenData.details || tokenData.error || `Server responded with status ${tokenResponse.status}`;
+        console.error(`Detailed token error: ${errorMessage}`);
+
+        // Try the legacy websocket API as a fallback
+        console.log('Attempting to use legacy websocket API as fallback...');
+        return this.getLegacyConnectionDetails();
+      }
+
+      // Verify we received a valid token
+      if (!tokenData.token) {
+        console.error('Invalid token received:', tokenData);
+
+        // Try the legacy websocket API as a fallback
+        console.log('Attempting to use legacy websocket API as fallback...');
+        return this.getLegacyConnectionDetails();
+      }
+
+      console.log('Successfully received Deepgram token');
+
+      // Step 2: Build the WebSocket URL with the provided options
+      const queryParams = Object.entries(options)
+        .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
+        .join('&');
+
+      // Return the WebSocket URL and headers with the temporary token
+      // For JWT tokens from the token API, we need to use Bearer format
+      return {
+        url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
+        headers: {
+          Authorization: `Bearer ${tokenData.token}`,
+        }
+      };
+    } catch (error) {
+      console.error('Error getting Deepgram connection details:', error);
+      throw new Error(error instanceof Error ? error.message : 'Failed to get Deepgram connection details');
+    }
+  }
+
+  /**
+   * Fallback method to get WebSocket connection details using the legacy API
+   * This is used when the token API fails
+   */
+  private async getLegacyConnectionDetails() {
+    try {
+      // Define transcription options
+      const options = {
+        language: 'en-US',
+        model: 'nova-2',
+        punctuate: true,
+        diarize: false,
+        smart_format: true,
+      };
+
+      console.log('Using legacy websocket API as fallback...');
 
       // Add a timestamp to avoid caching issues
       const timestamp = new Date().getTime();
@@ -59,35 +164,40 @@ export class DeepgramService {
         body: JSON.stringify(options),
       });
 
-      console.log(`Server response status: ${response.status}`);
+      console.log(`Legacy API response status: ${response.status}`, {
+        ok: response.ok,
+        statusText: response.statusText
+      });
 
       // Always parse the response, even if it's an error
       let data;
       try {
-        data = await response.json();
-        console.log('Response data structure:', Object.keys(data));
+        const responseText = await response.text();
+        console.log('Legacy API raw response:', responseText.substring(0, 200) + (responseText.length > 200 ? '...' : ''));
+        data = JSON.parse(responseText);
+        console.log('Legacy API response structure:', Object.keys(data));
       } catch (parseError) {
-        console.error('Failed to parse response as JSON:', parseError);
+        console.error('Failed to parse legacy API response as JSON:', parseError);
         throw new Error(`Failed to parse server response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
       }
 
       if (!response.ok) {
         // Log the full error response for debugging
-        console.error('Server returned an error:', data);
+        console.error('Legacy API returned an error:', data);
         const errorMessage = data.details || data.error || `Server responded with status ${response.status}`;
         console.error(`Detailed error: ${errorMessage}`);
         throw new Error(errorMessage);
       }
 
       if (!data.url || !data.headers?.Authorization) {
-        console.error('Invalid connection details received:', data);
+        console.error('Invalid connection details received from legacy API:', data);
         throw new Error('Invalid connection details received from server');
       }
 
-      console.log('Successfully received Deepgram connection details');
+      console.log('Successfully received connection details from legacy API');
       return data;
     } catch (error) {
-      console.error('Error getting connection details:', error);
+      console.error('Error getting legacy connection details:', error);
       throw new Error(error instanceof Error ? error.message : 'Failed to get Deepgram connection details');
     }
   }
@@ -100,6 +210,17 @@ export class DeepgramService {
    */
   async start() {
     try {
+      // SECURITY CHECK: Warn if there's any attempt to use the old NEXT_PUBLIC_DEEPGRAM_API_KEY pattern
+      // This helps catch any old code that might still be trying to use the insecure pattern
+      if (typeof process !== 'undefined' &&
+          process.env &&
+          'NEXT_PUBLIC_DEEPGRAM_API_KEY' in process.env) {
+        console.error(
+          'SECURITY WARNING: NEXT_PUBLIC_DEEPGRAM_API_KEY should not be used. ' +
+          'The application is configured to use secure server-side API routes instead.'
+        );
+      }
+
       // Request microphone access with specific device ID if provided
       let audioConstraints: MediaStreamConstraints;
 
@@ -138,9 +259,12 @@ export class DeepgramService {
         this.socket.onopen = () => {
           if (this.socket) {
             // Set the authorization header
+            // Send the authorization header with Bearer token
             this.socket.send(JSON.stringify({
               type: 'header',
-              headers: headers
+              headers: {
+                Authorization: headers.Authorization
+              }
             }));
             console.log('Deepgram connection established');
             this.reconnectAttempts = 0;
@@ -150,7 +274,7 @@ export class DeepgramService {
       } catch (connectionError) {
         // Handle connection detail errors specifically
         console.error('Failed to establish Deepgram connection:', connectionError);
-        this.onError(new Error('Deepgram API key not found'));
+        this.onError(new Error('Failed to establish Deepgram connection. Please try again later.'));
         throw connectionError;
       }
 
@@ -223,8 +347,29 @@ export class DeepgramService {
    * Handles errors by calling the error callback and attempting to reconnect
    */
   private handleError(error: Error) {
-    this.onError(error);
-    this.reconnect();
+    try {
+      // Log the error with stack trace for better debugging
+      console.error('Deepgram error handler called:', {
+        message: error.message,
+        stack: error.stack,
+        reconnectAttempts: this.reconnectAttempts
+      });
+
+      // Notify the error callback
+      this.onError(error);
+
+      // Only attempt to reconnect if we haven't exceeded the maximum attempts
+      // This prevents infinite reconnection loops
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        console.log(`Attempting to reconnect (${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})...`);
+        this.reconnect();
+      } else {
+        console.error(`Maximum reconnection attempts (${this.maxReconnectAttempts}) reached. Giving up.`);
+      }
+    } catch (handlerError) {
+      // Prevent any errors in the error handler from causing further issues
+      console.error('Error in Deepgram error handler:', handlerError);
+    }
   }
 
   /**

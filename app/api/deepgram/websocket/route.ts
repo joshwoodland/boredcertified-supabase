@@ -1,56 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerConfig } from '@/app/utils/serverConfig';
 
+// Set dynamic to force-dynamic to prevent caching
+export const dynamic = 'force-dynamic';
+
+/**
+ * POST handler for setting up a Deepgram WebSocket connection
+ * This is a legacy endpoint that now uses the new token API
+ *
+ * @param request The incoming request
+ * @returns A response containing the WebSocket URL and headers
+ */
 export async function POST(request: NextRequest) {
   try {
-    // Get the Deepgram API key from environment variables or server runtime config
-    const serverConfig = getServerConfig();
-    const apiKey = process.env.DEEPGRAM_API_KEY || serverConfig.DEEPGRAM_API_KEY;
+    console.log('[DEEPGRAM WEBSOCKET API] Processing request');
 
-    // More detailed debug logging
-    console.log('Environment check:');
-    console.log('- NODE_ENV:', process.env.NODE_ENV);
-    console.log('DEEPGRAM_API_KEY:', process.env.DEEPGRAM_API_KEY ? 'Present' : 'Missing');
-    console.log('- Deepgram API key available:', !!apiKey);
-    console.log('- API key length (if available):', apiKey ? apiKey.length : 0);
-    console.log('- Server config available:', !!serverConfig);
+    // Get the options from the request body
+    const options = await request.json();
 
-    // Log all environment variables (without revealing their values)
-    const envVars = Object.keys(process.env).sort();
-    console.log('- Available environment variables:', envVars.join(', '));
+    // Get a token from our secure token API
+    const timestamp = new Date().getTime();
+    const tokenResponse = await fetch(`${request.nextUrl.origin}/api/deepgram/token?ttl=3600&t=${timestamp}`, {
+      method: 'GET',
+      // Use the same headers as the client would
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      },
+    });
 
-    if (!apiKey) {
-      console.error('DEEPGRAM_API_KEY environment variable is not set or empty');
+    // Check if the token request was successful
+    if (!tokenResponse.ok) {
+      const errorData = await tokenResponse.json().catch(() => ({}));
+      console.error('[DEEPGRAM WEBSOCKET API] Failed to get token:', errorData);
       return NextResponse.json(
         {
-          error: 'Deepgram API key not found',
-          details: 'The Deepgram API key is not configured on the server'
+          error: 'Failed to get Deepgram token',
+          details: errorData.error || `Token API responded with status ${tokenResponse.status}`,
+        },
+        { status: tokenResponse.status }
+      );
+    }
+
+    // Parse the token response
+    const tokenData = await tokenResponse.json();
+
+    // Verify we received a valid token
+    if (!tokenData.token) {
+      console.error('[DEEPGRAM WEBSOCKET API] Invalid token received:', tokenData);
+      return NextResponse.json(
+        {
+          error: 'Invalid token received',
+          details: 'The token API returned an invalid response',
         },
         { status: 500 }
       );
     }
 
-    // Get the options from the request body
-    const options = await request.json();
+    console.log('[DEEPGRAM WEBSOCKET API] Successfully obtained token');
 
     // Build the WebSocket URL with the provided options
     const queryParams = Object.entries(options)
       .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
       .join('&');
 
-    // Return the WebSocket URL and headers that the client should use
+    // Return the WebSocket URL and headers with the temporary token
+    // For JWT tokens from the token API, we need to use Bearer format
     return NextResponse.json({
       url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
       headers: {
-        Authorization: `Token ${apiKey}`
-      }
+        Authorization: `Bearer ${tokenData.token}`,
+      },
     });
   } catch (error) {
-    console.error('Error setting up Deepgram connection:', error);
+    console.error('[DEEPGRAM WEBSOCKET API] Error setting up connection:', error);
     return NextResponse.json(
       {
         error: 'Failed to set up connection',
-        details: error instanceof Error ? error.message : 'Unknown error occurred'
+        details: error instanceof Error ? error.message : 'Unknown error occurred',
       },
       { status: 500 }
     );

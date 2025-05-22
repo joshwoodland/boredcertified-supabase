@@ -1,6 +1,6 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/app/utils/supabase/server';
-import { createClient as createClientClient } from '@/app/utils/supabase/client';
+import { createBrowserSupabaseClient } from '@/app/lib/supabase';
 
 // Check if we're in a browser environment
 const isClient = typeof window !== 'undefined';
@@ -20,11 +20,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 /**
  * DEPRECATED: Use standardized client initialization methods instead.
- * For client-side: import { createClient } from '@/app/utils/supabase/client'
+ * For client-side: import { createBrowserSupabaseClient } from '@/app/lib/supabase'
  * For server-side: import { createClient } from '@/app/utils/supabase/server'
  */
 export const supabase = isClient
-  ? createClientClient()
+  ? createBrowserSupabaseClient()
   : createClient();
 
 /**
@@ -34,6 +34,6 @@ export const supabase = isClient
 export function getSupabaseClient() {
   console.warn('db.ts - getSupabaseClient is deprecated. Use standardized client initialization methods instead.');
   return isClient
-    ? createClientClient()
+    ? createBrowserSupabaseClient()
     : createClient();
 }
