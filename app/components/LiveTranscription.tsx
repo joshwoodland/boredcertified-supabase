@@ -58,6 +58,56 @@ export default function LiveTranscription({
     }
   }, []);
 
+  // Function to fall back to HTTP service
+  const tryHttpFallback = useCallback(async () => {
+    console.log('Falling back to HTTP-based Deepgram service...');
+    
+    // Ensure all WebSocket services are stopped
+    if (deepgramServiceRef.current) {
+      deepgramServiceRef.current.stop();
+      deepgramServiceRef.current = null;
+    }
+
+    // Switch to HTTP mode
+    setConnectionType('http');
+    setNetworkError(false);
+    setNetworkErrorMessage('');
+
+    try {
+      // Make sure we don't have a conflicting HTTP service
+      if (httpServiceRef.current) {
+        httpServiceRef.current.stop();
+        httpServiceRef.current = null;
+      }
+
+      // Create and start HTTP service
+      httpServiceRef.current = new DeepgramHttpService(
+        handleTranscriptUpdate,
+        (error: Error) => {
+          // Use inline error handler to avoid circular dependency
+          console.error('HTTP service error:', error);
+          setNetworkError(true);
+          setNetworkErrorMessage('HTTP streaming also failed. Please check your connection.');
+          if (onErrorRef.current) {
+            onErrorRef.current(error);
+          }
+        },
+        selectedAudioDeviceId,
+        lowEchoCancellation
+      );
+
+      await httpServiceRef.current.start();
+      console.log('Successfully switched to HTTP-based service');
+    } catch (httpError) {
+      console.error('HTTP fallback also failed:', httpError);
+      setNetworkError(true);
+      setNetworkErrorMessage('Both WebSocket and HTTP connections failed. Please check your internet connection.');
+      if (onErrorRef.current) {
+        onErrorRef.current(httpError instanceof Error ? httpError : new Error('HTTP fallback failed'));
+      }
+    }
+  }, [handleTranscriptUpdate, selectedAudioDeviceId, lowEchoCancellation]);
+
   // Handle errors with automatic fallback to HTTP service
   const handleError = useCallback((error: Error) => {
     console.error('Deepgram error:', error);
@@ -68,22 +118,24 @@ export default function LiveTranscription({
                              error.message.includes('1006') ||
                              error.message.includes('Connection timeout');
 
-    if (connectionType === 'websocket' && isWebSocketError && wsRetryCount < 1) {
-      console.log(`WebSocket error detected, attempting fallback to HTTP service (retry ${wsRetryCount + 1}/1)`);
+    // If we're getting WebSocket errors, fall back to HTTP immediately
+    // This is especially important for network environments that block WebSocket connections
+    if (connectionType === 'websocket' && isWebSocketError) {
+      console.log(`WebSocket error detected (${error.message}), switching to HTTP service immediately`);
       setWsRetryCount(prev => prev + 1);
       
       // Stop any WebSocket reconnection attempts
       if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.disableAutoReconnect(); // Disable further WebSocket attempts
         deepgramServiceRef.current.stop();
         deepgramServiceRef.current = null;
       }
       
-              // Try to fall back to HTTP service after a brief delay
-        setTimeout(() => {
-          if (isRecordingRef.current) {
-            tryHttpFallback();
-          }
-        }, 2000);
+      // Try to fall back to HTTP service immediately
+      if (isRecordingRef.current) {
+        console.log('Immediately attempting HTTP fallback due to persistent WebSocket issues');
+        tryHttpFallback();
+      }
       return;
     }
 
@@ -118,45 +170,7 @@ export default function LiveTranscription({
     if (onErrorRef.current) {
       onErrorRef.current(error);
     }
-  }, [connectionType, wsRetryCount]);
-
-  // Function to fall back to HTTP service
-  const tryHttpFallback = useCallback(async () => {
-    console.log('Falling back to HTTP-based Deepgram service...');
-    
-    // Ensure all WebSocket services are stopped
-    if (deepgramServiceRef.current) {
-      deepgramServiceRef.current.stop();
-      deepgramServiceRef.current = null;
-    }
-
-    // Switch to HTTP mode
-    setConnectionType('http');
-    setNetworkError(false);
-    setNetworkErrorMessage('');
-
-    try {
-      // Make sure we don't have a conflicting HTTP service
-      if (httpServiceRef.current) {
-        httpServiceRef.current.stop();
-        httpServiceRef.current = null;
-      }
-
-      // Create and start HTTP service
-      httpServiceRef.current = new DeepgramHttpService(
-        handleTranscriptUpdate,
-        handleError,
-        selectedAudioDeviceId,
-        lowEchoCancellation
-      );
-
-      await httpServiceRef.current.start();
-      console.log('Successfully switched to HTTP-based service');
-    } catch (httpError) {
-      console.error('HTTP fallback also failed:', httpError);
-      handleError(httpError instanceof Error ? httpError : new Error('HTTP fallback failed'));
-    }
-  }, [handleTranscriptUpdate, handleError, selectedAudioDeviceId, lowEchoCancellation]);
+  }, [connectionType, wsRetryCount, tryHttpFallback]);
 
   // Load saved audio device on mount
   useEffect(() => {

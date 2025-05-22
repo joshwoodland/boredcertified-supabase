@@ -290,8 +290,22 @@ export class DeepgramService {
         // Create WebSocket with proper protocol and headers
         console.log('Creating WebSocket connection to Deepgram...');
         
+        // Log the exact URL being used (with token partially masked for security)
+        const maskedUrl = url.replace(/token=([^&]+)/, 'token=***REDACTED***');
+        console.log('WebSocket URL (masked):', maskedUrl);
+        console.log('URL length:', url.length);
+        console.log('URL starts with wss://api.deepgram.com:', url.startsWith('wss://api.deepgram.com'));
+        
         // Create WebSocket with token in URL
         this.socket = new WebSocket(url);
+        
+        // Log WebSocket creation details
+        console.log('WebSocket instance created:', {
+          readyState: this.socket.readyState,
+          protocol: this.socket.protocol,
+          extensions: this.socket.extensions,
+          url: maskedUrl
+        });
 
         // Set a connection timeout to handle hanging connections
         this.connectionTimeout = setTimeout(() => {
