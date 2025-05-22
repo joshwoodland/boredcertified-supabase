@@ -15,7 +15,9 @@
     "supabase:test-data": "node scripts/create-test-data.js",
     "supabase:full-migration": "npm run supabase:setup && npm run supabase:backup",
     "supabase:migrate-provider": "npx ts-node scripts/migrate-provider-emails.ts joshwoodland@gmail.com",
-    "supabase:test": "npx ts-node scripts/test-supabase.ts"
+    "supabase:test": "npx ts-node scripts/test-supabase.ts",
+    "env:check": "./scripts/setup-env.sh",
+    "env:test": "node test-env.js"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

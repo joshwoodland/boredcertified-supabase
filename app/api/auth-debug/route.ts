@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createClient } from '@/app/utils/supabase/server';
-import { createAdminClient } from '@/app/utils/supabase/server-admin';
+import { createAdminClient } from '@/app/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,8 +39,8 @@ export async function GET(_req: NextRequest) {
       error: sessionError,
     } = await supabase.auth.getSession();
 
-    // createAdminClient is async → await it
-    const adminClient = await createAdminClient();
+    // createAdminClient returns a client or null
+    const adminClient = createAdminClient();
     if (!adminClient) {
       throw new Error('Failed to initialize Supabase admin client');
     }
