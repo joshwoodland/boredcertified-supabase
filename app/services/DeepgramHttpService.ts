@@ -134,6 +134,12 @@ export class DeepgramHttpService {
    */
   async start(): Promise<void> {
     try {
+      // Prevent multiple simultaneous starts
+      if (this.isRecording || this.stream) {
+        console.log('HTTP service already starting or started, ignoring duplicate start request');
+        return;
+      }
+
       console.log('Starting HTTP-based Deepgram service...');
 
       // Get initial token
@@ -151,9 +157,9 @@ export class DeepgramHttpService {
         }
       };
 
-      console.log('Requesting microphone access...');
+      console.log('Requesting microphone access for HTTP service...');
       this.stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-      console.log('Microphone access granted');
+      console.log('Microphone access granted for HTTP service');
 
       // Check if webm is supported
       let mimeType = 'audio/webm';
@@ -163,6 +169,8 @@ export class DeepgramHttpService {
           mimeType = 'audio/wav';
         }
       }
+
+      console.log(`HTTP service using MIME type: ${mimeType}`);
 
       // Create MediaRecorder
       this.mediaRecorder = new MediaRecorder(this.stream, {
@@ -176,23 +184,27 @@ export class DeepgramHttpService {
       };
 
       this.mediaRecorder.onerror = (event) => {
-        console.error('MediaRecorder error:', event);
-        this.onError(new Error('Recording error occurred'));
+        console.error('MediaRecorder error in HTTP service:', event);
+        this.onError(new Error('Recording error occurred in HTTP service'));
       };
 
       // Start recording with shorter intervals for more responsive transcription
-      this.mediaRecorder.start(2000); // 2 second intervals
+      this.mediaRecorder.start(3000); // 3 second intervals for HTTP
       this.isRecording = true;
 
-      // Process audio chunks every 3 seconds
+      // Process audio chunks every 4 seconds
       this.processingInterval = setInterval(() => {
         if (this.isRecording) {
-          this.processAudioChunks().catch(console.error);
+          this.processAudioChunks().catch(error => {
+            console.error('Error processing audio chunks:', error);
+          });
         }
-      }, 3000);
+      }, 4000);
 
       console.log('HTTP-based Deepgram service started successfully');
     } catch (error) {
+      console.error('Failed to start HTTP service:', error);
+      this.stop(); // Clean up on failure
       this.onError(error instanceof Error ? error : new Error('Failed to start HTTP service'));
     }
   }
@@ -213,17 +225,29 @@ export class DeepgramHttpService {
 
     // Stop media recorder
     if (this.mediaRecorder?.state === 'recording') {
-      this.mediaRecorder.stop();
+      try {
+        this.mediaRecorder.stop();
+      } catch (error) {
+        console.error('Error stopping MediaRecorder:', error);
+      }
     }
 
     // Stop all audio tracks
     if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
+      this.stream.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (error) {
+          console.error('Error stopping audio track:', error);
+        }
+      });
     }
 
     // Process any remaining chunks
     if (this.audioChunks.length > 0) {
-      this.processAudioChunks().catch(console.error);
+      this.processAudioChunks().catch(error => {
+        console.error('Error processing final audio chunks:', error);
+      });
     }
 
     // Reset variables
@@ -231,5 +255,7 @@ export class DeepgramHttpService {
     this.stream = null;
     this.audioChunks = [];
     this.currentToken = null;
+
+    console.log('HTTP service stopped successfully');
   }
 } 

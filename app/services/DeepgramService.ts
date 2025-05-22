@@ -14,9 +14,10 @@ export class DeepgramService {
   private mediaRecorder: MediaRecorder | null = null;
   private stream: MediaStream | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 2; // Reduced for faster fallback
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private connectionTimeout: NodeJS.Timeout | null = null;
+  private disableReconnect = false; // Add flag to disable reconnect
 
   /**
    * Creates a new DeepgramService instance
@@ -32,6 +33,14 @@ export class DeepgramService {
     private audioDeviceId?: string,
     private lowEchoCancellation: boolean = false
   ) {}
+
+  /**
+   * Disable automatic reconnection attempts
+   */
+  public disableAutoReconnect(): void {
+    this.disableReconnect = true;
+    this.maxReconnectAttempts = 0;
+  }
 
   /**
    * Gets WebSocket connection details using our token API
@@ -122,21 +131,16 @@ export class DeepgramService {
       console.log('Successfully received Deepgram token');
 
       // Step 2: Build the WebSocket URL with the provided options AND the token
-      // Include the token directly in the URL for proper authentication
-      const allParams = {
-        ...options,
-        token: tokenData.token  // Include token in URL parameters for proper auth
-      };
-
-      const queryParams = Object.entries(allParams)
+      // Use Authorization header approach for better compatibility
+      const queryParams = Object.entries(options)
         .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
         .join('&');
 
-      // Return the WebSocket URL with token included
+      // Return the WebSocket URL with authorization header instead of token in URL
       return {
         url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
         headers: {
-          Authorization: `Bearer ${tokenData.token}`,
+          Authorization: `Token ${tokenData.token}`, // Use Token format instead of Bearer
         }
       };
     } catch (error) {
@@ -220,8 +224,13 @@ export class DeepgramService {
    */
   async start() {
     try {
+      // Prevent multiple simultaneous starts
+      if (this.socket || this.stream) {
+        console.log('Service already starting or started, ignoring duplicate start request');
+        return;
+      }
+
       // SECURITY CHECK: Warn if there's any attempt to use the old NEXT_PUBLIC_DEEPGRAM_API_KEY pattern
-      // This helps catch any old code that might still be trying to use the insecure pattern
       if (typeof process !== 'undefined' &&
           process.env &&
           'NEXT_PUBLIC_DEEPGRAM_API_KEY' in process.env) {
@@ -268,24 +277,30 @@ export class DeepgramService {
       try {
         // Get connection details from our API
         console.log('Requesting Deepgram connection details...');
-        const { url } = await this.getConnectionDetails();
+        const { url, headers } = await this.getConnectionDetails();
 
-        // Create WebSocket with the provided URL (token is now in the URL)
-        console.log('Creating WebSocket connection to Deepgram with URL auth...');
-        this.socket = new WebSocket(url);
+        // Create WebSocket with proper protocol and headers
+        console.log('Creating WebSocket connection to Deepgram...');
+        
+        // For Deepgram, we need to use the authorization in a specific way
+        // Try the token-in-URL approach for better browser compatibility
+        const urlWithToken = `${url}&authorization=${encodeURIComponent(headers.Authorization)}`;
+        console.log('WebSocket URL (with auth):', url.substring(0, 100) + '...');
+        
+        this.socket = new WebSocket(urlWithToken);
 
         // Set a connection timeout to handle hanging connections
         this.connectionTimeout = setTimeout(() => {
           if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
-            console.error('WebSocket connection timeout');
+            console.error('WebSocket connection timeout after 10 seconds');
             this.socket.close();
-            this.handleError(new Error('Connection timeout - please check your network connection'));
+            this.handleError(new Error('Connection timeout - WebSocket handshake failed'));
           }
         }, 10000); // 10 second timeout
 
         // Set up WebSocket event handlers
         this.socket.onopen = () => {
-          console.log('Deepgram WebSocket connection established');
+          console.log('Deepgram WebSocket connection established successfully');
           
           // Clear connection timeout
           if (this.connectionTimeout) {
@@ -438,13 +453,20 @@ export class DeepgramService {
    * Handles WebSocket disconnection with exponential backoff retry
    */
   private handleDisconnect() {
+    if (this.disableReconnect) {
+      console.log('Auto-reconnect disabled, not attempting reconnection');
+      this.onError(new Error('WebSocket connection lost'));
+      return;
+    }
+
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 10000);
+      const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 5000); // Max 5 seconds
       console.log(`Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
 
       this.reconnectTimeout = setTimeout(() => this.reconnect(), delay);
     } else {
+      console.log(`Maximum reconnection attempts (${this.maxReconnectAttempts}) reached for WebSocket`);
       this.onError(new Error('Maximum reconnection attempts reached'));
       this.stop(false); // Ensure cleanup without resetting attempts
     }

@@ -68,9 +68,15 @@ export default function LiveTranscription({
                              error.message.includes('1006') ||
                              error.message.includes('Connection timeout');
 
-    if (connectionType === 'websocket' && isWebSocketError && wsRetryCount < 2) {
-      console.log(`WebSocket error detected, attempting fallback to HTTP service (retry ${wsRetryCount + 1}/2)`);
+    if (connectionType === 'websocket' && isWebSocketError && wsRetryCount < 1) {
+      console.log(`WebSocket error detected, attempting fallback to HTTP service (retry ${wsRetryCount + 1}/1)`);
       setWsRetryCount(prev => prev + 1);
+      
+      // Stop any WebSocket reconnection attempts
+      if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.stop();
+        deepgramServiceRef.current = null;
+      }
       
       // Try to fall back to HTTP service
       setTimeout(() => {
@@ -81,6 +87,7 @@ export default function LiveTranscription({
       return;
     }
 
+    // If we're already using HTTP or have exhausted retries, show error
     setNetworkError(true);
 
     // Provide more user-friendly error messages
@@ -117,7 +124,7 @@ export default function LiveTranscription({
   const tryHttpFallback = useCallback(async () => {
     console.log('Falling back to HTTP-based Deepgram service...');
     
-    // Stop WebSocket service
+    // Ensure all WebSocket services are stopped
     if (deepgramServiceRef.current) {
       deepgramServiceRef.current.stop();
       deepgramServiceRef.current = null;
@@ -129,6 +136,12 @@ export default function LiveTranscription({
     setNetworkErrorMessage('');
 
     try {
+      // Make sure we don't have a conflicting HTTP service
+      if (httpServiceRef.current) {
+        httpServiceRef.current.stop();
+        httpServiceRef.current = null;
+      }
+
       // Create and start HTTP service
       httpServiceRef.current = new DeepgramHttpService(
         handleTranscriptUpdate,
@@ -169,24 +182,27 @@ export default function LiveTranscription({
         httpServiceRef.current = null;
       }
 
-      // Create new service based on current connection type
-      if (connectionType === 'websocket') {
-        deepgramServiceRef.current = new DeepgramService(
-          handleTranscriptUpdate,
-          handleError,
-          deviceId,
-          lowEchoCancellation
-        );
-        deepgramServiceRef.current.start().catch(handleError);
-      } else {
-        httpServiceRef.current = new DeepgramHttpService(
-          handleTranscriptUpdate,
-          handleError,
-          deviceId,
-          lowEchoCancellation
-        );
-        httpServiceRef.current.start().catch(handleError);
-      }
+      // Wait a moment for cleanup, then restart
+      setTimeout(() => {
+        // Create new service based on current connection type
+        if (connectionType === 'websocket') {
+          deepgramServiceRef.current = new DeepgramService(
+            handleTranscriptUpdate,
+            handleError,
+            deviceId,
+            lowEchoCancellation
+          );
+          deepgramServiceRef.current.start().catch(handleError);
+        } else {
+          httpServiceRef.current = new DeepgramHttpService(
+            handleTranscriptUpdate,
+            handleError,
+            deviceId,
+            lowEchoCancellation
+          );
+          httpServiceRef.current.start().catch(handleError);
+        }
+      }, 500);
     }
   }, [isRecording, connectionType, handleTranscriptUpdate, handleError, lowEchoCancellation]);
 
@@ -202,18 +218,30 @@ export default function LiveTranscription({
       setWsRetryCount(0); // Reset retry count
       setConnectionType('websocket'); // Always start with WebSocket
 
-      // Create and start WebSocket service first
-      if (!deepgramServiceRef.current && !httpServiceRef.current) {
-        deepgramServiceRef.current = new DeepgramService(
-          handleTranscriptUpdate,
-          handleError,
-          selectedAudioDeviceId,
-          lowEchoCancellation
-        );
-
-        // Start the service
-        deepgramServiceRef.current.start().catch(handleError);
+      // Ensure no services are running before starting
+      if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.stop();
+        deepgramServiceRef.current = null;
       }
+      if (httpServiceRef.current) {
+        httpServiceRef.current.stop();
+        httpServiceRef.current = null;
+      }
+
+      // Start WebSocket service after a brief delay to ensure cleanup
+      setTimeout(() => {
+        if (isRecordingRef.current && !deepgramServiceRef.current && !httpServiceRef.current) {
+          deepgramServiceRef.current = new DeepgramService(
+            handleTranscriptUpdate,
+            handleError,
+            selectedAudioDeviceId,
+            lowEchoCancellation
+          );
+
+          // Start the service
+          deepgramServiceRef.current.start().catch(handleError);
+        }
+      }, 100);
     } else {
       // Stop both services when recording stops
       if (deepgramServiceRef.current) {
