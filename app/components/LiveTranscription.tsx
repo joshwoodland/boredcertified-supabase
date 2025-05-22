@@ -62,12 +62,15 @@ export default function LiveTranscription({
     // Provide more user-friendly error messages
     let userMessage = 'Connection error occurred';
 
-    if (error.message.includes('API key not configured')) {
+    if (error.message.includes('API key not found') || error.message.includes('API key not configured')) {
       userMessage = 'Speech-to-text service is not properly configured on the server. Please contact support.';
+      console.error('Deepgram API key issue detected. The API key may not be set in the server environment variables.');
     } else if (error.message.includes('getUserMedia')) {
       userMessage = 'Microphone access denied. Please allow microphone access in your browser settings.';
-    } else if (error.message.includes('Failed to get Deepgram token')) {
+    } else if (error.message.includes('Failed to get Deepgram') || error.message.includes('Failed to get connection details')) {
       userMessage = 'Unable to connect to speech-to-text service. Please check your internet connection.';
+    } else if (error.message.includes('Server responded with status')) {
+      userMessage = 'Server error when connecting to speech-to-text service. Please try again later.';
     } else {
       userMessage = error.message || 'Connection error occurred';
     }

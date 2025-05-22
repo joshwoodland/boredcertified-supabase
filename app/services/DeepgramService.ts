@@ -45,24 +45,46 @@ export class DeepgramService {
         smart_format: true,
       };
 
-      const response = await fetch('/api/deepgram/websocket', {
+      console.log('Requesting Deepgram connection details from server...');
+
+      // Add a timestamp to avoid caching issues
+      const timestamp = new Date().getTime();
+      const response = await fetch(`/api/deepgram/websocket?t=${timestamp}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
         },
         body: JSON.stringify(options),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.details || errorData.error || 'Failed to get connection details');
+      console.log(`Server response status: ${response.status}`);
+
+      // Always parse the response, even if it's an error
+      let data;
+      try {
+        data = await response.json();
+        console.log('Response data structure:', Object.keys(data));
+      } catch (parseError) {
+        console.error('Failed to parse response as JSON:', parseError);
+        throw new Error(`Failed to parse server response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        // Log the full error response for debugging
+        console.error('Server returned an error:', data);
+        const errorMessage = data.details || data.error || `Server responded with status ${response.status}`;
+        console.error(`Detailed error: ${errorMessage}`);
+        throw new Error(errorMessage);
+      }
+
       if (!data.url || !data.headers?.Authorization) {
+        console.error('Invalid connection details received:', data);
         throw new Error('Invalid connection details received from server');
       }
 
+      console.log('Successfully received Deepgram connection details');
       return data;
     } catch (error) {
       console.error('Error getting connection details:', error);
@@ -99,27 +121,38 @@ export class DeepgramService {
           : { audio: true };
       }
 
+      console.log('Requesting microphone access...');
       this.stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+      console.log('Microphone access granted');
 
-      // Get connection details from our API
-      const { url, headers } = await this.getConnectionDetails();
+      try {
+        // Get connection details from our API
+        console.log('Requesting Deepgram connection details...');
+        const { url, headers } = await this.getConnectionDetails();
 
-      // Create WebSocket with the provided URL and headers
-      this.socket = new WebSocket(url);
-      
-      // Add authorization header to the WebSocket connection
-      this.socket.onopen = () => {
-        if (this.socket) {
-          // Set the authorization header
-          this.socket.send(JSON.stringify({ 
-            type: 'header',
-            headers: headers 
-          }));
-          console.log('Deepgram connection established');
-          this.reconnectAttempts = 0;
-          this.startRecording();
-        }
-      };
+        // Create WebSocket with the provided URL and headers
+        console.log('Creating WebSocket connection to Deepgram...');
+        this.socket = new WebSocket(url);
+
+        // Add authorization header to the WebSocket connection
+        this.socket.onopen = () => {
+          if (this.socket) {
+            // Set the authorization header
+            this.socket.send(JSON.stringify({
+              type: 'header',
+              headers: headers
+            }));
+            console.log('Deepgram connection established');
+            this.reconnectAttempts = 0;
+            this.startRecording();
+          }
+        };
+      } catch (connectionError) {
+        // Handle connection detail errors specifically
+        console.error('Failed to establish Deepgram connection:', connectionError);
+        this.onError(new Error('Deepgram API key not found'));
+        throw connectionError;
+      }
 
       // Set up WebSocket event handlers
       this.socket.onmessage = (event) => {
