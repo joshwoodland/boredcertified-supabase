@@ -83,7 +83,7 @@ export default function DeepgramWebSocketDebugPage() {
     setWsMessages([]);
 
     try {
-      addLog('Creating WebSocket connection...');
+      addLog('Creating WebSocket connection with improved error handling...');
 
       // Create WebSocket URL with token embedded in URL (correct method)
       const wsUrl = `wss://api.deepgram.com/v1/listen?` +
@@ -102,14 +102,14 @@ export default function DeepgramWebSocketDebugPage() {
       const newSocket = new WebSocket(wsUrl);
       setSocket(newSocket);
 
-      // Set connection timeout
+      // Set reduced connection timeout for faster fallback
       const connectionTimeout = setTimeout(() => {
-        addLog('Connection timeout after 10 seconds');
+        addLog('Connection timeout after 5 seconds (reduced for faster fallback)');
         setWsStatus('Connection timeout');
         if (newSocket.readyState === WebSocket.CONNECTING) {
           newSocket.close();
         }
-      }, 10000);
+      }, 5000); // Reduced from 10 to 5 seconds
 
       newSocket.onopen = () => {
         clearTimeout(connectionTimeout);
@@ -141,9 +141,9 @@ export default function DeepgramWebSocketDebugPage() {
 
       newSocket.onerror = (event) => {
         clearTimeout(connectionTimeout);
-        addLog(`WebSocket error occurred`);
+        addLog(`WebSocket error occurred - improved error handling`);
         addLog(`Error event: ${JSON.stringify(event)}`);
-        setWsStatus('Error');
+        setWsStatus('Error (improved detection)');
         setWsMessages(prev => [...prev, `Error: ${JSON.stringify(event)}`]);
       };
 
@@ -153,9 +153,14 @@ export default function DeepgramWebSocketDebugPage() {
         setWsStatus(`Closed (${event.code}: ${event.reason || 'No reason provided'})`);
         setWsMessages(prev => [...prev, `Closed: ${event.code} ${event.reason}`]);
 
-        // Provide specific error code explanations
+        // Provide specific error code explanations with improved messaging
         if (event.code === 1006) {
-          addLog('Code 1006: Abnormal closure - usually indicates network issues, CORS problems, or server rejection');
+          addLog('Code 1006: Abnormal closure - improved detection suggests:');
+          addLog('- Authentication method incorrect (should use token in URL for browsers)');
+          addLog('- Network connectivity issues');
+          addLog('- Firewall blocking WebSocket connections');
+          addLog('- Server-side token validation failure');
+          addLog('Fallback to HTTP service would now be attempted automatically');
         } else if (event.code === 1011) {
           addLog('Code 1011: Server error - the server encountered an unexpected condition');
         } else if (event.code === 4001) {

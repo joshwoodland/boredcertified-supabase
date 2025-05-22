@@ -14,7 +14,6 @@ export class DeepgramHttpService {
   private isRecording = false;
   private audioChunks: Blob[] = [];
   private processingInterval: NodeJS.Timeout | null = null;
-  private currentToken: string | null = null;
 
   /**
    * Creates a new DeepgramHttpService instance
@@ -32,65 +31,36 @@ export class DeepgramHttpService {
   ) {}
 
   /**
-   * Gets a fresh token for HTTP requests
-   */
-  private async getToken(): Promise<string> {
-    try {
-      const timestamp = new Date().getTime();
-      const response = await fetch(`/api/deepgram/token?ttl=3600&t=${timestamp}`, {
-        method: 'GET',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Token API failed: ${response.status}`);
-      }
-
-      const tokenData = await response.json();
-      if (!tokenData.token) {
-        throw new Error('No token received from server');
-      }
-
-      this.currentToken = tokenData.token;
-      return tokenData.token;
-    } catch (error) {
-      console.error('Error getting Deepgram token:', error);
-      throw new Error('Failed to get authentication token');
-    }
-  }
-
-  /**
    * Transcribes an audio blob using HTTP API
    */
   private async transcribeAudioChunk(audioBlob: Blob): Promise<void> {
-    if (!this.currentToken) {
-      console.log('No token available, skipping transcription chunk');
-      return;
-    }
-
     try {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'audio.webm');
 
-      const response = await fetch('https://api.deepgram.com/v1/listen', {
+      // Use our server-side transcription endpoint instead of direct Deepgram calls
+      // This provides better error handling and avoids CORS/network issues
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+      const response = await fetch('/api/transcribe/process', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.currentToken}`,
-        },
         body: formData,
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Server transcription failed:', response.status, errorData);
+        
         if (response.status === 401) {
-          // Token expired, try to get a new one
-          console.log('Token expired, refreshing...');
-          await this.getToken();
-          return; // Skip this chunk, next one will use new token
+          // Token issue on server side
+          console.log('Server reports authentication error');
+          return; // Skip this chunk
         }
-        throw new Error(`Deepgram API error: ${response.status}`);
+        throw new Error(`Server transcription error: ${response.status} ${response.statusText}`);
       }
 
       const result = await response.json();
@@ -104,7 +74,19 @@ export class DeepgramHttpService {
       }
     } catch (error) {
       console.error('Error transcribing audio chunk:', error);
-      // Don't call onError for individual chunk failures to avoid stopping the service
+      
+      // Handle specific error types
+      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+        console.error('Network error in HTTP transcription - likely connection issue');
+        // Don't call onError for individual network failures to avoid stopping the service
+        // But if this becomes persistent, the service will need to be restarted
+      } else if (error instanceof Error && error.name === 'AbortError') {
+        console.error('HTTP transcription request timed out');
+      } else {
+        // For other errors, we might want to signal a problem
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('HTTP transcription failed with error:', errorMessage);
+      }
     }
   }
 
@@ -141,9 +123,6 @@ export class DeepgramHttpService {
       }
 
       console.log('Starting HTTP-based Deepgram service...');
-
-      // Get initial token
-      await this.getToken();
 
       // Request microphone access
       const audioConstraints: MediaStreamConstraints = {
@@ -254,7 +233,6 @@ export class DeepgramHttpService {
     this.mediaRecorder = null;
     this.stream = null;
     this.audioChunks = [];
-    this.currentToken = null;
 
     console.log('HTTP service stopped successfully');
   }

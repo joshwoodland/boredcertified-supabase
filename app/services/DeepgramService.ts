@@ -35,11 +35,11 @@ export class DeepgramService {
   ) {}
 
   /**
-   * Disable automatic reconnection attempts
+   * Disables automatic reconnection attempts
    */
-  public disableAutoReconnect(): void {
+  disableAutoReconnect(): void {
     this.disableReconnect = true;
-    this.maxReconnectAttempts = 0;
+    console.log('Auto-reconnect disabled for WebSocket service');
   }
 
   /**
@@ -63,13 +63,13 @@ export class DeepgramService {
       console.log('Requesting Deepgram token from server...', {
         environment: process.env.NODE_ENV,
         buildTime: process.env.NEXT_PUBLIC_BUILD_TIME || 'not set',
-        tokenApiUrl: `/api/deepgram/token?ttl=3600&t=${new Date().getTime()}`
+        tokenApiUrl: `/api/deepgram/token?ttl=7200&t=${new Date().getTime()}`
       });
 
       // Step 1: Get a temporary token from our secure API endpoint
-      // Add a timestamp to avoid caching issues
+      // Add a timestamp to avoid caching issues and use longer TTL
       const timestamp = new Date().getTime();
-      const tokenResponse = await fetch(`/api/deepgram/token?ttl=7200&t=${timestamp}`, {
+      const tokenResponse = await fetch(`/api/deepgram/token?ttl=14400&t=${timestamp}`, {
         method: 'GET',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -310,11 +310,11 @@ export class DeepgramService {
         // Set a connection timeout to handle hanging connections
         this.connectionTimeout = setTimeout(() => {
           if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
-            console.error('WebSocket connection timeout after 10 seconds');
+            console.error('WebSocket connection timeout after 5 seconds');
             this.socket.close();
             this.handleError(new Error('Connection timeout - WebSocket handshake failed'));
           }
-        }, 10000); // 10 second timeout
+        }, 5000); // Reduced from 10 seconds to 5 seconds for faster fallback
 
         // Set up WebSocket event handlers
         this.socket.onopen = () => {
