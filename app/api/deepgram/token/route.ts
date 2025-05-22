@@ -21,9 +21,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get TTL from query params or use default (1 hour)
+    // Get TTL from query params or use default (2 hours for better stability)
     const ttlParam = request.nextUrl.searchParams.get('ttl');
-    const requestedTtl = ttlParam ? parseInt(ttlParam, 10) : 3600;
+    const requestedTtl = ttlParam ? parseInt(ttlParam, 10) : 7200;
 
     // Get the Deepgram API key from environment variables
     const deepgramApiKey = process.env.DEEPGRAM_API_KEY;
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
       },
       body: JSON.stringify({
         name: `temp-streaming-key-${Date.now()}`,
-        time_to_live_in_seconds: requestedTtl, // Use the requested TTL
+        time_to_live_in_seconds: requestedTtl, // Use the requested TTL (default 2 hours)
         scopes: [
           'usage:write',     // Required for real-time streaming
           'usage:read'       // Allows reading usage data if needed

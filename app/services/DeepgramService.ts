@@ -69,7 +69,7 @@ export class DeepgramService {
       // Step 1: Get a temporary token from our secure API endpoint
       // Add a timestamp to avoid caching issues
       const timestamp = new Date().getTime();
-      const tokenResponse = await fetch(`/api/deepgram/token?ttl=3600&t=${timestamp}`, {
+      const tokenResponse = await fetch(`/api/deepgram/token?ttl=7200&t=${timestamp}`, {
         method: 'GET',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -282,12 +282,13 @@ export class DeepgramService {
         // Create WebSocket with proper protocol and headers
         console.log('Creating WebSocket connection to Deepgram...');
         
-        // For Deepgram, we need to use the authorization in a specific way
-        // Try the token-in-URL approach for better browser compatibility
-        const urlWithToken = `${url}&authorization=${encodeURIComponent(headers.Authorization)}`;
-        console.log('WebSocket URL (with auth):', url.substring(0, 100) + '...');
+        // Use Sec-WebSocket-Protocol for browser compatibility per Deepgram docs
+        // Extract token from Authorization header
+        const token = headers.Authorization.replace('Token ', '');
+        console.log('WebSocket URL:', url.substring(0, 100) + '...');
         
-        this.socket = new WebSocket(urlWithToken);
+        // Create WebSocket with Sec-WebSocket-Protocol header for authentication
+        this.socket = new WebSocket(url, ['token', token]);
 
         // Set a connection timeout to handle hanging connections
         this.connectionTimeout = setTimeout(() => {
@@ -340,7 +341,15 @@ export class DeepgramService {
             this.connectionTimeout = null;
           }
           
-          this.handleError(new Error('WebSocket connection error - this may be due to network restrictions or server issues'));
+          // Provide more specific error messaging based on WebSocket state
+          let errorMessage = 'WebSocket connection error';
+          if (this.socket?.readyState === WebSocket.CONNECTING) {
+            errorMessage = 'Failed to establish WebSocket connection - check authentication and network';
+          } else if (this.socket?.readyState === WebSocket.CLOSING) {
+            errorMessage = 'WebSocket connection is closing unexpectedly';
+          }
+          
+          this.handleError(new Error(errorMessage));
         };
 
         this.socket.onclose = (event) => {

@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Get a token from our secure token API
     const timestamp = new Date().getTime();
-    const tokenResponse = await fetch(`${request.nextUrl.origin}/api/deepgram/token?ttl=3600&t=${timestamp}`, {
+    const tokenResponse = await fetch(`${request.nextUrl.origin}/api/deepgram/token?ttl=7200&t=${timestamp}`, {
       method: 'GET',
       // Use the same headers as the client would
       headers: {
@@ -64,11 +64,11 @@ export async function POST(request: NextRequest) {
       .join('&');
 
     // Return the WebSocket URL and headers with the temporary token
-    // For JWT tokens from the token API, we need to use Bearer format
+    // For temporary tokens from the token API, use Token format
     return NextResponse.json({
       url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
       headers: {
-        Authorization: `Bearer ${tokenData.token}`,
+        Authorization: `Token ${tokenData.token}`,
       },
     });
   } catch (error) {

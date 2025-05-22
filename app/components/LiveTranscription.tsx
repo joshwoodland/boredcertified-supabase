@@ -78,12 +78,12 @@ export default function LiveTranscription({
         deepgramServiceRef.current = null;
       }
       
-      // Try to fall back to HTTP service
-      setTimeout(() => {
-        if (isRecordingRef.current) {
-          tryHttpFallback();
-        }
-      }, 1000);
+              // Try to fall back to HTTP service after a brief delay
+        setTimeout(() => {
+          if (isRecordingRef.current) {
+            tryHttpFallback();
+          }
+        }, 2000);
       return;
     }
 
