@@ -68,8 +68,9 @@ export class DeepgramService {
 
       // Step 1: Get a temporary token from our secure API endpoint
       // Add a timestamp to avoid caching issues and use longer TTL
+      // Use direct API key approach by default to avoid quick expiration issues
       const timestamp = new Date().getTime();
-      const tokenResponse = await fetch(`/api/deepgram/token?ttl=14400&t=${timestamp}`, {
+      const tokenResponse = await fetch(`/api/deepgram/token?ttl=14400&direct=true&t=${timestamp}`, {
         method: 'GET',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
