@@ -95,7 +95,7 @@ export async function loginWithGoogle() {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: redirectUrl,
+        redirectTo: `${redirectUrl}/auth/callback`,
         queryParams: {
           // These params ensure you get refresh tokens for longer sessions
           access_type: 'offline',

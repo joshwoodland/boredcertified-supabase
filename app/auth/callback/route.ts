@@ -14,32 +14,17 @@ export async function GET(request: NextRequest) {
   const origin = requestUrl.origin;
 
   console.log('[AUTH CALLBACK] Processing callback with origin:', origin);
+  console.log('[AUTH CALLBACK] Authorization code received:', code ? `${code.substring(0, 10)}...` : 'NO CODE');
 
   if (code) {
     try {
       const cookieStore = cookies();
 
-      // Log all cookies for debugging
+      // Log existing cookies for debugging - but don't clear them yet
       const allCookies = cookieStore.getAll();
-      console.log('[AUTH CALLBACK] Cookies before exchange:', allCookies.map(c => c.name));
+      console.log('[AUTH CALLBACK] Existing cookies:', allCookies.map(c => c.name));
 
-      // Clear any existing auth cookies before setting new ones
-      const authCookies = allCookies.filter(cookie =>
-        cookie.name.includes('sb-') ||
-        cookie.name.includes('-auth-token') ||
-        cookie.name.includes('supabase')
-      );
-
-      console.log('[AUTH CALLBACK] Clearing existing auth cookies:', authCookies.map(c => c.name));
-
-      // Remove all existing auth cookies
-      authCookies.forEach(cookie => {
-        cookieStore.delete(cookie.name);
-        console.log(`[AUTH CALLBACK] Deleted cookie: ${cookie.name}`);
-      });
-
-      // Note: For OAuth callback, we need special cookie handling that the standard
-      // client doesn't provide, so we use createServerClient directly
+      // Check if Supabase environment variables are available
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -48,32 +33,23 @@ export async function GET(request: NextRequest) {
         throw new Error('Missing Supabase environment variables');
       }
 
+      // Create Supabase client with proper cookie handling for PKCE
       const supabase = createServerClient(
         supabaseUrl,
         supabaseKey,
         {
           cookies: {
             get(name: string) {
-              try {
-                const cookie = cookieStore.get(name);
-                console.log(`[AUTH CALLBACK] Reading cookie: ${name}, exists: ${!!cookie}`);
-                return cookie?.value;
-              } catch (error) {
-                console.error(`[AUTH CALLBACK] Error getting cookie ${name}:`, error);
-                return undefined;
-              }
+              const cookie = cookieStore.get(name);
+              return cookie?.value;
             },
             set(name: string, value: string, options: CookieOptions) {
               try {
-                console.log(`[AUTH CALLBACK] Setting cookie: ${name}, options:`, options);
-                // Always set new cookies with proper security attributes
                 cookieStore.set(name, value, {
                   ...options,
                   secure: process.env.NODE_ENV === 'production',
                   sameSite: 'lax',
                   path: '/',
-                  // Ensure cookies are properly scoped
-                  domain: new URL(origin).hostname
                 });
               } catch (error) {
                 console.error(`[AUTH CALLBACK] Error setting cookie ${name}:`, error);
@@ -81,12 +57,10 @@ export async function GET(request: NextRequest) {
             },
             remove(name: string, options: CookieOptions) {
               try {
-                console.log(`[AUTH CALLBACK] Removing cookie: ${name}`);
                 cookieStore.set(name, '', {
                   ...options,
-                  maxAge: -1,
-                  expires: new Date(0),
-                  path: '/'
+                  maxAge: 0,
+                  path: '/',
                 });
               } catch (error) {
                 console.error(`[AUTH CALLBACK] Error removing cookie ${name}:`, error);
@@ -96,71 +70,65 @@ export async function GET(request: NextRequest) {
         }
       );
 
-      // Exchange the code for a session
+      // Exchange the code for a session - this should handle PKCE automatically
+      console.log('[AUTH CALLBACK] Exchanging authorization code for session...');
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (error) {
-        console.error('[AUTH CALLBACK] Error exchanging code for session:', error);
+        console.error('[AUTH CALLBACK] Error exchanging code for session:', {
+          message: error.message,
+          status: error.status,
+          code: error.code
+        });
+        
+        // Log additional debug info for PKCE errors
+        if (error.message?.includes('code verifier') || error.code === 'validation_failed') {
+          console.error('[AUTH CALLBACK] PKCE validation error detected');
+          const pkceRelatedCookies = allCookies.filter(c => 
+            c.name.includes('pkce') || 
+            c.name.includes('verifier') || 
+            c.name.includes('code_verifier') ||
+            c.name.startsWith('sb-')
+          );
+          console.error('[AUTH CALLBACK] Auth-related cookies:', pkceRelatedCookies.map(c => c.name));
+        }
+        
         throw error;
       }
 
       if (data.session) {
         console.log('[AUTH CALLBACK] Successfully created session for user:', data.session.user.email);
 
-        // Verify the session was properly set with retries
-        let sessionVerified = false;
-        let retryCount = 0;
-        const maxRetries = 3;
-
-        while (!sessionVerified && retryCount < maxRetries) {
-          const { data: sessionCheck } = await supabase.auth.getSession();
-          if (sessionCheck.session && sessionCheck.session.user.id === data.session.user.id) {
-            console.log('[AUTH CALLBACK] Session verification successful');
-            sessionVerified = true;
-          } else {
-            console.warn(`[AUTH CALLBACK] Session verification failed (attempt ${retryCount + 1}/${maxRetries})`);
-            retryCount++;
-            if (retryCount < maxRetries) {
-              // Wait a bit before retrying
-              await new Promise(resolve => setTimeout(resolve, 100));
-            }
-          }
-        }
-
-        if (!sessionVerified) {
-          console.error('[AUTH CALLBACK] Failed to verify session after multiple attempts');
+        // Verify the session was properly set
+        const { data: sessionCheck } = await supabase.auth.getSession();
+        if (sessionCheck.session) {
+          console.log('[AUTH CALLBACK] Session verification successful');
+        } else {
+          console.warn('[AUTH CALLBACK] Session verification failed');
         }
       } else {
         console.warn('[AUTH CALLBACK] No session data returned from exchange');
       }
 
-      // Log all cookies after exchange
-      const afterCookies = cookieStore.getAll();
-      console.log('[AUTH CALLBACK] Cookies after exchange:', afterCookies.map(c => c.name));
-
     } catch (error) {
       console.error('[AUTH CALLBACK] Exception during auth callback:', error);
-      // Continue to redirect even on error, to avoid leaving the user on an error page
+      // Continue to redirect even on error, but redirect to login with error
+      const errorResponse = NextResponse.redirect(new URL('/login?error=callback_error', origin));
+      return errorResponse;
     }
   } else {
-    console.error('[AUTH CALLBACK] No code parameter found in callback URL');
+    console.error('[AUTH CALLBACK] No authorization code found in callback URL');
+    return NextResponse.redirect(new URL('/login?error=no_code', origin));
   }
 
-  // Add a small delay to ensure cookies are properly set before redirect
-  await new Promise(resolve => setTimeout(resolve, 50));
-
-  // Create a response that redirects to the home page
-  // Always use the original request URL's origin to ensure we stay on the same host
-  // We already have the origin from the beginning of this function
+  // Create redirect response to home page
   const response = NextResponse.redirect(new URL('/', origin));
 
-  // Add headers to prevent caching
+  // Add cache control headers
   response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   response.headers.set('Pragma', 'no-cache');
   response.headers.set('Expires', '0');
 
-  // Log the response headers for debugging
-  console.log('[AUTH CALLBACK] Redirect response created, redirecting to home page:', origin);
-
+  console.log('[AUTH CALLBACK] Redirecting to home page');
   return response;
 }
