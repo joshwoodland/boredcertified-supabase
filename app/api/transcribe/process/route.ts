@@ -30,27 +30,75 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('[TRANSCRIBE API] Forwarding audio to Deepgram', {
+    // Validate audio file
+    if (audioFile.size === 0) {
+      console.warn('[TRANSCRIBE API] Empty audio file received, skipping transcription');
+      return NextResponse.json(
+        { error: 'Empty audio file' },
+        { status: 400 }
+      );
+    }
+
+    // Log audio details for debugging
+    console.log('[TRANSCRIBE API] Processing audio file', {
       fileName: audioFile.name,
       fileSize: audioFile.size,
-      fileType: audioFile.type
+      fileType: audioFile.type,
+      timestamp: new Date().toISOString()
     });
 
-    // Forward to Deepgram with proper error handling
+    // Skip very small audio chunks that might be noise
+    if (audioFile.size < 1000) { // Less than 1KB
+      console.log('[TRANSCRIBE API] Skipping very small audio chunk');
+      return NextResponse.json({ 
+        results: { 
+          channels: [{ 
+            alternatives: [{ 
+              transcript: '', 
+              confidence: 0 
+            }] 
+          }] 
+        } 
+      });
+    }
+
+    // Forward to Deepgram with proper parameters
     const deepgramFormData = new FormData();
     deepgramFormData.append('audio', audioFile);
 
-    const response = await fetch('https://api.deepgram.com/v1/listen', {
+    // Build the API URL with transcription parameters
+    const deepgramUrl = new URL('https://api.deepgram.com/v1/listen');
+    deepgramUrl.searchParams.set('language', 'en-US');
+    deepgramUrl.searchParams.set('model', 'nova-2');
+    deepgramUrl.searchParams.set('punctuate', 'true');
+    deepgramUrl.searchParams.set('smart_format', 'true');
+    // Let Deepgram auto-detect the audio format from the WebM file
+    // This is more reliable than manually specifying encoding parameters
+    
+    console.log('[TRANSCRIBE API] Sending request to Deepgram:', {
+      url: deepgramUrl.toString(),
+      audioSize: audioFile.size,
+      audioType: audioFile.type,
+      audioName: audioFile.name
+    });
+
+    const response = await fetch(deepgramUrl.toString(), {
       method: 'POST',
       headers: {
-        'Authorization': `Token ${deepgramApiKey}`,
+        'Authorization': `Bearer ${deepgramApiKey}`,
       },
-      body: deepgramFormData,
+      body: deepgramFormData, // Use FormData instead of raw file
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[TRANSCRIBE API] Deepgram error:', response.status, errorText);
+      console.error('[TRANSCRIBE API] Deepgram error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+        audioSize: audioFile.size,
+        audioType: audioFile.type
+      });
       
       return NextResponse.json(
         { 
@@ -63,7 +111,10 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await response.json();
-    console.log('[TRANSCRIBE API] Transcription successful');
+    console.log('[TRANSCRIBE API] Transcription successful', {
+      hasTranscript: !!(result.results?.channels?.[0]?.alternatives?.[0]?.transcript),
+      transcriptLength: result.results?.channels?.[0]?.alternatives?.[0]?.transcript?.length || 0
+    });
 
     return NextResponse.json(result);
 
