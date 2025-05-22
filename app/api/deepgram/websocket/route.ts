@@ -8,7 +8,10 @@ export async function POST(request: NextRequest) {
     if (!apiKey) {
       console.error('DEEPGRAM_API_KEY environment variable is not set');
       return NextResponse.json(
-        { error: 'Server configuration error' },
+        { 
+          error: 'Deepgram API key not found',
+          details: 'The Deepgram API key is not configured on the server'
+        },
         { status: 500 }
       );
     }
@@ -31,7 +34,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error setting up Deepgram connection:', error);
     return NextResponse.json(
-      { error: 'Failed to set up connection' },
+      { 
+        error: 'Failed to set up connection',
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
+      },
       { status: 500 }
     );
   }

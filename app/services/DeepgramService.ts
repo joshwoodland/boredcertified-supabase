@@ -54,14 +54,19 @@ export class DeepgramService {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Failed to get connection details: ${error}`);
+        const errorData = await response.json();
+        throw new Error(errorData.details || errorData.error || 'Failed to get connection details');
       }
 
-      return await response.json();
+      const data = await response.json();
+      if (!data.url || !data.headers?.Authorization) {
+        throw new Error('Invalid connection details received from server');
+      }
+
+      return data;
     } catch (error) {
       console.error('Error getting connection details:', error);
-      throw error;
+      throw new Error(error instanceof Error ? error.message : 'Failed to get Deepgram connection details');
     }
   }
 
