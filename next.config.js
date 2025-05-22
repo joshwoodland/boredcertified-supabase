@@ -14,6 +14,39 @@ const nextConfig = {
   serverRuntimeConfig: {
     DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY,
   },
+  // Add experimental features for better WebSocket support
+  experimental: {
+    // Enable edge runtime for better performance
+    runtime: 'nodejs',
+    // Optimize for serverless environments
+    isrMemoryCacheSize: 0,
+  },
+  // Headers configuration for CORS and WebSocket support
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+          {
+            key: 'Access-Control-Allow-Methods',
+            value: 'GET, POST, PUT, DELETE, OPTIONS',
+          },
+          {
+            key: 'Access-Control-Allow-Headers',
+            value: 'Content-Type, Authorization, X-Requested-With',
+          },
+          {
+            key: 'Cache-Control',
+            value: 'no-cache, no-store, must-revalidate',
+          },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

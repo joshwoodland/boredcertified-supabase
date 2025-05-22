@@ -16,6 +16,7 @@ export class DeepgramService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  private connectionTimeout: NodeJS.Timeout | null = null;
 
   /**
    * Creates a new DeepgramService instance
@@ -37,13 +38,17 @@ export class DeepgramService {
    */
   private async getConnectionDetails() {
     try {
-      // Define transcription options
+      // Define transcription options with improved settings for Vercel deployment
       const options = {
         language: 'en-US',
         model: 'nova-2',
         punctuate: true,
         diarize: false,
         smart_format: true,
+        interim_results: true,
+        encoding: 'webm',
+        channels: 1,
+        sample_rate: 48000
       };
 
       console.log('Requesting Deepgram token from server...', {
@@ -116,13 +121,18 @@ export class DeepgramService {
 
       console.log('Successfully received Deepgram token');
 
-      // Step 2: Build the WebSocket URL with the provided options
-      const queryParams = Object.entries(options)
+      // Step 2: Build the WebSocket URL with the provided options AND the token
+      // Include the token directly in the URL for proper authentication
+      const allParams = {
+        ...options,
+        token: tokenData.token  // Include token in URL parameters for proper auth
+      };
+
+      const queryParams = Object.entries(allParams)
         .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
         .join('&');
 
-      // Return the WebSocket URL and headers with the temporary token
-      // For JWT tokens from the token API, we need to use Bearer format
+      // Return the WebSocket URL with token included
       return {
         url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
         headers: {
@@ -232,14 +242,23 @@ export class DeepgramService {
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
+            sampleRate: 48000,
+            channelCount: 1
           },
         };
         console.log('Using low echo cancellation mode');
       } else {
-        // Use standard settings
-        audioConstraints = this.audioDeviceId
-          ? { audio: { deviceId: { exact: this.audioDeviceId } } }
-          : { audio: true };
+        // Use standard settings optimized for WebRTC
+        audioConstraints = {
+          audio: {
+            ...(this.audioDeviceId ? { deviceId: { exact: this.audioDeviceId } } : {}),
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000,
+            channelCount: 1
+          }
+        };
       }
 
       console.log('Requesting microphone access...');
@@ -249,62 +268,93 @@ export class DeepgramService {
       try {
         // Get connection details from our API
         console.log('Requesting Deepgram connection details...');
-        const { url, headers } = await this.getConnectionDetails();
+        const { url } = await this.getConnectionDetails();
 
-        // Create WebSocket with the provided URL and headers
-        console.log('Creating WebSocket connection to Deepgram...');
+        // Create WebSocket with the provided URL (token is now in the URL)
+        console.log('Creating WebSocket connection to Deepgram with URL auth...');
         this.socket = new WebSocket(url);
 
-        // Add authorization header to the WebSocket connection
+        // Set a connection timeout to handle hanging connections
+        this.connectionTimeout = setTimeout(() => {
+          if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+            console.error('WebSocket connection timeout');
+            this.socket.close();
+            this.handleError(new Error('Connection timeout - please check your network connection'));
+          }
+        }, 10000); // 10 second timeout
+
+        // Set up WebSocket event handlers
         this.socket.onopen = () => {
-          if (this.socket) {
-            // Set the authorization header
-            // Send the authorization header with Bearer token
-            this.socket.send(JSON.stringify({
-              type: 'header',
-              headers: {
-                Authorization: headers.Authorization
+          console.log('Deepgram WebSocket connection established');
+          
+          // Clear connection timeout
+          if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+          }
+          
+          this.reconnectAttempts = 0;
+          this.startRecording();
+        };
+
+        this.socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'Results') {
+              const transcript = data.channel?.alternatives?.[0]?.transcript || '';
+              if (transcript) {
+                this.onTranscript(transcript, data.is_final || false);
               }
-            }));
-            console.log('Deepgram connection established');
-            this.reconnectAttempts = 0;
-            this.startRecording();
+            } else if (data.type === 'Error') {
+              this.handleError(new Error(`Deepgram API error: ${data.message || 'Unknown error'}`));
+            } else if (data.type === 'Metadata') {
+              console.log('Deepgram metadata received:', data);
+            }
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+            this.handleError(new Error('Invalid WebSocket message format'));
           }
         };
+
+        this.socket.onerror = (error) => {
+          console.error('Deepgram WebSocket error:', error);
+          
+          // Clear connection timeout
+          if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+          }
+          
+          this.handleError(new Error('WebSocket connection error - this may be due to network restrictions or server issues'));
+        };
+
+        this.socket.onclose = (event) => {
+          console.log(`Deepgram connection closed: ${event.code} ${event.reason}`);
+          
+          // Clear connection timeout
+          if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+          }
+          
+          // Handle specific close codes
+          if (event.code === 1006) {
+            console.error('WebSocket closed abnormally (1006) - this usually indicates network issues or CORS problems');
+          } else if (event.code === 1011) {
+            console.error('WebSocket closed due to server error (1011)');
+          } else if (event.code === 4001) {
+            console.error('WebSocket closed due to authentication error (4001)');
+          }
+          
+          this.handleDisconnect();
+        };
+
       } catch (connectionError) {
         // Handle connection detail errors specifically
         console.error('Failed to establish Deepgram connection:', connectionError);
         this.onError(new Error('Failed to establish Deepgram connection. Please try again later.'));
         throw connectionError;
       }
-
-      // Set up WebSocket event handlers
-      this.socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'Results') {
-            const transcript = data.channel?.alternatives?.[0]?.transcript || '';
-            if (transcript) {
-              this.onTranscript(transcript, data.is_final || false);
-            }
-          } else if (data.type === 'Error') {
-            this.handleError(new Error(`Deepgram API error: ${data.message || 'Unknown error'}`));
-          }
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-          this.handleError(new Error('Invalid WebSocket message format'));
-        }
-      };
-
-      this.socket.onerror = (error) => {
-        console.error('Deepgram WebSocket error:', error);
-        this.handleError(new Error('WebSocket error occurred'));
-      };
-
-      this.socket.onclose = (event) => {
-        console.log(`Deepgram connection closed: ${event.code} ${event.reason}`);
-        this.handleDisconnect();
-      };
 
     } catch (error) {
       this.handleError(error instanceof Error ? error : new Error('Unknown error occurred'));
@@ -318,9 +368,20 @@ export class DeepgramService {
     if (!this.stream || !this.socket) return;
 
     try {
+      // Check if webm is supported, fallback to other formats
+      let mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm;codecs=opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'audio/wav';
+        }
+      }
+
+      console.log(`Using MIME type: ${mimeType}`);
+
       // Create MediaRecorder to capture audio
       this.mediaRecorder = new MediaRecorder(this.stream, {
-        mimeType: 'audio/webm',
+        mimeType: mimeType,
       });
 
       // Send audio data to Deepgram when available
@@ -338,6 +399,7 @@ export class DeepgramService {
 
       // Start recording with 250ms intervals
       this.mediaRecorder.start(250);
+      console.log('Started recording and streaming to Deepgram');
     } catch (error) {
       this.handleError(error instanceof Error ? error : new Error('Failed to start recording'));
     }
@@ -401,10 +463,15 @@ export class DeepgramService {
    * @param resetAttempts Whether to reset reconnection attempts (default: true)
    */
   stop(resetAttempts = true) {
-    // Clear any pending reconnect timeout
+    // Clear any pending timeouts
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+    
+    if (this.connectionTimeout) {
+      clearTimeout(this.connectionTimeout);
+      this.connectionTimeout = null;
     }
 
     // Stop media recorder

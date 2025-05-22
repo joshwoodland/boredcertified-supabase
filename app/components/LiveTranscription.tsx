@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { DeepgramService } from '../services/DeepgramService';
+import { DeepgramHttpService } from '../services/DeepgramHttpService';
 import { getSavedAudioDevice } from '../utils/audioLoopback';
 import dynamic from 'next/dynamic';
 
@@ -28,7 +29,10 @@ export default function LiveTranscription({
   const [transcript, setTranscript] = useState('');
   const [networkError, setNetworkError] = useState(false);
   const [networkErrorMessage, setNetworkErrorMessage] = useState('');
+  const [connectionType, setConnectionType] = useState<'websocket' | 'http'>('websocket');
+  const [wsRetryCount, setWsRetryCount] = useState(0);
   const deepgramServiceRef = useRef<DeepgramService | null>(null);
+  const httpServiceRef = useRef<DeepgramHttpService | null>(null);
   const isRecordingRef = useRef(false);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string | undefined>(undefined);
@@ -54,9 +58,29 @@ export default function LiveTranscription({
     }
   }, []);
 
-  // Handle errors
+  // Handle errors with automatic fallback to HTTP service
   const handleError = useCallback((error: Error) => {
     console.error('Deepgram error:', error);
+
+    // Check if this is a WebSocket-related error that we should fall back from
+    const isWebSocketError = error.message.includes('WebSocket') || 
+                             error.message.includes('connection error') ||
+                             error.message.includes('1006') ||
+                             error.message.includes('Connection timeout');
+
+    if (connectionType === 'websocket' && isWebSocketError && wsRetryCount < 2) {
+      console.log(`WebSocket error detected, attempting fallback to HTTP service (retry ${wsRetryCount + 1}/2)`);
+      setWsRetryCount(prev => prev + 1);
+      
+      // Try to fall back to HTTP service
+      setTimeout(() => {
+        if (isRecordingRef.current) {
+          tryHttpFallback();
+        }
+      }, 1000);
+      return;
+    }
+
     setNetworkError(true);
 
     // Provide more user-friendly error messages
@@ -68,9 +92,15 @@ export default function LiveTranscription({
     } else if (error.message.includes('getUserMedia')) {
       userMessage = 'Microphone access denied. Please allow microphone access in your browser settings.';
     } else if (error.message.includes('Failed to get Deepgram') || error.message.includes('Failed to get connection details')) {
-      userMessage = 'Unable to connect to speech-to-text service. Please check your internet connection.';
+      if (connectionType === 'websocket') {
+        userMessage = 'WebSocket connection failed. Trying HTTP fallback...';
+      } else {
+        userMessage = 'Unable to connect to speech-to-text service. Please check your internet connection.';
+      }
     } else if (error.message.includes('Server responded with status')) {
       userMessage = 'Server error when connecting to speech-to-text service. Please try again later.';
+    } else if (isWebSocketError && connectionType === 'http') {
+      userMessage = 'Connection issues detected. Using HTTP streaming mode for better reliability.';
     } else {
       userMessage = error.message || 'Connection error occurred';
     }
@@ -81,7 +111,39 @@ export default function LiveTranscription({
     if (onErrorRef.current) {
       onErrorRef.current(error);
     }
-  }, []);
+  }, [connectionType, wsRetryCount]);
+
+  // Function to fall back to HTTP service
+  const tryHttpFallback = useCallback(async () => {
+    console.log('Falling back to HTTP-based Deepgram service...');
+    
+    // Stop WebSocket service
+    if (deepgramServiceRef.current) {
+      deepgramServiceRef.current.stop();
+      deepgramServiceRef.current = null;
+    }
+
+    // Switch to HTTP mode
+    setConnectionType('http');
+    setNetworkError(false);
+    setNetworkErrorMessage('');
+
+    try {
+      // Create and start HTTP service
+      httpServiceRef.current = new DeepgramHttpService(
+        handleTranscriptUpdate,
+        handleError,
+        selectedAudioDeviceId,
+        lowEchoCancellation
+      );
+
+      await httpServiceRef.current.start();
+      console.log('Successfully switched to HTTP-based service');
+    } catch (httpError) {
+      console.error('HTTP fallback also failed:', httpError);
+      handleError(httpError instanceof Error ? httpError : new Error('HTTP fallback failed'));
+    }
+  }, [handleTranscriptUpdate, handleError, selectedAudioDeviceId, lowEchoCancellation]);
 
   // Load saved audio device on mount
   useEffect(() => {
@@ -96,24 +158,39 @@ export default function LiveTranscription({
     setSelectedAudioDeviceId(deviceId);
 
     // If already recording, restart with new device
-    if (isRecording && deepgramServiceRef.current) {
-      deepgramServiceRef.current.stop();
-      deepgramServiceRef.current = null;
+    if (isRecording) {
+      // Stop current service
+      if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.stop();
+        deepgramServiceRef.current = null;
+      }
+      if (httpServiceRef.current) {
+        httpServiceRef.current.stop();
+        httpServiceRef.current = null;
+      }
 
-      // Create new service with the selected device
-      deepgramServiceRef.current = new DeepgramService(
-        handleTranscriptUpdate,
-        handleError,
-        deviceId,
-        lowEchoCancellation
-      );
-
-      // Start the service
-      deepgramServiceRef.current.start().catch(handleError);
+      // Create new service based on current connection type
+      if (connectionType === 'websocket') {
+        deepgramServiceRef.current = new DeepgramService(
+          handleTranscriptUpdate,
+          handleError,
+          deviceId,
+          lowEchoCancellation
+        );
+        deepgramServiceRef.current.start().catch(handleError);
+      } else {
+        httpServiceRef.current = new DeepgramHttpService(
+          handleTranscriptUpdate,
+          handleError,
+          deviceId,
+          lowEchoCancellation
+        );
+        httpServiceRef.current.start().catch(handleError);
+      }
     }
-  }, [isRecording]);
+  }, [isRecording, connectionType, handleTranscriptUpdate, handleError, lowEchoCancellation]);
 
-  // Initialize or clean up Deepgram service when recording state changes
+  // Initialize or clean up services when recording state changes
   useEffect(() => {
     isRecordingRef.current = isRecording;
 
@@ -122,22 +199,35 @@ export default function LiveTranscription({
       setTranscript('');
       setNetworkError(false);
       setNetworkErrorMessage('');
+      setWsRetryCount(0); // Reset retry count
+      setConnectionType('websocket'); // Always start with WebSocket
 
-      // Create and start Deepgram service
-      if (!deepgramServiceRef.current) {
+      // Create and start WebSocket service first
+      if (!deepgramServiceRef.current && !httpServiceRef.current) {
         deepgramServiceRef.current = new DeepgramService(
           handleTranscriptUpdate,
           handleError,
           selectedAudioDeviceId,
           lowEchoCancellation
         );
-      }
 
-      // Start the service
-      deepgramServiceRef.current.start().catch(handleError);
-    } else if (deepgramServiceRef.current) {
-      // Stop the service when recording stops
-      deepgramServiceRef.current.stop();
+        // Start the service
+        deepgramServiceRef.current.start().catch(handleError);
+      }
+    } else {
+      // Stop both services when recording stops
+      if (deepgramServiceRef.current) {
+        deepgramServiceRef.current.stop();
+        deepgramServiceRef.current = null;
+      }
+      if (httpServiceRef.current) {
+        httpServiceRef.current.stop();
+        httpServiceRef.current = null;
+      }
+      
+      // Reset connection type for next session
+      setConnectionType('websocket');
+      setWsRetryCount(0);
     }
 
     // Clean up on unmount
@@ -146,8 +236,12 @@ export default function LiveTranscription({
         deepgramServiceRef.current.stop();
         deepgramServiceRef.current = null;
       }
+      if (httpServiceRef.current) {
+        httpServiceRef.current.stop();
+        httpServiceRef.current = null;
+      }
     };
-  }, [isRecording, handleTranscriptUpdate, handleError]);
+  }, [isRecording, handleTranscriptUpdate, handleError, selectedAudioDeviceId, lowEchoCancellation]);
 
   // Set up auto-scrolling for the transcript container
   useEffect(() => {
@@ -170,19 +264,28 @@ export default function LiveTranscription({
 
   // Manual retry function
   const handleManualRetry = useCallback(() => {
-    if (!deepgramServiceRef.current || !isRecordingRef.current) return;
+    if (!isRecordingRef.current) return;
 
     setNetworkError(false);
     setNetworkErrorMessage('');
 
-    // Restart the Deepgram service
-    deepgramServiceRef.current.stop();
-    setTimeout(() => {
-      if (deepgramServiceRef.current && isRecordingRef.current) {
-        deepgramServiceRef.current.start().catch(handleError);
-      }
-    }, 500);
-  }, [handleError]);
+    // Restart the appropriate service
+    if (connectionType === 'websocket' && deepgramServiceRef.current) {
+      deepgramServiceRef.current.stop();
+      setTimeout(() => {
+        if (deepgramServiceRef.current && isRecordingRef.current) {
+          deepgramServiceRef.current.start().catch(handleError);
+        }
+      }, 500);
+    } else if (connectionType === 'http' && httpServiceRef.current) {
+      httpServiceRef.current.stop();
+      setTimeout(() => {
+        if (httpServiceRef.current && isRecordingRef.current) {
+          httpServiceRef.current.start().catch(handleError);
+        }
+      }, 500);
+    }
+  }, [handleError, connectionType]);
 
   return (
     <div className="w-full flex flex-col gap-2">
@@ -253,6 +356,23 @@ export default function LiveTranscription({
       </div>
       {isRecording && (
         <div className="absolute top-4 right-4 flex items-center gap-2">
+          <div className="flex items-center gap-1 text-xs text-gray-300 bg-gray-700/80 px-2 py-1 rounded">
+            {connectionType === 'websocket' ? (
+              <>
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z" />
+                </svg>
+                WebSocket
+              </>
+            ) : (
+              <>
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                </svg>
+                HTTP
+              </>
+            )}
+          </div>
           <span className="flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
