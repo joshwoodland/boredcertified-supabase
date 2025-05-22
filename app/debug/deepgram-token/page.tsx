@@ -51,22 +51,13 @@ export default function DeepgramTokenDebugPage() {
     setWsStatus('Connecting...');
     setWsMessages([]);
 
-    // Create a WebSocket connection to Deepgram
-    const socket = new WebSocket(`wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000`);
+    // Create a WebSocket connection to Deepgram with token in URL
+    const wsUrl = `wss://api.deepgram.com/v1/listen?token=${encodeURIComponent(token)}&encoding=linear16&sample_rate=16000`;
+    const socket = new WebSocket(wsUrl);
 
-    // Add the token as a header
     socket.onopen = () => {
-      setWsStatus('Connected, sending authorization...');
-      socket.send(JSON.stringify({
-        type: 'header',
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }));
-
-      setWsStatus('Authorized, ready to send audio');
+      setWsStatus('Connected successfully');
       setWsMessages(prev => [...prev, 'WebSocket connection established']);
-      setWsMessages(prev => [...prev, 'Authorization sent']);
 
       // Close after 5 seconds (this is just a test)
       setTimeout(() => {

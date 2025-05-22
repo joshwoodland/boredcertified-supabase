@@ -130,19 +130,19 @@ export class DeepgramService {
 
       console.log('Successfully received Deepgram token');
 
-      // Step 2: Build the WebSocket URL with the provided options AND the token
-      // Use Authorization header approach for better compatibility
+      // Step 2: Build the WebSocket URL with the token embedded in the URL
+      // This is the correct method for browser-based WebSocket connections to Deepgram
       const queryParams = Object.entries(options)
         .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
         .join('&');
 
-      // Return the WebSocket URL with authorization header instead of token in URL
-      return {
-        url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
-        headers: {
-          Authorization: `Token ${tokenData.token}`, // Use Token format instead of Bearer
-        }
-      };
+      // Include the token directly in the URL - this is the correct approach per Deepgram docs
+      const url = `wss://api.deepgram.com/v1/listen?token=${encodeURIComponent(tokenData.token)}&${queryParams}`;
+
+      console.log('Built WebSocket URL with embedded token');
+
+      // Return the WebSocket URL (no headers needed for browser-based connections)
+      return { url };
     } catch (error) {
       console.error('Error getting Deepgram connection details:', error);
       throw new Error(error instanceof Error ? error.message : 'Failed to get Deepgram connection details');
@@ -196,23 +196,31 @@ export class DeepgramService {
       }
 
       if (!response.ok) {
-        // Log the full error response for debugging
         console.error('Legacy API returned an error:', data);
-        const errorMessage = data.details || data.error || `Server responded with status ${response.status}`;
-        console.error(`Detailed error: ${errorMessage}`);
-        throw new Error(errorMessage);
+        throw new Error(data.details || data.error || `Server responded with status ${response.status}`);
       }
 
-      if (!data.url || !data.headers?.Authorization) {
-        console.error('Invalid connection details received from legacy API:', data);
-        throw new Error('Invalid connection details received from server');
+      // The legacy API should return a URL with token, but if it returns headers, we need to convert
+      if (data.url && data.headers && data.headers.Authorization) {
+        // Extract token from Authorization header and embed it in the URL
+        const token = data.headers.Authorization.replace(/^(Token|Bearer)\s+/, '');
+        
+        // Build URL with token embedded
+        const baseUrl = data.url;
+        const separator = baseUrl.includes('?') ? '&' : '?';
+        const urlWithToken = `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+        
+        console.log('Converted legacy API response to token-in-URL format');
+        return { url: urlWithToken };
+      } else if (data.url) {
+        // URL already has token embedded
+        return { url: data.url };
+      } else {
+        throw new Error('Invalid legacy API response: missing URL');
       }
-
-      console.log('Successfully received connection details from legacy API');
-      return data;
     } catch (error) {
-      console.error('Error getting legacy connection details:', error);
-      throw new Error(error instanceof Error ? error.message : 'Failed to get Deepgram connection details');
+      console.error('Error using legacy websocket API:', error);
+      throw new Error(error instanceof Error ? error.message : 'Failed to get legacy connection details');
     }
   }
 
@@ -277,18 +285,13 @@ export class DeepgramService {
       try {
         // Get connection details from our API
         console.log('Requesting Deepgram connection details...');
-        const { url, headers } = await this.getConnectionDetails();
+        const { url } = await this.getConnectionDetails();
 
         // Create WebSocket with proper protocol and headers
         console.log('Creating WebSocket connection to Deepgram...');
         
-        // Use Sec-WebSocket-Protocol for browser compatibility per Deepgram docs
-        // Extract token from Authorization header
-        const token = headers.Authorization.replace('Token ', '');
-        console.log('WebSocket URL:', url.substring(0, 100) + '...');
-        
-        // Create WebSocket with Sec-WebSocket-Protocol header for authentication
-        this.socket = new WebSocket(url, ['token', token]);
+        // Create WebSocket with token in URL
+        this.socket = new WebSocket(url);
 
         // Set a connection timeout to handle hanging connections
         this.connectionTimeout = setTimeout(() => {
@@ -302,6 +305,11 @@ export class DeepgramService {
         // Set up WebSocket event handlers
         this.socket.onopen = () => {
           console.log('Deepgram WebSocket connection established successfully');
+          console.log('Connection details:', {
+            readyState: this.socket?.readyState,
+            url: url.substring(0, 100) + '...',
+            timestamp: new Date().toISOString()
+          });
           
           // Clear connection timeout
           if (this.connectionTimeout) {
@@ -316,15 +324,29 @@ export class DeepgramService {
         this.socket.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            console.log('Received message type:', data.type);
+            
             if (data.type === 'Results') {
               const transcript = data.channel?.alternatives?.[0]?.transcript || '';
               if (transcript) {
+                console.log('Transcript received:', { 
+                  text: transcript, 
+                  isFinal: data.is_final || false,
+                  confidence: data.channel?.alternatives?.[0]?.confidence 
+                });
                 this.onTranscript(transcript, data.is_final || false);
               }
             } else if (data.type === 'Error') {
+              console.error('Deepgram API error:', data);
               this.handleError(new Error(`Deepgram API error: ${data.message || 'Unknown error'}`));
             } else if (data.type === 'Metadata') {
-              console.log('Deepgram metadata received:', data);
+              console.log('Deepgram metadata received:', {
+                request_id: data.request_id,
+                model_info: data.model_info,
+                duration: data.duration
+              });
+            } else {
+              console.log('Unknown message type:', data.type, data);
             }
           } catch (error) {
             console.error('Error parsing WebSocket message:', error);
@@ -334,6 +356,11 @@ export class DeepgramService {
 
         this.socket.onerror = (error) => {
           console.error('Deepgram WebSocket error:', error);
+          console.error('Error details:', {
+            readyState: this.socket?.readyState,
+            timestamp: new Date().toISOString(),
+            url: url.substring(0, 100) + '...'
+          });
           
           // Clear connection timeout
           if (this.connectionTimeout) {
@@ -344,7 +371,7 @@ export class DeepgramService {
           // Provide more specific error messaging based on WebSocket state
           let errorMessage = 'WebSocket connection error';
           if (this.socket?.readyState === WebSocket.CONNECTING) {
-            errorMessage = 'Failed to establish WebSocket connection - check authentication and network';
+            errorMessage = 'Failed to establish WebSocket connection - this may indicate authentication issues or network problems';
           } else if (this.socket?.readyState === WebSocket.CLOSING) {
             errorMessage = 'WebSocket connection is closing unexpectedly';
           }
@@ -354,6 +381,13 @@ export class DeepgramService {
 
         this.socket.onclose = (event) => {
           console.log(`Deepgram connection closed: ${event.code} ${event.reason}`);
+          console.log('Close event details:', {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+            timestamp: new Date().toISOString(),
+            url: url.substring(0, 100) + '...'
+          });
           
           // Clear connection timeout
           if (this.connectionTimeout) {
@@ -361,13 +395,19 @@ export class DeepgramService {
             this.connectionTimeout = null;
           }
           
-          // Handle specific close codes
+          // Handle specific close codes with helpful error messages
           if (event.code === 1006) {
-            console.error('WebSocket closed abnormally (1006) - this usually indicates network issues or CORS problems');
+            console.error('WebSocket closed abnormally (1006) - Common causes:');
+            console.error('- Authentication method incorrect (should use token in URL for browsers)');
+            console.error('- Network connectivity issues');
+            console.error('- Firewall blocking WebSocket connections');
+            console.error('- Server-side token validation failure');
           } else if (event.code === 1011) {
             console.error('WebSocket closed due to server error (1011)');
           } else if (event.code === 4001) {
             console.error('WebSocket closed due to authentication error (4001)');
+          } else if (event.code === 1000) {
+            console.log('WebSocket closed normally (1000)');
           }
           
           this.handleDisconnect();

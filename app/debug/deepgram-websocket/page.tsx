@@ -85,7 +85,7 @@ export default function DeepgramWebSocketDebugPage() {
     try {
       addLog('Creating WebSocket connection...');
 
-      // Create WebSocket URL with token authentication
+      // Create WebSocket URL with token embedded in URL (correct method)
       const wsUrl = `wss://api.deepgram.com/v1/listen?` +
         `token=${encodeURIComponent(token)}&` +
         `language=en-US&` +

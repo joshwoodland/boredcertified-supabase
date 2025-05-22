@@ -6,9 +6,10 @@ export const dynamic = 'force-dynamic';
 /**
  * POST handler for setting up a Deepgram WebSocket connection
  * This is a legacy endpoint that now uses the new token API
+ * Updated to return URLs with embedded tokens for browser compatibility
  *
  * @param request The incoming request
- * @returns A response containing the WebSocket URL and headers
+ * @returns A response containing the WebSocket URL with embedded token
  */
 export async function POST(request: NextRequest) {
   try {
@@ -58,15 +59,19 @@ export async function POST(request: NextRequest) {
 
     console.log('[DEEPGRAM WEBSOCKET API] Successfully obtained token');
 
-    // Build the WebSocket URL with the provided options
+    // Build the WebSocket URL with the provided options and embedded token
     const queryParams = Object.entries(options)
       .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
       .join('&');
 
-    // Return the WebSocket URL and headers with the temporary token
-    // For temporary tokens from the token API, use Token format
+    // Return the WebSocket URL with embedded token (correct approach for browsers)
+    const url = `wss://api.deepgram.com/v1/listen?token=${encodeURIComponent(tokenData.token)}&${queryParams}`;
+    
+    console.log('[DEEPGRAM WEBSOCKET API] Built URL with embedded token');
+
     return NextResponse.json({
-      url: `wss://api.deepgram.com/v1/listen?${queryParams}`,
+      url: url,
+      // Keep headers for backward compatibility, but clients should use token in URL
       headers: {
         Authorization: `Token ${tokenData.token}`,
       },
