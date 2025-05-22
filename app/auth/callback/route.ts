@@ -107,21 +107,28 @@ export async function GET(request: NextRequest) {
       if (data.session) {
         console.log('[AUTH CALLBACK] Successfully created session for user:', data.session.user.email);
 
-        // Verify the session was properly set
-        const { data: sessionCheck } = await supabase.auth.getSession();
-        if (sessionCheck.session) {
-          console.log('[AUTH CALLBACK] Session verification successful');
+        // Verify the session was properly set with retries
+        let sessionVerified = false;
+        let retryCount = 0;
+        const maxRetries = 3;
 
-          // Double check the user matches
-          if (sessionCheck.session.user.id !== data.session.user.id) {
-            console.warn('[AUTH CALLBACK] Session user mismatch - clearing cookies and retrying');
-            // Clear all cookies again and retry the exchange
-            authCookies.forEach(cookie => cookieStore.delete(cookie.name));
-            const { data: retryData } = await supabase.auth.exchangeCodeForSession(code);
-            console.log('[AUTH CALLBACK] Retry session created for:', retryData.session?.user.email);
+        while (!sessionVerified && retryCount < maxRetries) {
+          const { data: sessionCheck } = await supabase.auth.getSession();
+          if (sessionCheck.session && sessionCheck.session.user.id === data.session.user.id) {
+            console.log('[AUTH CALLBACK] Session verification successful');
+            sessionVerified = true;
+          } else {
+            console.warn(`[AUTH CALLBACK] Session verification failed (attempt ${retryCount + 1}/${maxRetries})`);
+            retryCount++;
+            if (retryCount < maxRetries) {
+              // Wait a bit before retrying
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
           }
-        } else {
-          console.warn('[AUTH CALLBACK] Session verification failed - no session found after exchange');
+        }
+
+        if (!sessionVerified) {
+          console.error('[AUTH CALLBACK] Failed to verify session after multiple attempts');
         }
       } else {
         console.warn('[AUTH CALLBACK] No session data returned from exchange');
@@ -139,10 +146,18 @@ export async function GET(request: NextRequest) {
     console.error('[AUTH CALLBACK] No code parameter found in callback URL');
   }
 
+  // Add a small delay to ensure cookies are properly set before redirect
+  await new Promise(resolve => setTimeout(resolve, 50));
+
   // Create a response that redirects to the home page
   // Always use the original request URL's origin to ensure we stay on the same host
   // We already have the origin from the beginning of this function
   const response = NextResponse.redirect(new URL('/', origin));
+
+  // Add headers to prevent caching
+  response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
 
   // Log the response headers for debugging
   console.log('[AUTH CALLBACK] Redirect response created, redirecting to home page:', origin);

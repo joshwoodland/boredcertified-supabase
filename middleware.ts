@@ -29,6 +29,11 @@ export async function middleware(request: NextRequest) {
     return;
   }
 
+  // Allow auth callback route and immediate post-auth requests
+  if (pathname === '/auth/callback') {
+    return;
+  }
+
   return await updateSession(request);
 }
 

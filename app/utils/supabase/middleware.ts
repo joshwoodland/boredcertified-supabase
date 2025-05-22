@@ -131,27 +131,38 @@ export async function updateSession(request: NextRequest) {
     if (error) {
       console.error('[MIDDLEWARE] Error getting session:', error);
 
-      // If we have an invalid refresh token error, clear all auth cookies
+      // Only clear cookies and redirect for specific token errors and not immediately after OAuth
       if (error.message?.includes('Invalid Refresh Token') || error.code === 'refresh_token_not_found') {
-        console.log('[MIDDLEWARE] Invalid refresh token detected, clearing all auth cookies');
+        // Don't aggressively clear cookies if we're coming from the auth callback
+        const isFromAuthCallback = request.headers.get('referer')?.includes('/auth/callback');
+        
+        if (!isFromAuthCallback) {
+          console.log('[MIDDLEWARE] Invalid refresh token detected (not from auth callback), clearing all auth cookies');
 
-        // Find all auth cookies and remove them
-        const allCookies = Array.from(cookieStore).map(([name]) => name);
-        const authCookies = allCookies.filter(name => name.startsWith('sb-'));
+          // Find all auth cookies and remove them
+          const allCookies = Array.from(cookieStore).map(([name]) => name);
+          const authCookies = allCookies.filter(name => name.startsWith('sb-'));
 
-        authCookies.forEach(name => {
-          console.log(`[MIDDLEWARE] Forcibly removing invalid auth cookie: ${name}`);
-          response.cookies.set(name, '', {
-            maxAge: 0,
-            path: '/',
+          authCookies.forEach(name => {
+            console.log(`[MIDDLEWARE] Forcibly removing invalid auth cookie: ${name}`);
+            response.cookies.set(name, '', {
+              maxAge: 0,
+              path: '/',
+            });
           });
-        });
 
-        // Redirect to login page to force a clean login
-        return NextResponse.redirect(new URL('/login', request.url));
+          // Redirect to login page to force a clean login
+          return NextResponse.redirect(new URL('/login', request.url));
+        } else {
+          console.log('[MIDDLEWARE] Token error from auth callback, allowing passthrough for session establishment');
+          // Allow the request to pass through to give the session time to establish
+          return response;
+        }
       }
 
-      throw error;
+      // For other errors, don't redirect - let the client handle it
+      console.log('[MIDDLEWARE] Non-token error, allowing request to continue');
+      return response;
     }
 
     const session = data.session;
@@ -170,25 +181,33 @@ export async function updateSession(request: NextRequest) {
           if (refreshError) {
             console.error('[MIDDLEWARE] Error refreshing session:', refreshError);
 
-            // If refresh fails with token error, clear all auth cookies
+            // Only clear cookies and redirect for specific token errors and not immediately after OAuth
             if (refreshError.message?.includes('Invalid Refresh Token') ||
                 refreshError.code === 'refresh_token_not_found') {
-              console.log('[MIDDLEWARE] Invalid refresh token during refresh, clearing all auth cookies');
+              
+              // Don't aggressively clear cookies if we're coming from the auth callback
+              const isFromAuthCallback = request.headers.get('referer')?.includes('/auth/callback');
+              
+              if (!isFromAuthCallback) {
+                console.log('[MIDDLEWARE] Invalid refresh token during refresh (not from auth callback), clearing all auth cookies');
 
-              // Find all auth cookies and remove them
-              const allCookies = Array.from(cookieStore).map(([name]) => name);
-              const authCookies = allCookies.filter(name => name.startsWith('sb-'));
+                // Find all auth cookies and remove them
+                const allCookies = Array.from(cookieStore).map(([name]) => name);
+                const authCookies = allCookies.filter(name => name.startsWith('sb-'));
 
-              authCookies.forEach(name => {
-                console.log(`[MIDDLEWARE] Forcibly removing invalid auth cookie: ${name}`);
-                response.cookies.set(name, '', {
-                  maxAge: 0,
-                  path: '/',
+                authCookies.forEach(name => {
+                  console.log(`[MIDDLEWARE] Forcibly removing invalid auth cookie: ${name}`);
+                  response.cookies.set(name, '', {
+                    maxAge: 0,
+                    path: '/',
+                  });
                 });
-              });
 
-              // Redirect to login page to force a clean login
-              return NextResponse.redirect(new URL('/login', request.url));
+                // Redirect to login page to force a clean login
+                return NextResponse.redirect(new URL('/login', request.url));
+              } else {
+                console.log('[MIDDLEWARE] Refresh error from auth callback, allowing passthrough for session establishment');
+              }
             }
           } else if (refreshData.session) {
             console.log('[MIDDLEWARE] Session refreshed successfully for user:', refreshData.session.user.email);
@@ -208,7 +227,10 @@ export async function updateSession(request: NextRequest) {
       !request.nextUrl.pathname.startsWith('/static') &&
       !isAuthRoute;
 
-    if (isProtectedRoute && !session) {
+    // Don't redirect to login if we're coming from auth callback (give session time to establish)
+    const isFromAuthCallback = request.headers.get('referer')?.includes('/auth/callback');
+
+    if (isProtectedRoute && !session && !isFromAuthCallback) {
       console.log(`[MIDDLEWARE] Redirecting unauthenticated user to login from: ${request.nextUrl.pathname}`);
       return NextResponse.redirect(new URL('/login', request.url));
     }
@@ -216,6 +238,12 @@ export async function updateSession(request: NextRequest) {
     if (isAuthRoute && session) {
       console.log(`[MIDDLEWARE] Redirecting authenticated user to home from: ${request.nextUrl.pathname}`);
       return NextResponse.redirect(new URL('/', request.url));
+    }
+
+    // If we're in a potential race condition from auth callback, just let the request through
+    if (isProtectedRoute && !session && isFromAuthCallback) {
+      console.log(`[MIDDLEWARE] Allowing request from auth callback without session (race condition handling)`);
+      return response;
     }
 
     // Check response cookies for debugging
