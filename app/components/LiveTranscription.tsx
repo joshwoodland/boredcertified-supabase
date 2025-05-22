@@ -58,7 +58,21 @@ export default function LiveTranscription({
   const handleError = useCallback((error: Error) => {
     console.error('Deepgram error:', error);
     setNetworkError(true);
-    setNetworkErrorMessage(error.message || 'Connection error occurred');
+
+    // Provide more user-friendly error messages
+    let userMessage = 'Connection error occurred';
+
+    if (error.message.includes('API key not configured')) {
+      userMessage = 'Speech-to-text service is not properly configured on the server. Please contact support.';
+    } else if (error.message.includes('getUserMedia')) {
+      userMessage = 'Microphone access denied. Please allow microphone access in your browser settings.';
+    } else if (error.message.includes('Failed to get Deepgram token')) {
+      userMessage = 'Unable to connect to speech-to-text service. Please check your internet connection.';
+    } else {
+      userMessage = error.message || 'Connection error occurred';
+    }
+
+    setNetworkErrorMessage(userMessage);
 
     // Call the parent component's error handler if provided
     if (onErrorRef.current) {

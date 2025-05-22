@@ -524,9 +524,10 @@ export default function SupabasePatientNotes({
                         e.stopPropagation();
                         handleEditClick(note);
                       }}
-                      className="p-2 transition transform hover:scale-105 active:scale-95"
+                      className="p-2 flex items-center gap-2 transition transform hover:scale-105 active:scale-95"
                     >
                       <FiEdit className="text-purple-600 dark:text-purple-500 hover:drop-shadow-[0_0_8px_rgba(147,51,234,0.5)]" />
+                      <span className="text-purple-600 dark:text-purple-500">Edit</span>
                     </button>
                     <button
                       type="button"
@@ -534,9 +535,10 @@ export default function SupabasePatientNotes({
                         e.stopPropagation();
                         handleCopy(note);
                       }}
-                      className="p-2 transition transform hover:scale-105 active:scale-95"
+                      className="p-2 flex items-center gap-2 transition transform hover:scale-105 active:scale-95"
                     >
                       <FiCopy className="text-green-600 dark:text-green-500 hover:drop-shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                      <span className="text-green-600 dark:text-green-500">Copy</span>
                     </button>
                     <button
                       type="button"
@@ -559,9 +561,10 @@ export default function SupabasePatientNotes({
                         e.stopPropagation();
                         handleSendWebhook(note);
                       }}
-                      className="p-2 transition transform hover:scale-105 active:scale-95"
+                      className="p-2 flex items-center gap-2 transition transform hover:scale-105 active:scale-95"
                     >
                       <FiSend className="text-blue-600 dark:text-blue-500 hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                      <span className="text-blue-600 dark:text-blue-500">Ship It</span>
                     </button>
                     <button
                       type="button"

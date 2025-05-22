@@ -23,6 +23,7 @@ export class DeepgramService {
    * @param onTranscript Callback function that receives transcription text and final status
    * @param onError Callback function that receives errors
    * @param audioDeviceId Optional audio device ID to use for capture (for loopback support)
+   * @param lowEchoCancellation Whether to use low echo cancellation settings
    */
   constructor(
     private onTranscript: (text: string, isFinal: boolean) => void,
@@ -32,16 +33,36 @@ export class DeepgramService {
   ) {}
 
   /**
-   * Gets a temporary token from our API endpoint
+   * Gets WebSocket connection details from our API endpoint
    */
-  private async getToken(): Promise<string> {
-    const response = await fetch('/api/deepgram/token');
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Failed to get Deepgram token: ${error}`);
+  private async getConnectionDetails() {
+    try {
+      const options = {
+        language: 'en-US',
+        model: 'nova-2',
+        punctuate: true,
+        diarize: false,
+        smart_format: true,
+      };
+
+      const response = await fetch('/api/deepgram/websocket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(options),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Failed to get connection details: ${error}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting connection details:', error);
+      throw error;
     }
-    const data = await response.json();
-    return data.token;
   }
 
   /**
@@ -62,8 +83,8 @@ export class DeepgramService {
             ...(this.audioDeviceId ? { deviceId: { exact: this.audioDeviceId } } : {}),
             echoCancellation: false,
             noiseSuppression: false,
-            autoGainControl: false
-          }
+            autoGainControl: false,
+          },
         };
         console.log('Using low echo cancellation mode');
       } else {
@@ -75,43 +96,41 @@ export class DeepgramService {
 
       this.stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
 
-      // Get temporary token from our API
-      const token = await this.getToken();
+      // Get connection details from our API
+      const { url, headers } = await this.getConnectionDetails();
 
-      // Create WebSocket connection to Deepgram
-      // Using direct WebSocket connection instead of SDK for browser compatibility
-      const options = {
-        language: 'en-US',
-        model: 'nova-2',
-        punctuate: true,
-        diarize: false,
-        smart_format: true
+      // Create WebSocket with the provided URL and headers
+      this.socket = new WebSocket(url);
+      
+      // Add authorization header to the WebSocket connection
+      this.socket.onopen = () => {
+        if (this.socket) {
+          // Set the authorization header
+          this.socket.send(JSON.stringify({ 
+            type: 'header',
+            headers: headers 
+          }));
+          console.log('Deepgram connection established');
+          this.reconnectAttempts = 0;
+          this.startRecording();
+        }
       };
-
-      // Build URL with query parameters
-      const queryParams = Object.entries(options)
-        .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
-        .join('&');
-
-      // Create WebSocket with temporary token
-      this.socket = new WebSocket(
-        `wss://api.deepgram.com/v1/listen?${queryParams}`,
-        ['token', token]
-      );
 
       // Set up WebSocket event handlers
-      this.socket.onopen = () => {
-        console.log('Deepgram connection established');
-        this.startRecording();
-      };
-
       this.socket.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'Results') {
-          const transcript = data.channel?.alternatives?.[0]?.transcript || '';
-          if (transcript) {
-            this.onTranscript(transcript, data.is_final || false);
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'Results') {
+            const transcript = data.channel?.alternatives?.[0]?.transcript || '';
+            if (transcript) {
+              this.onTranscript(transcript, data.is_final || false);
+            }
+          } else if (data.type === 'Error') {
+            this.handleError(new Error(`Deepgram API error: ${data.message || 'Unknown error'}`));
           }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+          this.handleError(new Error('Invalid WebSocket message format'));
         }
       };
 
@@ -182,6 +201,7 @@ export class DeepgramService {
       this.reconnectTimeout = setTimeout(() => this.reconnect(), delay);
     } else {
       this.onError(new Error('Maximum reconnection attempts reached'));
+      this.stop(false); // Ensure cleanup without resetting attempts
     }
   }
 
@@ -189,7 +209,7 @@ export class DeepgramService {
    * Attempts to reconnect to Deepgram
    */
   private async reconnect() {
-    this.stop(false);
+    this.stop(false); // Stop without resetting attempts
     await this.start();
   }
 
@@ -204,31 +224,19 @@ export class DeepgramService {
       this.reconnectTimeout = null;
     }
 
-    // Stop media recorder if it's recording
+    // Stop media recorder
     if (this.mediaRecorder?.state === 'recording') {
-      try {
-        this.mediaRecorder.stop();
-      } catch (e) {
-        console.warn('Error stopping media recorder:', e);
-      }
+      this.mediaRecorder.stop();
     }
 
     // Close WebSocket connection
     if (this.socket) {
-      try {
-        this.socket.close();
-      } catch (e) {
-        console.warn('Error closing WebSocket:', e);
-      }
+      this.socket.close();
     }
 
     // Stop all audio tracks
     if (this.stream) {
-      try {
-        this.stream.getTracks().forEach(track => track.stop());
-      } catch (e) {
-        console.warn('Error stopping audio tracks:', e);
-      }
+      this.stream.getTracks().forEach(track => track.stop());
     }
 
     // Reset instance variables

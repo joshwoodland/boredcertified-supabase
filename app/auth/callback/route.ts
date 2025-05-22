@@ -24,6 +24,21 @@ export async function GET(request: NextRequest) {
       const allCookies = cookieStore.getAll();
       console.log('[AUTH CALLBACK] Cookies before exchange:', allCookies.map(c => c.name));
 
+      // Clear any existing auth cookies before setting new ones
+      const authCookies = allCookies.filter(cookie => 
+        cookie.name.includes('sb-') || 
+        cookie.name.includes('-auth-token') ||
+        cookie.name.includes('supabase')
+      );
+
+      console.log('[AUTH CALLBACK] Clearing existing auth cookies:', authCookies.map(c => c.name));
+      
+      // Remove all existing auth cookies
+      authCookies.forEach(cookie => {
+        cookieStore.delete(cookie.name);
+        console.log(`[AUTH CALLBACK] Deleted cookie: ${cookie.name}`);
+      });
+
       // Note: For OAuth callback, we need special cookie handling that the standard
       // client doesn't provide, so we use createServerClient directly
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -52,12 +67,14 @@ export async function GET(request: NextRequest) {
             set(name: string, value: string, options: CookieOptions) {
               try {
                 console.log(`[AUTH CALLBACK] Setting cookie: ${name}, options:`, options);
+                // Always set new cookies with proper security attributes
                 cookieStore.set(name, value, {
                   ...options,
-                  // Ensure cookies are properly set with secure attributes
                   secure: process.env.NODE_ENV === 'production',
                   sameSite: 'lax',
-                  path: '/'
+                  path: '/',
+                  // Ensure cookies are properly scoped
+                  domain: new URL(origin).hostname
                 });
               } catch (error) {
                 console.error(`[AUTH CALLBACK] Error setting cookie ${name}:`, error);
@@ -68,7 +85,8 @@ export async function GET(request: NextRequest) {
                 console.log(`[AUTH CALLBACK] Removing cookie: ${name}`);
                 cookieStore.set(name, '', {
                   ...options,
-                  maxAge: 0,
+                  maxAge: -1,
+                  expires: new Date(0),
                   path: '/'
                 });
               } catch (error) {
@@ -94,6 +112,15 @@ export async function GET(request: NextRequest) {
         const { data: sessionCheck } = await supabase.auth.getSession();
         if (sessionCheck.session) {
           console.log('[AUTH CALLBACK] Session verification successful');
+          
+          // Double check the user matches
+          if (sessionCheck.session.user.id !== data.session.user.id) {
+            console.warn('[AUTH CALLBACK] Session user mismatch - clearing cookies and retrying');
+            // Clear all cookies again and retry the exchange
+            authCookies.forEach(cookie => cookieStore.delete(cookie.name));
+            const { data: retryData } = await supabase.auth.exchangeCodeForSession(code);
+            console.log('[AUTH CALLBACK] Retry session created for:', retryData.session?.user.email);
+          }
         } else {
           console.warn('[AUTH CALLBACK] Session verification failed - no session found after exchange');
         }

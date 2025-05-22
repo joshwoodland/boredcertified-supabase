@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { createClient } from '@/app/utils/supabase/server';
 import { createAdminClient } from '@/app/utils/supabase/server-admin';
 
+export const dynamic = 'force-dynamic';
+
 type CookieObject = { name: string; value: string | undefined };
 
 export async function GET(_req: NextRequest) {

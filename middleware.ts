@@ -2,6 +2,11 @@ import { type NextRequest } from 'next/server';
 import { updateSession } from '@/app/utils/supabase/middleware';
 
 export async function middleware(request: NextRequest) {
+  // Skip auth check for Deepgram endpoints
+  const pathname = request.nextUrl.pathname.toLowerCase();
+  if (pathname === '/api/deepgram/websocket' || pathname.startsWith('/api/deepgram/websocket/')) {
+    return;
+  }
   return await updateSession(request);
 }
 
@@ -15,11 +20,8 @@ export const config = {
      * - Public assets like images, videos, and other media
      * - /api/auth-test (our test endpoint)
      * - /auth/callback (auth callback route)
-     * Feel free to modify this pattern to include more paths.
-     *
-     * Also match all API routes to ensure authentication is properly handled.
+     * - /api/deepgram/websocket (Deepgram WebSocket endpoint)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api/auth-test|auth/callback|background.mp4|video-poster.png|logo.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4|webm)$).*)',
-    '/api/:path*',
+    '/((?!_next/static|_next/image|favicon.ico|api/auth-test|auth/callback|api/deepgram/websocket|background.mp4|video-poster.png|logo.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4|webm)$).*)',
   ],
 };
