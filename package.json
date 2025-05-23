@@ -20,6 +20,7 @@
     "env:test": "node test-env.js"
   },
   "dependencies": {
+    "@deepgram/sdk": "^4.2.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.4",
     "@tailwindcss/typography": "^0.5.10",

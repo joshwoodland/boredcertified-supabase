@@ -12,7 +12,8 @@ export async function middleware(request: NextRequest) {
   if (pathname === '/api/deepgram/websocket' ||
       pathname.startsWith('/api/deepgram/websocket/') ||
       pathname === '/api/deepgram/token' ||
-      pathname === '/api/deepgram/token-test') {
+      pathname === '/api/deepgram/token-test' ||
+      pathname === '/api/deepgram/authenticate') {
     return;
   }
 
@@ -58,6 +59,6 @@ export const config = {
      * - /api/debug-page (HTML debug page)
      * - /api/direct-key-test (direct API key test)
      */
-    '/((?!_next/static|_next/image|favicon.ico|api/auth-test|auth/callback|api/clear-auth-cookies|api/deepgram/websocket|api/deepgram/token|api/deepgram/token-test|debug/deepgram|debug/deepgram-token|debug/deepgram-debug|api/debug-env|api/test-deepgram-key|api/deepgram-direct-test|api/env-test|api/debug-page|api/direct-key-test|background.mp4|video-poster.png|logo.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4|webm)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api/auth-test|auth/callback|api/clear-auth-cookies|api/deepgram/websocket|api/deepgram/token|api/deepgram/token-test|api/deepgram/authenticate|debug/deepgram|debug/deepgram-token|debug/deepgram-debug|api/debug-env|api/test-deepgram-key|api/deepgram-direct-test|api/env-test|api/debug-page|api/direct-key-test|background.mp4|video-poster.png|logo.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4|webm)$).*)',
   ],
 };

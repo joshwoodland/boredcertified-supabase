@@ -3,6 +3,8 @@ import { Inter, Montserrat } from 'next/font/google'
 import ThemeProvider from './components/ThemeProvider'
 import { AppSettingsProvider } from './providers/AppSettingsProvider'
 import DeepgramSecurityCheck from './components/DeepgramSecurityCheck'
+import { DeepgramContextProvider } from './context/DeepgramContextProvider'
+import { MicrophoneContextProvider } from './context/MicrophoneContextProvider'
 
 const inter = Inter({ subsets: ['latin'] })
 const montserrat = Montserrat({
@@ -72,11 +74,15 @@ export default function RootLayout({
       </head>
       <body className={`${inter.className} ${montserrat.variable} min-h-screen dark:bg-dark-main bg-gray-50`}>
         <AppSettingsProvider>
-          <ThemeProvider />
-          <DeepgramSecurityCheck />
-          <main className="min-h-screen">
-            {children}
-          </main>
+          <DeepgramContextProvider>
+            <MicrophoneContextProvider>
+              <ThemeProvider />
+              <DeepgramSecurityCheck />
+              <main className="min-h-screen">
+                {children}
+              </main>
+            </MicrophoneContextProvider>
+          </DeepgramContextProvider>
         </AppSettingsProvider>
       </body>
     </html>
