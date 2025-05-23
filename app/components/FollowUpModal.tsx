@@ -9,11 +9,6 @@ import RecoveryPrompt from './RecoveryPrompt';
 import { saveChecklistToCache, getChecklistFromCache, getMostRecentChecklist } from '../utils/checklistCache';
 import { formatSoapNote } from '../utils/formatSoapNote';
 
-const LiveTranscription = dynamic(
-  () => import('./LiveTranscription'),
-  { ssr: false }
-);
-
 interface FollowUpModalProps {
   lastVisitNote: string;
   patientId: string;
@@ -900,33 +895,6 @@ export default function FollowUpModal({
               <p className="text-blue-600 dark:text-blue-400 font-medium">
                 Transcript saved - click "Resume Recording" to continue from where you left off
               </p>
-            </div>
-          </div>
-        )}
-
-        {/* Hidden LiveTranscription component - hidden but still functional */}
-        {isRecording && (
-          <div className="hidden">
-            <LiveTranscription
-              isRecording={isRecording}
-              onTranscriptUpdate={handleTranscriptUpdate}
-              lowEchoCancellation={settings?.lowEchoCancellation || false}
-            />
-          </div>
-        )}
-
-        {/* Visible transcript UI replacement */}
-        {isRecording && (
-          <div className="mt-4 mb-6 w-full bg-gray-800 dark:bg-gray-800 p-6 rounded-2xl relative shadow-lg" style={{ height: '200px', overflowY: 'auto' }}>
-            <p className="text-white whitespace-pre-wrap leading-relaxed">
-              {transcript || 'Listening...'}
-            </p>
-
-            <div className="absolute top-4 right-4 flex items-center gap-2">
-              <span className="flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-              </span>
             </div>
           </div>
         )}

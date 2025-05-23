@@ -6,11 +6,6 @@ import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
 
-const LiveTranscription = dynamic(
-  () => import('./LiveTranscription'),
-  { ssr: false }
-);
-
 interface InitialVisitModalProps {
   onRecordingComplete: (blob: Blob, transcript: string, isInitialEvaluation: boolean) => void;
   onClose: () => void;
@@ -314,15 +309,6 @@ export default function InitialVisitModal({
                   Recording in progress - speak clearly and at a normal pace
                 </p>
               </div>
-            </div>
-
-            {/* Hidden transcript component - will still function but not be visible */}
-            <div className="hidden">
-              <LiveTranscription
-                isRecording={isRecording}
-                onTranscriptUpdate={handleTranscriptUpdate}
-                lowEchoCancellation={settings?.lowEchoCancellation || false}
-              />
             </div>
 
             {/* Placeholder for transcript UI */}

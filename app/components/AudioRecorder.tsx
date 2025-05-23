@@ -1,15 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState, useRef, Suspense } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import RecoveryPrompt from './RecoveryPrompt';
 // Audio storage imports removed
-
-const LiveTranscription = dynamic(
-  () => import('./LiveTranscription'),
-  { ssr: false }
-);
 
 interface AudioRecorderProps {
   onRecordingComplete: (blob: Blob, transcript: string) => void;
@@ -476,24 +471,22 @@ export default function AudioRecorder({
           w-full max-w-2xl transition-all duration-300 ease-in-out mt-10
           ${isRecording ? 'opacity-100 translate-y-0' : 'opacity-80 translate-y-2'}
         `}>
-          <Suspense fallback={
-            <div className="bg-gray-800 dark:bg-gray-800 p-6 rounded-2xl h-[200px] relative overflow-hidden">
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-pulse flex space-x-4">
-                  <div className="h-3 w-3 bg-gray-600 dark:bg-gray-600 rounded-full"></div>
-                  <div className="h-3 w-3 bg-gray-600 dark:bg-gray-600 rounded-full"></div>
-                  <div className="h-3 w-3 bg-gray-600 dark:bg-gray-600 rounded-full"></div>
+          <div className="bg-gray-800 dark:bg-gray-800 p-6 rounded-2xl min-h-[200px] relative overflow-hidden">
+            <div className="text-center">
+              <h3 className="text-white text-lg font-semibold mb-4">Live Transcription</h3>
+              {(transcript || finalTranscript) ? (
+                <div className="text-gray-300 text-left bg-gray-900 p-4 rounded-lg">
+                  <p className={isRecording ? 'animate-pulse' : ''}>
+                    {finalTranscript || transcript || "No transcription yet..."}
+                  </p>
                 </div>
-              </div>
+              ) : (
+                <div className="text-gray-500 italic">
+                  {isRecording ? "Listening..." : "Start recording to see live transcription"}
+                </div>
+              )}
             </div>
-          }>
-            <LiveTranscription
-              isRecording={isRecording}
-              onTranscriptUpdate={handleTranscriptUpdate}
-              showAudioSettings={showAudioSettings}
-              lowEchoCancellation={lowEchoCancellation}
-            />
-          </Suspense>
+          </div>
         </div>
       )}
     </div>
