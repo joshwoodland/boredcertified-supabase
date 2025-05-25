@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAppSettings } from './providers/AppSettingsProvider';
 import SupabasePatientList from './components/SupabasePatientList';
-import AudioRecorder from './components/AudioRecorder';
+import LiveDeepgramRecorder from './components/LiveDeepgramRecorder';
 import SupabasePatientNotes from './components/SupabasePatientNotes';
 import Settings from './components/Settings';
 import SoapNoteGenerator from './components/SoapNoteGenerator';
@@ -1059,11 +1059,12 @@ export default function Home() {
         <AudioRecordings isOpen={isAudioRecordingsOpen} onClose={() => setIsAudioRecordingsOpen(false)} />
       )}
 
-      {/* Audio Recorder - Only display during active recording sessions */}
+      {/* Live Deepgram Recorder - Only display during active recording sessions */}
       {selectedPatientId && !isManualInput && isActiveRecordingSession && !isProcessing && (
-        <div className="hidden">
-          <AudioRecorder
-            onRecordingComplete={handleRecordingComplete}
+        <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-40 max-w-md">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recording Session Active</div>
+          <LiveDeepgramRecorder
+            onRecordingComplete={(audioBlob, transcript) => handleRecordingComplete(audioBlob, transcript, false)}
             isProcessing={isProcessing}
             isRecordingFromModal={isRecordingFromModal}
             onTranscriptUpdate={handleTranscriptUpdate}

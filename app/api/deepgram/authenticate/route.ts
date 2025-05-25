@@ -5,17 +5,38 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
-    // For development, return the API key directly
-    if (process.env.NODE_ENV === "development" || process.env.DEEPGRAM_ENV === "development") {
+    // Check if we're in a development environment
+    // This includes: npm run dev, vercel dev, or explicit development flag
+    const isLocalDevelopment = 
+      process.env.NODE_ENV === "development" || 
+      process.env.DEEPGRAM_ENV === "development" ||
+      process.env.VERCEL_ENV === "development" ||
+      (!process.env.VERCEL_ENV && !process.env.VERCEL) || // Local development without Vercel
+      process.env.VERCEL_URL?.includes('localhost') ||
+      request.url.includes('localhost');
+
+    console.log('[DEEPGRAM AUTH] Environment check:', {
+      NODE_ENV: process.env.NODE_ENV,
+      DEEPGRAM_ENV: process.env.DEEPGRAM_ENV,
+      VERCEL_ENV: process.env.VERCEL_ENV,
+      VERCEL: process.env.VERCEL,
+      VERCEL_URL: process.env.VERCEL_URL,
+      requestUrl: request.url,
+      isLocalDevelopment
+    });
+
+    // For development environments, return the API key directly
+    if (isLocalDevelopment) {
       const apiKey = process.env.DEEPGRAM_API_KEY;
       if (!apiKey) {
+        console.error('[DEEPGRAM AUTH] Missing DEEPGRAM_API_KEY in development');
         return NextResponse.json(
           { error: "Deepgram API key not configured" },
           { status: 500 }
         );
       }
       
-      console.log('[DEEPGRAM AUTH] Using direct API key for development');
+      console.log('[DEEPGRAM AUTH] Using direct API key for development environment');
       return NextResponse.json({
         key: apiKey,
       });

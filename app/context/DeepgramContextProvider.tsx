@@ -33,11 +33,27 @@ interface DeepgramContextProviderProps {
 }
 
 const getApiKey = async (): Promise<string> => {
+  console.log('[DEEPGRAM CONTEXT] Fetching API key from /api/deepgram/authenticate');
   const response = await fetch("/api/deepgram/authenticate", { cache: "no-store" });
+  
+  console.log('[DEEPGRAM CONTEXT] API key response:', {
+    status: response.status,
+    statusText: response.statusText,
+    ok: response.ok
+  });
+  
   if (!response.ok) {
-    throw new Error(`Failed to get API key: ${response.status}`);
+    const errorText = await response.text();
+    console.error('[DEEPGRAM CONTEXT] Failed to get API key:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText
+    });
+    throw new Error(`Failed to get API key: ${response.status} - ${errorText}`);
   }
+  
   const result = await response.json();
+  console.log('[DEEPGRAM CONTEXT] API key received successfully');
   return result.key;
 };
 

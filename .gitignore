@@ -56,3 +56,5 @@ Creating my own Lindy/
 # Temporary files
 /temp/
 /tmp/
+.env.vercel.dev
+.env.vercel.local
