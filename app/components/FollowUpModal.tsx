@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
+import LiveDeepgramRecorder from './LiveDeepgramRecorder';
 import { saveChecklistToCache, getChecklistFromCache, getMostRecentChecklist } from '../utils/checklistCache';
 import { formatSoapNote } from '../utils/formatSoapNote';
 
@@ -30,16 +31,15 @@ export default function FollowUpModal({
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState(''); // Current/interim transcript
   const [finalTranscript, setFinalTranscript] = useState(''); // Accumulated final transcript
-  // Removed unused isProcessing state
   const [error, setError] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [preserveTranscript, setPreserveTranscript] = useState(false);
   const [editableTranscript, setEditableTranscript] = useState('');
+  const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
 
   // Use the recording safeguard hook
   const {
     recoverySession,
-    // lastBackupTime not used but available from the hook
     handleRecoverTranscript,
     handleDiscardRecovery,
     clearRecordingData
@@ -57,18 +57,9 @@ export default function FollowUpModal({
     setEditableTranscript(recoveredText);
     setIsEditMode(true);
 
-    // Create a placeholder audio blob
-    audioBlob.current = new Blob([], { type: 'audio/wav' });
-
     // Clear the recovery session after applying it
     handleRecoverTranscript(recoveredText);
   }, [handleRecoverTranscript]);
-
-  // Audio recording refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  // Removed unused refs: mediaRecorderRef, chunksRef
-  const audioBlob = useRef<Blob | null>(null);
 
   // Keep track of which keywords have been processed to avoid double-counting
   const processedKeywordsRef = useRef<Map<string, Set<string>>>(new Map());
@@ -140,18 +131,6 @@ export default function FollowUpModal({
     loadFollowUpItems();
   }, [lastVisitNote, patientId, noteId]);
 
-  // Cleanup recording resources on unmount
-  useEffect(() => {
-    return () => {
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(console.error);
-      }
-    };
-  }, []);
-
   /**
    * Helper function to check if a keyword appears as a whole word/phrase in text
    * This prevents matching parts of other words (e.g., "the" in "therapy")
@@ -201,260 +180,81 @@ export default function FollowUpModal({
     return false;
   }, [matchesWholeWord]);
 
-  /**
-   * Get the appropriate background color class based on points accumulated
-   */
-  const getCompletionColor = useCallback((item: FollowUpItem) => {
-    const points = itemPoints[item.id] || 0;
-    const threshold = item.threshold || 4; // Default threshold if not specified
+  // Handle transcript updates from LiveDeepgramRecorder
+  const handleTranscriptUpdate = useCallback((newTranscript: string) => {
+    setTranscript(newTranscript);
+    setFinalTranscript(newTranscript);
 
-    // Calculate percentage of completion
-    const percentage = Math.min(points / threshold, 1);
-
-    // No discussion yet - default state
-    if (points === 0) return 'bg-gray-100 dark:bg-gray-700 dark:text-gray-200';
-
-    if (percentage < 0.33) {
-      // Early discussion (orange)
-      return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300';
-    } else if (percentage < 0.66) {
-      // Moderate discussion (yellow/gold)
-      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
-    } else if (percentage < 1) {
-      // Substantial discussion (light green)
-      return 'bg-lime-100 text-lime-800 dark:bg-lime-900/30 dark:text-lime-300';
-    } else {
-      // Fully discussed (full green)
-      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-    }
-  }, [itemPoints]);
-
-  /**
-   * Get item progress percentage
-   */
-  const getItemProgress = useCallback((item: FollowUpItem) => {
-    const points = itemPoints[item.id] || 0;
-    const threshold = item.threshold || 4;
-    return Math.min(Math.round((points / threshold) * 100), 100);
-  }, [itemPoints]);
-
-  /**
-   * Analyze transcript for keywords and update points
-   * This runs on every transcript update
-   */
-  useEffect(() => {
-    // Only run when we have items and transcript
-    if (!transcript || transcript.length === 0 || items.length === 0 || !isRecording) return;
-
-    // Analyze the full transcript every time
-    const transcriptLower = transcript.toLowerCase();
-
-    // Create a new points object based on the existing one
-    const newItemPoints = { ...itemPoints };
-
-    // For each item, check for keywords in the transcript
-    items.forEach((item) => {
-      // Track keywords we've detected
-      const detectedKeywords = new Set<string>();
-
-      // Get or initialize the processed keywords set for this item
-      if (!processedKeywordsRef.current.has(item.id)) {
-        processedKeywordsRef.current.set(item.id, new Set<string>());
-      }
-      const processedKeywords = processedKeywordsRef.current.get(item.id)!;
-
-      // Process keywords for all categories
-      if (item.keywords) {
+    // Analyze transcript for keywords and update points
+    const currentTranscriptLength = newTranscript.length;
+    
+    // Only analyze new content to avoid double-counting
+    if (currentTranscriptLength > lastAnalyzedLengthRef.current) {
+      const newContent = newTranscript.slice(lastAnalyzedLengthRef.current);
+      
+      // Process each item for keyword matches in the new content
+      items.forEach(item => {
+        if (!processedKeywordsRef.current.has(item.id)) {
+          processedKeywordsRef.current.set(item.id, new Set());
+        }
+        
+        const processedKeywords = processedKeywordsRef.current.get(item.id)!;
+        
         item.keywords.forEach(keyword => {
-          const keywordLower = keyword.toLowerCase();
-
-          // Skip very common words that might cause false positives
-          if (['the', 'and', 'that', 'with', 'for', 'this', 'patient'].includes(keywordLower)) {
-            return;
-          }
-
-          // Only process keywords we haven't seen before in this session
-          if (!processedKeywords.has(keywordLower) && matchesWordVariation(transcriptLower, keywordLower)) {
-            // Add to detected and processed sets
-            detectedKeywords.add(keywordLower);
-            processedKeywords.add(keywordLower);
-
-            // Calculate point value
-            let pointValue: number;
-
-            // Count how many keywords we've already processed for this item
-            const processedCount = processedKeywords.size;
-
-            // Apply diminishing returns based on how many keywords we've seen
-            if (processedCount <= 1) {
-              // First keyword
-              pointValue = 0.5;
-            } else if (processedCount <= 3) {
-              // 2-3 keywords
-              pointValue = 0.25;
-            } else {
-              // 4+ keywords
-              pointValue = 0.125;
+          if (!processedKeywords.has(keyword) && matchesWordVariation(newContent.toLowerCase(), keyword.toLowerCase())) {
+            // Mark this keyword as processed for this item
+            processedKeywords.add(keyword);
+            
+            // Add points for this item
+            setItemPoints(prev => ({
+              ...prev,
+              [item.id]: (prev[item.id] || 0) + 1
+            }));
+            
+            // Auto-complete items that reach the threshold
+            if ((itemPoints[item.id] || 0) + 1 >= item.threshold) {
+              setCompletedIds(prev => [...prev.filter(id => id !== item.id), item.id]);
             }
-
-            // Extra points for important keywords (first few in the list)
-            if (item.keywords.indexOf(keyword) < 5) {
-              pointValue += 0.2;
-            }
-
-            // Add points to this item
-            newItemPoints[item.id] = (newItemPoints[item.id] || 0) + pointValue;
           }
         });
-      }
-
-      // Add diversity bonus if we detected multiple new keywords
-      if (detectedKeywords.size >= 3) {
-        const diversityBonus = Math.min(1, (detectedKeywords.size - 2) * 0.5);
-        newItemPoints[item.id] = (newItemPoints[item.id] || 0) + diversityBonus;
-      }
-    });
-
-    // Update the points state
-    setItemPoints(newItemPoints);
-
-    // Update completed ids based on thresholds
-    const newCompletedIds = Object.entries(newItemPoints)
-      .filter(([id, points]) => {
-        const item = items.find(i => i.id === id);
-        return item && points >= item.threshold;
-      })
-      .map(([id]) => id);
-
-    setCompletedIds(newCompletedIds);
-
-    // Update the last analyzed length
-    lastAnalyzedLengthRef.current = transcript.length;
-  }, [transcript, items, matchesWordVariation, itemPoints]);
-
-  // Handle transcript updates from the LiveTranscription component
-  const handleTranscriptUpdate = useCallback((newTranscript: string, isFinal: boolean) => {
-    // Always update the displayed transcript for user feedback
-    setTranscript(newTranscript.trim());
-
-    // Only update the final transcript when we get final results
-    if (isFinal) {
-      setFinalTranscript(prevFinalTranscript => {
-        // If this is a resumed session, handle transcript differently to avoid duplicates
-        if (isResumedSessionRef.current) {
-          // Check if the new transcript contains content that's already in the previous transcript
-          // This helps prevent duplicates when Deepgram re-transcribes parts of the conversation
-          const existingTranscript = prevFinalTranscript || '';
-
-          // If we have a previous transcript, check for potential duplicates
-          if (existingTranscript) {
-            // Add a separator if we're resuming recording
-            if (previousTranscriptLengthRef.current > 0 &&
-                previousTranscriptLengthRef.current === existingTranscript.length) {
-              // Add a newline to separate the previous and new content
-              return `${existingTranscript}\n\n[Resumed recording]\n${newTranscript.trim()}`;
-            }
-          }
-        }
-
-        // Standard handling for non-resumed sessions or if we couldn't detect duplicates
-        const updatedTranscript = prevFinalTranscript
-          ? `${prevFinalTranscript} ${newTranscript}`
-          : newTranscript;
-
-        return updatedTranscript.trim();
       });
+      
+      lastAnalyzedLengthRef.current = currentTranscriptLength;
     }
+  }, [items, itemPoints, matchesWordVariation]);
+
+  // Handle recording completion from LiveDeepgramRecorder
+  const handleRecordingComplete = useCallback((blob: Blob, transcriptText: string) => {
+    setFinalTranscript(transcriptText);
+    setEditableTranscript(transcriptText);
+    setIsEditMode(true);
+    setIsRecording(false);
   }, []);
 
-  // Toggle an item's completion status manually
+  // Toggle item completion
   const toggleItem = (id: string) => {
-    setCompletedIds(prev =>
-      prev.includes(id) ? prev.filter(itemId => itemId !== id) : [...prev, id]
+    setCompletedIds(prev => 
+      prev.includes(id) 
+        ? prev.filter(itemId => itemId !== id)
+        : [...prev, id]
     );
   };
 
   // Group items by category
   const getItemsByCategory = () => {
-    // Define the order of categories
-    const categoryOrder = ['clinical-expertise', 'medications', 'diagnoses', 'important', 'sleep', 'exercise', 'diet', 'substances'];
-
-    // Create a map of categories to items
-    const categoryMap: Record<string, FollowUpItem[]> = {};
-
+    const categories: Record<string, FollowUpItem[]> = {};
+    
     items.forEach(item => {
-      if (!categoryMap[item.category]) {
-        categoryMap[item.category] = [];
+      if (!categories[item.category]) {
+        categories[item.category] = [];
       }
-      categoryMap[item.category].push(item);
+      categories[item.category].push(item);
     });
-
-    // Return categories in the defined order
-    return categoryOrder
-      .filter(category => categoryMap[category] && categoryMap[category].length > 0)
-      .map(category => ({
-        category,
-        items: categoryMap[category]
-      }));
-  };
-
-  // Start recording function
-  const startRecording = async () => {
-    try {
-      // Reset state
-      setError(null);
-      setTranscript('');
-      setFinalTranscript('');
-      setItemPoints({}); // Reset accumulated points
-      setCompletedIds([]);
-
-      // Reset the refs used for transcript analysis
-      processedKeywordsRef.current = new Map();
-      lastAnalyzedLengthRef.current = 0;
-
-      // Reset the transcript tracking refs
-      previousTranscriptLengthRef.current = 0;
-      isResumedSessionRef.current = false;
-
-      // Check if mediaDevices API is available
-      if (!navigator || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Media devices API not available in this browser or context');
-      }
-
-      // Get audio stream
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-
-      setIsRecording(true);
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      setError(error instanceof Error ? error.message : 'Failed to start recording');
-
-      // Clean up if there was an error
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-        audioStreamRef.current = null;
-      }
-    }
-  };
-
-  // Stop recording function
-  const stopRecording = () => {
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(track => track.stop());
-      audioStreamRef.current = null;
-    }
-
-    setIsRecording(false);
-
-    // Create a minimal empty audio blob - we don't need to store audio
-    const emptyBlob = new Blob([], { type: 'audio/wav' });
-    audioBlob.current = emptyBlob;
-
-    // Set the editable transcript and enter edit mode
-    setEditableTranscript(finalTranscript || transcript);
-    setIsEditMode(true);
-    setPreserveTranscript(false); // Reset preserve transcript flag when stopping recording
+    
+    return Object.entries(categories).map(([category, categoryItems]) => ({
+      category,
+      items: categoryItems
+    }));
   };
 
   // Function to go back to checklist from transcript edit mode
@@ -463,66 +263,6 @@ export default function FollowUpModal({
     setIsEditMode(false);
     setPreserveTranscript(true);
   };
-
-  // Function to resume recording
-  const resumeRecording = async () => {
-    try {
-      // Reset error state
-      setError(null);
-
-      // Check if mediaDevices API is available
-      if (!navigator || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Media devices API not available in this browser or context');
-      }
-
-      // Get audio stream
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-
-      // Store the current transcript length before resuming
-      previousTranscriptLengthRef.current = (finalTranscript || transcript).length;
-      // Set the flag to indicate we're in a resumed session
-      isResumedSessionRef.current = true;
-
-      // Start recording again, but keep the existing transcript
-      // We don't reset the transcript or finalTranscript here to preserve progress
-      setIsRecording(true);
-      setPreserveTranscript(false);
-
-      // Don't reset the processedKeywordsRef or lastAnalyzedLengthRef
-      // so we continue tracking the same keywords
-    } catch (error) {
-      console.error('Error resuming recording:', error);
-      setError(error instanceof Error ? error.message : 'Failed to resume recording');
-
-      // Clean up if there was an error
-      if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-        audioStreamRef.current = null;
-      }
-    }
-  };
-
-  // Add warning before page close during recording
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isRecording) {
-        // Standard way to show a confirmation dialog before leaving
-        const confirmationMessage = 'Recording in progress. Are you sure you want to leave?';
-        e.preventDefault();
-        // Note: returnValue is deprecated but still needed for older browsers
-        // Modern browsers will show their own generic message regardless of this text
-        (e as any).returnValue = confirmationMessage;
-        return confirmationMessage;
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isRecording]);
-
-  // State for loading status during SOAP note generation
-  const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
 
   // Function to generate SOAP note with edited transcript
   const generateSoapNote = async () => {
@@ -597,32 +337,19 @@ export default function FollowUpModal({
       // Ensure the note is formatted properly by formatting it explicitly if needed
       if (noteData && typeof noteData.content === 'string') {
         try {
-          // Parse the content to check if it's JSON
-          const contentObj = JSON.parse(noteData.content);
-
-          // If content is in JSON format, ensure it's formatted properly
-          if (typeof contentObj === 'object' && contentObj !== null) {
-            // Format the note using formatSoapNote (which will be applied in the Note component)
-            const formattedContent = formatSoapNote(JSON.stringify(contentObj));
-
-            // Update the note content to include both raw and formatted content
-            noteData.content = JSON.stringify({
-              content: JSON.stringify(contentObj), // Keep original content
-              formattedContent // Add formatted content
-            });
-          }
-        } catch (e) {
-          // If it's not JSON, just ensure it's a string
-          console.log("Note content is not in JSON format, keeping as is");
+          const formattedContent = formatSoapNote(noteData.content);
+          noteData.content = formattedContent;
+        } catch (formatError) {
+          console.warn('Error formatting SOAP note:', formatError);
+          // Continue with unformatted content if formatting fails
         }
       }
 
-      // Just close the modal after successful submission
-      // We don't need to call onRecordingComplete since we've already generated the note directly
+      console.log('SOAP note generated successfully');
       onClose();
     } catch (error) {
       console.error('Error generating SOAP note:', error);
-      setError(error instanceof Error ? error.message : 'Error generating SOAP note');
+      setError(error instanceof Error ? error.message : 'Failed to generate SOAP note');
     } finally {
       setIsGeneratingSoapNote(false);
     }
@@ -708,6 +435,19 @@ export default function FollowUpModal({
               onChange={(e) => setEditableTranscript(e.target.value)}
               className="w-full h-64 p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
               placeholder="Edit the transcript if needed..."
+            />
+          </div>
+        ) : isRecording ? (
+          // Recording mode with LiveDeepgramRecorder
+          <div className="my-4">
+            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-4">
+              Recording Session
+            </h3>
+            <LiveDeepgramRecorder
+              onRecordingComplete={handleRecordingComplete}
+              isProcessing={false}
+              isRecordingFromModal={true}
+              onTranscriptUpdate={handleTranscriptUpdate}
             />
           </div>
         ) : loading ? (
@@ -812,7 +552,7 @@ export default function FollowUpModal({
                     }
 
                     // Standard rendering for regular checklist items
-                    const progress = getItemProgress(item);
+                    const progress = itemPoints[item.id] || 0;
                     const isComplete = completedIds.includes(item.id);
 
                     return (
@@ -820,8 +560,14 @@ export default function FollowUpModal({
                         key={item.id}
                         onClick={() => toggleItem(item.id)}
                         /* Always use the color gradient, regardless of completion status */
-                        className={`cursor-pointer px-3 py-2 rounded-lg transition-all flex items-start ${getCompletionColor(item)}`}
-                        title={`Discussion coverage: ${progress}%${isComplete ? ' (Completed)' : ''}`}
+                        className={`cursor-pointer px-3 py-2 rounded-lg transition-all flex items-start ${
+                          progress === 0 ? 'bg-gray-100 dark:bg-gray-700 dark:text-gray-200' :
+                          progress < item.threshold ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
+                          progress < 2 * item.threshold ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                          progress < 3 * item.threshold ? 'bg-lime-100 text-lime-800 dark:bg-lime-900/30 dark:text-lime-300' :
+                          'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                        }`}
+                        title={`Discussion coverage: ${progress}/${item.threshold}`}
                       >
                         <div className="relative flex-shrink-0 mr-3">
                           {/* Circle indicator */}
@@ -843,15 +589,11 @@ export default function FollowUpModal({
                             >
                               <div
                                 className={`h-full ${
-                                  progress < 33
-                                    ? "bg-orange-500"
-                                    : progress < 66
-                                      ? "bg-yellow-500"
-                                      : progress < 100
-                                        ? "bg-lime-500"
-                                        : "bg-green-500"
+                                  progress < item.threshold ? "bg-orange-500" :
+                                  progress < 2 * item.threshold ? "bg-yellow-500" :
+                                  progress < 3 * item.threshold ? "bg-lime-500" : "bg-green-500"
                                 }`}
-                                style={{ width: `${progress}%` }}
+                                style={{ width: `${progress / item.threshold * 100}%` }}
                               ></div>
                             </div>
                           )}
@@ -951,7 +693,10 @@ export default function FollowUpModal({
               </button>
               {preserveTranscript ? (
                 <button
-                  onClick={resumeRecording}
+                  onClick={() => {
+                    setIsRecording(true);
+                    setPreserveTranscript(false);
+                  }}
                   disabled={loading}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
@@ -963,7 +708,10 @@ export default function FollowUpModal({
                 </button>
               ) : (
                 <button
-                  onClick={startRecording}
+                  onClick={() => {
+                    setIsRecording(true);
+                    setPreserveTranscript(false);
+                  }}
                   disabled={loading}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
@@ -977,7 +725,10 @@ export default function FollowUpModal({
           ) : (
             <>
               <button
-                onClick={stopRecording}
+                onClick={() => {
+                  setIsRecording(false);
+                  setPreserveTranscript(false);
+                }}
                 className="bg-red-600 text-white px-4 py-2 rounded-xl hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 transition-colors flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
