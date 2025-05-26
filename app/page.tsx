@@ -346,7 +346,7 @@ export default function Home() {
     if (patientNotes.length === 0) {
       // Show the initial visit modal instead of displaying an error
       setShowInitialVisitModal(true);
-      setIsActiveRecordingSession(true);
+      // Don't set isActiveRecordingSession here - the modal will handle recording
       return;
     }
 
@@ -354,7 +354,7 @@ export default function Home() {
     const lastNote = patientNotes[0];
     setLastVisitNote(extractContent(lastNote.content) || '');
     setShowFollowUpModal(true);
-    setIsActiveRecordingSession(true);
+    // Don't set isActiveRecordingSession here - the modal will handle recording
   };
 
   // Handler for starting recording from the follow-up modal
@@ -1059,8 +1059,8 @@ export default function Home() {
         <AudioRecordings isOpen={isAudioRecordingsOpen} onClose={() => setIsAudioRecordingsOpen(false)} />
       )}
 
-      {/* Live Deepgram Recorder - Only display during active recording sessions */}
-      {selectedPatientId && !isManualInput && isActiveRecordingSession && !isProcessing && (
+      {/* Live Deepgram Recorder - Only display during active recording sessions when no modals are open */}
+      {selectedPatientId && !isManualInput && isActiveRecordingSession && !isProcessing && !showInitialVisitModal && !showFollowUpModal && (
         <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-40 max-w-md">
           <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recording Session Active</div>
           <LiveDeepgramRecorder

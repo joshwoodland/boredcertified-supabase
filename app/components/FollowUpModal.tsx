@@ -36,6 +36,7 @@ export default function FollowUpModal({
   const [preserveTranscript, setPreserveTranscript] = useState(false);
   const [editableTranscript, setEditableTranscript] = useState('');
   const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
+  const [recorderStatus, setRecorderStatus] = useState('Initializing...');
   const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
 
   // Use the recording safeguard hook
@@ -620,6 +621,20 @@ export default function FollowUpModal({
           </div>
         )}
 
+        {/* Recorder Status Display - Show when not recording */}
+        {!isRecording && !isEditMode && (
+          <div className="my-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recorder Status</div>
+            <div className={`text-sm ${
+              recorderRef.current?.canRecord ? 'text-green-600' :
+              error ? 'text-red-600' :
+              'text-yellow-600'
+            }`}>
+              {error || recorderStatus}
+            </div>
+          </div>
+        )}
+
         {/* Recording status indicator */}
         {isRecording && (
           <div className="my-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -705,7 +720,7 @@ export default function FollowUpModal({
                       setPreserveTranscript(false);
                     }
                   }}
-                  disabled={loading}
+                  disabled={loading || !recorderRef.current?.canRecord}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -723,7 +738,7 @@ export default function FollowUpModal({
                       setPreserveTranscript(false);
                     }
                   }}
-                  disabled={loading}
+                  disabled={loading || !recorderRef.current?.canRecord}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -761,6 +776,9 @@ export default function FollowUpModal({
           isRecordingFromModal={true}
           onTranscriptUpdate={handleTranscriptUpdate}
           headless={true}
+          onStatusChange={setRecorderStatus}
+          onRecordingStateChange={setIsRecording}
+          onErrorChange={setError}
         />
         </div>
       </div>

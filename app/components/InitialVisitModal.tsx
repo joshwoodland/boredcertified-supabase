@@ -259,29 +259,52 @@ export default function InitialVisitModal({
             <p className="text-gray-600 dark:text-gray-300 mb-6">
               Please select the appropriate visit type for this recording:
             </p>
+            
+            {/* Recorder Status Display */}
+            <div className="mb-6 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recorder Status</div>
+              <div className={`text-sm ${
+                recorderRef.current?.canRecord ? 'text-green-600' :
+                error ? 'text-red-600' :
+                'text-yellow-600'
+              }`}>
+                {error || recorderStatus}
+              </div>
+            </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <button
                 onClick={() => startRecording('initial')}
-                className="flex flex-col items-center justify-center p-6 border-2 border-blue-400 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                disabled={!recorderRef.current?.canRecord}
+                className={`flex flex-col items-center justify-center p-6 border-2 rounded-xl transition-colors ${
+                  recorderRef.current?.canRecord 
+                    ? 'border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer' 
+                    : 'border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
+                }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-blue-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-12 w-12 mb-4 ${recorderRef.current?.canRecord ? 'text-blue-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
-                <span className="text-lg font-medium text-gray-800 dark:text-white">Initial Evaluation</span>
-                <p className="text-sm text-gray-500 dark:text-gray-400 text-center mt-2">
+                <span className={`text-lg font-medium ${recorderRef.current?.canRecord ? 'text-gray-800 dark:text-white' : 'text-gray-500'}`}>Initial Evaluation</span>
+                <p className={`text-sm text-center mt-2 ${recorderRef.current?.canRecord ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}`}>
                   First time seeing this patient
                 </p>
               </button>
 
               <button
                 onClick={() => startRecording('followup')}
-                className="flex flex-col items-center justify-center p-6 border-2 border-purple-400 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors"
+                disabled={!recorderRef.current?.canRecord}
+                className={`flex flex-col items-center justify-center p-6 border-2 rounded-xl transition-colors ${
+                  recorderRef.current?.canRecord 
+                    ? 'border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 cursor-pointer' 
+                    : 'border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
+                }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-purple-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-12 w-12 mb-4 ${recorderRef.current?.canRecord ? 'text-purple-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
                 </svg>
-                <span className="text-lg font-medium text-gray-800 dark:text-white">Follow Up</span>
-                <p className="text-sm text-gray-500 dark:text-gray-400 text-center mt-2">
+                <span className={`text-lg font-medium ${recorderRef.current?.canRecord ? 'text-gray-800 dark:text-white' : 'text-gray-500'}`}>Follow Up</span>
+                <p className={`text-sm text-center mt-2 ${recorderRef.current?.canRecord ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}`}>
                   Have seen this patient before
                 </p>
               </button>
