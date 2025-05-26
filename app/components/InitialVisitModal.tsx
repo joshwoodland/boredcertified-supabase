@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
-import LiveDeepgramRecorder from './LiveDeepgramRecorder';
+import LiveDeepgramRecorder, { LiveDeepgramRecorderRef } from './LiveDeepgramRecorder';
 
 interface InitialVisitModalProps {
   onRecordingComplete: (blob: Blob, transcript: string, isInitialEvaluation: boolean) => void;
@@ -26,6 +26,8 @@ export default function InitialVisitModal({
   const [isEditMode, setIsEditMode] = useState(!!manualTranscript); // Start in edit mode if manual transcript is provided
   const [editableTranscript, setEditableTranscript] = useState(manualTranscript || '');
   const [visitType, setVisitType] = useState<'initial' | 'followup' | null>(null);
+  const [recorderStatus, setRecorderStatus] = useState('Initializing...');
+  const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
 
   // Use the recording safeguard hook
   const {
@@ -93,10 +95,23 @@ export default function InitialVisitModal({
       setTranscript('');
       setFinalTranscript('');
 
-      setIsRecording(true);
+      // Start recording using the ref
+      if (recorderRef.current?.canRecord) {
+        recorderRef.current.startRecording();
+        setIsRecording(true);
+      } else {
+        setError('Recorder not ready. Please wait and try again.');
+      }
     } catch (error) {
       console.error('Error starting recording:', error);
       setError(error instanceof Error ? error.message : 'Failed to start recording');
+    }
+  };
+
+  // Stop recording function
+  const stopRecording = () => {
+    if (recorderRef.current?.canStop) {
+      recorderRef.current.stopRecording();
     }
   };
 
@@ -201,17 +216,42 @@ export default function InitialVisitModal({
             )}
           </div>
         ) : isRecording ? (
-          // Recording mode with LiveDeepgramRecorder
+          // Recording mode with custom UI
           <div className="my-4">
             <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-4">
               Recording Session
             </h3>
-            <LiveDeepgramRecorder
-              onRecordingComplete={handleRecordingComplete}
-              isProcessing={false}
-              isRecordingFromModal={true}
-              onTranscriptUpdate={handleTranscriptUpdate}
-            />
+            
+            {/* Status Display */}
+            <div className="flex flex-col md:flex-row gap-4 mb-4">
+              <div className="flex-1 bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</div>
+                <div className={`text-sm ${
+                  recorderRef.current?.canRecord ? 'text-green-600' :
+                  error ? 'text-red-600' :
+                  'text-yellow-600'
+                }`}>
+                  {error || recorderStatus}
+                </div>
+              </div>
+              
+              <div className="flex-1 bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recording</div>
+                <div className={`text-sm ${isRecording ? 'text-red-600' : 'text-gray-600'}`}>
+                  {isRecording ? 'Active' : 'Stopped'}
+                </div>
+              </div>
+            </div>
+
+            {/* Transcript Display */}
+            {(transcript || finalTranscript) && (
+              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
+                <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
+                <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
+                  {transcript || finalTranscript || "No transcription yet..."}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           // Visit type selection
@@ -285,7 +325,7 @@ export default function InitialVisitModal({
             </button>
           ) : (
             <button
-              onClick={() => setIsRecording(false)}
+              onClick={stopRecording}
               className="bg-red-600 text-white px-4 py-2 rounded-xl hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 transition-colors flex items-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -294,6 +334,19 @@ export default function InitialVisitModal({
               Stop Recording
             </button>
           )}
+
+        {/* Hidden LiveDeepgramRecorder in headless mode */}
+        <LiveDeepgramRecorder
+          ref={recorderRef}
+          onRecordingComplete={handleRecordingComplete}
+          isProcessing={false}
+          isRecordingFromModal={true}
+          onTranscriptUpdate={handleTranscriptUpdate}
+          headless={true}
+          onStatusChange={setRecorderStatus}
+          onRecordingStateChange={setIsRecording}
+          onErrorChange={setError}
+        />
         </div>
       </div>
     </div>

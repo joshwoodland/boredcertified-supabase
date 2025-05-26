@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import {
   LiveConnectionState,
   LiveTranscriptionEvent,
@@ -21,6 +21,21 @@ interface LiveDeepgramRecorderProps {
   isRecordingFromModal?: boolean;
   onTranscriptUpdate?: (transcript: string) => void;
   lowEchoCancellation?: boolean;
+  headless?: boolean; // When true, renders no UI - only provides recording functionality
+  onStatusChange?: (status: string) => void; // Callback for status updates in headless mode
+  onRecordingStateChange?: (isRecording: boolean) => void; // Callback for recording state changes
+  onErrorChange?: (error: string | null) => void; // Callback for error state changes
+}
+
+export interface LiveDeepgramRecorderRef {
+  startRecording: () => void;
+  stopRecording: () => void;
+  canRecord: boolean;
+  canStop: boolean;
+  isRecording: boolean;
+  transcript: string;
+  error: string | null;
+  status: string;
 }
 
 const loadingMessages = [
@@ -36,13 +51,17 @@ const loadingMessages = [
   "Ted Lasso is giving your medical records the pep talk they deserve. 📋",
 ];
 
-export default function LiveDeepgramRecorder({
+const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRecorderProps>(({
   onRecordingComplete,
   isProcessing,
   isRecordingFromModal = false,
   onTranscriptUpdate,
-  lowEchoCancellation = true
-}: LiveDeepgramRecorderProps) {
+  lowEchoCancellation = true,
+  headless = false,
+  onStatusChange,
+  onRecordingStateChange,
+  onErrorChange
+}, ref) => {
   const [transcript, setTranscript] = useState("");
   const [finalTranscript, setFinalTranscript] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -123,6 +142,25 @@ export default function LiveDeepgramRecorder({
   useEffect(() => {
     setupMicrophone();
   }, [setupMicrophone]);
+
+  // Notify parent components of state changes in headless mode
+  useEffect(() => {
+    if (headless && onRecordingStateChange) {
+      onRecordingStateChange(isRecording);
+    }
+  }, [headless, isRecording, onRecordingStateChange]);
+
+  useEffect(() => {
+    if (headless && onErrorChange) {
+      onErrorChange(error);
+    }
+  }, [headless, error, onErrorChange]);
+
+  useEffect(() => {
+    if (headless && onStatusChange) {
+      onStatusChange(getStatusMessage());
+    }
+  }, [headless, microphoneState, connectionState, isRecording, error, onStatusChange]);
 
   // Connect to Deepgram when microphone is ready
   useEffect(() => {
@@ -278,8 +316,20 @@ export default function LiveDeepgramRecorder({
 
   const canStop = isRecording && microphoneState === MicrophoneState.Open;
 
-  // Show recovery prompt if available
-  if (recoverySession && !isRecording) {
+  // Expose recording controls through ref
+  useImperativeHandle(ref, () => ({
+    startRecording,
+    stopRecording,
+    canRecord,
+    canStop,
+    isRecording,
+    transcript: transcript || finalTranscript,
+    error,
+    status: getStatusMessage()
+  }), [startRecording, stopRecording, canRecord, canStop, isRecording, transcript, finalTranscript, error, getStatusMessage]);
+
+  // Show recovery prompt if available (only in non-headless mode)
+  if (recoverySession && !isRecording && !headless) {
     return (
       <RecoveryPrompt
         savedSession={recoverySession}
@@ -291,6 +341,11 @@ export default function LiveDeepgramRecorder({
         onDiscard={handleDiscardRecovery}
       />
     );
+  }
+
+  // In headless mode, return null (no UI)
+  if (headless) {
+    return null;
   }
 
   return (
@@ -399,4 +454,8 @@ export default function LiveDeepgramRecorder({
       )}
     </div>
   );
-} 
+});
+
+LiveDeepgramRecorder.displayName = 'LiveDeepgramRecorder';
+
+export default LiveDeepgramRecorder; 

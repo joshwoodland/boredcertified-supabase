@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
-import LiveDeepgramRecorder from './LiveDeepgramRecorder';
+import LiveDeepgramRecorder, { LiveDeepgramRecorderRef } from './LiveDeepgramRecorder';
 import { saveChecklistToCache, getChecklistFromCache, getMostRecentChecklist } from '../utils/checklistCache';
 import { formatSoapNote } from '../utils/formatSoapNote';
 
@@ -36,6 +36,7 @@ export default function FollowUpModal({
   const [preserveTranscript, setPreserveTranscript] = useState(false);
   const [editableTranscript, setEditableTranscript] = useState('');
   const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
+  const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
 
   // Use the recording safeguard hook
   const {
@@ -438,17 +439,21 @@ export default function FollowUpModal({
             />
           </div>
         ) : isRecording ? (
-          // Recording mode with LiveDeepgramRecorder
+          // Recording mode with custom UI
           <div className="my-4">
             <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-4">
               Recording Session
             </h3>
-            <LiveDeepgramRecorder
-              onRecordingComplete={handleRecordingComplete}
-              isProcessing={false}
-              isRecordingFromModal={true}
-              onTranscriptUpdate={handleTranscriptUpdate}
-            />
+            
+            {/* Live transcript display */}
+            {(transcript || finalTranscript) && (
+              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
+                <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
+                <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
+                  {transcript || finalTranscript || "No transcription yet..."}
+                </div>
+              </div>
+            )}
           </div>
         ) : loading ? (
           <div className="flex flex-col items-center justify-center py-8">
@@ -694,8 +699,11 @@ export default function FollowUpModal({
               {preserveTranscript ? (
                 <button
                   onClick={() => {
-                    setIsRecording(true);
-                    setPreserveTranscript(false);
+                    if (recorderRef.current?.canRecord) {
+                      recorderRef.current.startRecording();
+                      setIsRecording(true);
+                      setPreserveTranscript(false);
+                    }
                   }}
                   disabled={loading}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
@@ -709,8 +717,11 @@ export default function FollowUpModal({
               ) : (
                 <button
                   onClick={() => {
-                    setIsRecording(true);
-                    setPreserveTranscript(false);
+                    if (recorderRef.current?.canRecord) {
+                      recorderRef.current.startRecording();
+                      setIsRecording(true);
+                      setPreserveTranscript(false);
+                    }
                   }}
                   disabled={loading}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
@@ -726,6 +737,9 @@ export default function FollowUpModal({
             <>
               <button
                 onClick={() => {
+                  if (recorderRef.current?.canStop) {
+                    recorderRef.current.stopRecording();
+                  }
                   setIsRecording(false);
                   setPreserveTranscript(false);
                 }}
@@ -738,6 +752,16 @@ export default function FollowUpModal({
               </button>
             </>
           )}
+
+        {/* Hidden LiveDeepgramRecorder in headless mode */}
+        <LiveDeepgramRecorder
+          ref={recorderRef}
+          onRecordingComplete={handleRecordingComplete}
+          isProcessing={false}
+          isRecordingFromModal={true}
+          onTranscriptUpdate={handleTranscriptUpdate}
+          headless={true}
+        />
         </div>
       </div>
     </div>
