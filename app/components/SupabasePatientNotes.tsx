@@ -499,7 +499,7 @@ export default function SupabasePatientNotes({
         return (
           <div
             key={note.id}
-            className={`bg-card rounded-lg shadow-md overflow-hidden ${
+            className={`bg-muted/50 rounded-lg shadow-md overflow-hidden ${
               selectedNote?.id === note.id ? 'gradient-border' : ''
             }`}
             onClick={() => handleNoteSelect(note)}
@@ -619,7 +619,7 @@ export default function SupabasePatientNotes({
                 ) : (
                   <div className="prose dark:prose-invert max-w-none compact-soap-note mono-column">
                     {/* Note content container with lighter background */}
-                    <div className="bg-muted/40 dark:bg-muted/40 p-6 rounded-lg">
+                    <div className="bg-muted/80 dark:bg-muted/80 p-6 rounded-lg">
                       <div dangerouslySetInnerHTML={{ __html: formatSoapNote(extractContent(note.content)) }} />
                     </div>
                   </div>

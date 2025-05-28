@@ -876,7 +876,7 @@ export default function Home() {
 
             {/* Main Content Area */}
             <div className="md:col-span-9 space-y-4 -mt-2">
-              <div className="bg-card rounded-lg shadow-lg border border-border">
+              <div className="bg-muted/50 rounded-lg shadow-lg border border-border">
                 <div className="flex items-center justify-between py-4 px-4 dark:border-dark-border">
                   {selectedPatientId ? (
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
@@ -933,7 +933,7 @@ export default function Home() {
 
                       {/* Manual Transcript Input Section */}
                       {isManualInput && !showInitialVisitModal && (
-                        <div className="w-full bg-card p-6 rounded-lg shadow-lg border border-border m-6">
+                        <div className="w-full bg-muted/50 p-6 rounded-lg shadow-lg border border-border m-6">
                           <h2 className="text-lg font-semibold mb-4 text-foreground">Transcript Entry</h2>
                           <textarea
                             value={manualTranscript}

@@ -390,7 +390,7 @@ export default function SupabasePatientList({
   );
 
   return (
-    <div className="bg-card rounded-lg shadow-lg border border-border">
+    <div className="bg-muted/50 rounded-lg shadow-lg border border-border">
       <div className="p-4 border-b border-border bg-muted/50">
         <div className="flex flex-col gap-2">
           {/* Remove "Patients" header as requested */}
@@ -524,7 +524,7 @@ export default function SupabasePatientList({
                     className={`w-full text-left pl-4 pr-2 py-3.5 cursor-pointer transition-all duration-200 group relative animate-in fade-in duration-200 ${
                       selectedPatientId === patient.id
                         ? 'bg-muted/80 dark:bg-muted/80 border-l-4 border-l-blue-500 dark:border-l-blue-400 text-foreground'
-                        : 'bg-card hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-foreground'
+                        : 'bg-muted/50 hover:bg-muted/60 focus:bg-muted/60 focus:outline-none text-foreground'
                     }`}
                     onMouseEnter={() => setHoveredPatientId(patient.id)}
                     onMouseLeave={() => setHoveredPatientId(null)}
