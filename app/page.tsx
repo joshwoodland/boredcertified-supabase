@@ -939,7 +939,7 @@ export default function Home() {
                             value={manualTranscript}
                             onChange={(e) => setManualTranscript(e.target.value)}
                             placeholder="Paste or type the visit transcript here..."
-                            className="w-full min-h-[300px] p-4 border rounded-lg bg-background border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                            className="w-full min-h-[300px] p-4 border rounded-lg bg-muted border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                             disabled={isProcessing}
                           />
 

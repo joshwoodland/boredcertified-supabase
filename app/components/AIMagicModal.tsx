@@ -50,7 +50,7 @@ export default function AIMagicModal({
               id="editRequest"
               value={editRequest}
               onChange={(e) => setEditRequest(e.target.value)}
-              className="w-full h-40 p-3 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+              className="w-full h-40 p-3 border rounded-lg bg-muted dark:border-gray-600 dark:text-gray-200"
               placeholder="Describe the changes you want to make..."
               disabled={isLoading}
             />

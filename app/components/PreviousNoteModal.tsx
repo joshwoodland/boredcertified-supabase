@@ -102,7 +102,7 @@ export default function PreviousNoteModal({
               <textarea
                 value={previousNote}
                 onChange={(e) => setPreviousNote(e.target.value)}
-                className="w-full h-64 p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
+                className="w-full h-64 p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-muted dark:border-gray-600 dark:text-white resize-none"
                 placeholder="Paste the previous note here..."
                 autoFocus
               />

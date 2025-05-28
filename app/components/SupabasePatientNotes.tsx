@@ -619,7 +619,7 @@ export default function SupabasePatientNotes({
                 ) : (
                   <div className="prose dark:prose-invert max-w-none compact-soap-note mono-column">
                     {/* Note content container with lighter background */}
-                    <div className="bg-muted/80 dark:bg-muted/80 p-6 rounded-lg">
+                    <div className="bg-muted dark:bg-muted p-6 rounded-lg">
                       <div dangerouslySetInnerHTML={{ __html: formatSoapNote(extractContent(note.content)) }} />
                     </div>
                   </div>

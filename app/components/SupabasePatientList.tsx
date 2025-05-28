@@ -427,7 +427,7 @@ export default function SupabasePatientList({
                           type="text"
                           value={newPatientName}
                           onChange={(e) => setNewPatientName(e.target.value)}
-                          className="w-full px-4 py-2 bg-muted/50 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-foreground placeholder-muted-foreground"
+                          className="w-full px-4 py-2 bg-muted border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-foreground placeholder-muted-foreground"
                           placeholder="Enter patient name"
                           ref={newPatientInputRef}
                           autoFocus
@@ -470,7 +470,7 @@ export default function SupabasePatientList({
               onChange={(e) => setSearchQuery(e.target.value)}
               autoFocus={!isAddingPatient}
               onKeyDown={(e) => e.key === 'Escape' && setSearchQuery('')}
-              className="w-full px-4 py-2 bg-muted/50 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-foreground placeholder-muted-foreground"
+              className="w-full px-4 py-2 bg-muted border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-foreground placeholder-muted-foreground"
               placeholder="Search patients..."
             />
             {searchQuery && (
@@ -504,7 +504,7 @@ export default function SupabasePatientList({
             <div key={group.date.toISOString()}>
               {groupIndex > 0 && <Separator />}
               {/* Date header */}
-              <div className="bg-muted/80 px-4 py-2 sticky top-0 z-10 backdrop-blur-sm">
+              <div className="bg-muted px-4 py-2 sticky top-0 z-10 backdrop-blur-sm">
                 <p className="font-medium text-muted-foreground">
                   {group.date.toLocaleDateString(undefined, {
                     weekday: 'long',
