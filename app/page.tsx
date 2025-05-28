@@ -757,7 +757,7 @@ export default function Home() {
 
   return (
     <>
-      <div className="min-h-screen bg-background">
+      <div>
         <div className="container mx-auto px-4 py-0 -mt-12 -mb-14">
           <div className="flex justify-between items-center mb-0">
             <div className="flex items-center space-x-3">
