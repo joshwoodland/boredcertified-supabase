@@ -499,7 +499,7 @@ export default function SupabasePatientNotes({
         return (
           <div
             key={note.id}
-            className={`bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${
+            className={`bg-card rounded-lg shadow-md overflow-hidden ${
               selectedNote?.id === note.id ? 'gradient-border' : ''
             }`}
             onClick={() => handleNoteSelect(note)}
@@ -508,7 +508,7 @@ export default function SupabasePatientNotes({
               <summary className="flex items-center justify-between p-4 cursor-pointer">
                 <div className="flex items-center">
                   <div className="pl-1">
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <div className="text-sm font-medium text-foreground">
                       {formatDate(note.createdAt)}
                     </div>
                     <div className="text-xs">
@@ -518,17 +518,17 @@ export default function SupabasePatientNotes({
                       }
                     </div>
                     {/* Display summary when collapsed, regardless of selection state */}
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mt-1 pr-4">
+                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1 pr-4">
                       {summaries[note.id] || (isFetchingSummary[note.id] ? 'Loading summary...' : getParsedContent(note.content).split('\n')[0])}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center">
                   {/* Always show expand/collapse indicator */}
-                  <FiChevronDown className="text-gray-500 dark:text-gray-400" />
+                  <FiChevronDown className="text-muted-foreground" />
                 </div>
               </summary>
-              <div className="p-4 border-t dark:border-gray-700">
+              <div className="p-4 border-t border-border">
                 {selectedNote?.id === note.id && (
                   <div className="flex items-center justify-end space-x-2 mb-4">
                     <button
@@ -618,7 +618,10 @@ export default function SupabasePatientNotes({
                   </div>
                 ) : (
                   <div className="prose dark:prose-invert max-w-none compact-soap-note mono-column">
-                    <div dangerouslySetInnerHTML={{ __html: formatSoapNote(extractContent(note.content)) }} />
+                    {/* Note content container with lighter background */}
+                    <div className="bg-muted/40 dark:bg-muted/40 p-6 rounded-lg">
+                      <div dangerouslySetInnerHTML={{ __html: formatSoapNote(extractContent(note.content)) }} />
+                    </div>
                   </div>
                 )}
               </div>

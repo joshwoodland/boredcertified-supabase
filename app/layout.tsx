@@ -72,7 +72,7 @@ export default function RootLayout({
           }
         `}} />
       </head>
-      <body className={`${inter.className} ${montserrat.variable} min-h-screen dark:bg-dark-main bg-gray-50`}>
+      <body className={`${inter.className} ${montserrat.variable} min-h-screen bg-background text-foreground`}>
         <AppSettingsProvider>
           <DeepgramContextProvider>
             <MicrophoneContextProvider>

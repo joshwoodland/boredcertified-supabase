@@ -1,7 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createBrowserSupabaseClient, getClientSupabasePatients, convertToAppFormat, supabaseBrowser } from '@/app/lib/supabase';
 import type { AppPatient, SupabasePatient } from '@/app/lib/supabase';
-import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
+import { User, Trash2, RefreshCw, Edit2 } from 'lucide-react';
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { iconButtonVariants } from "@/lib/button-variants";
+import Toast from './Toast';
 
 // Use the singleton browser client
 const supabase = supabaseBrowser;
@@ -60,6 +64,7 @@ export default function SupabasePatientList({
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]); // Use Patient type
+  const [hoveredPatientId, setHoveredPatientId] = useState<string | null>(null);
 
   const newPatientInputRef = useRef<HTMLInputElement>(null);
 
@@ -182,7 +187,7 @@ export default function SupabasePatientList({
       await loadPatients();
 
       // Select the newly created patient
-      if (newPatientId) {
+      if (newPatientId && newPatientId.length > 0) {
         onSelectPatient(newPatientId);
       }
     } catch (err) {
@@ -359,29 +364,34 @@ export default function SupabasePatientList({
     onSelectPatient(strId);
   };
 
-  if (loading) return <div>Loading patients...</div>;
-  if (error) return <div className="error">{error}</div>;
+  if (loading) {
+    return (
+      <div className="bg-card rounded-lg shadow-lg border border-border">
+        <div className="p-4 border-b border-border bg-muted/50">
+          <Skeleton className="h-10 w-full mb-2" />
+          <Skeleton className="h-8 w-full" />
+        </div>
+        <div className="p-4 space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="flex items-center space-x-3">
+              <Skeleton className="h-10 w-10 rounded-full" />
+              <Skeleton className="h-4 flex-1" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  
+  if (error) return (
+    <div className="bg-card rounded-lg shadow-lg border border-border p-4">
+      <div className="text-red-600 dark:text-red-400">{error}</div>
+    </div>
+  );
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-      {/* Custom CSS for the gradient border */}
-      <style jsx>{`
-        .gradient-border-left {
-          position: relative;
-        }
-        .gradient-border-left::before {
-          content: '';
-          position: absolute;
-          left: 0;
-          top: 0;
-          width: 4px; /* Match the original border-l-4 width */
-          height: 100%;
-          background: linear-gradient(to bottom, #9333ea, #3b82f6); /* Deeper purple to blue */
-          opacity: 0.8; /* Slightly faded for better visual balance */
-          z-index: 10;
-        }
-      `}</style>
-      <div className="p-4 border-b dark:border-gray-700 dark:bg-gray-900">
+    <div className="bg-card rounded-lg shadow-lg border border-border">
+      <div className="p-4 border-b border-border bg-muted/50">
         <div className="flex flex-col gap-2">
           {/* Remove "Patients" header as requested */}
           {showTrash && (
@@ -402,8 +412,8 @@ export default function SupabasePatientList({
                 </button>
               ) : (
                 <div className="flex items-center">
-                  <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
-                    <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                  <div className="p-2 bg-muted rounded-full mr-3">
+                    <User className="w-5 h-5 text-muted-foreground" />
                   </div>
                   <form
                     onSubmit={handleAddPatientSubmit}
@@ -417,7 +427,7 @@ export default function SupabasePatientList({
                           type="text"
                           value={newPatientName}
                           onChange={(e) => setNewPatientName(e.target.value)}
-                          className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:outline-none focus:border-blue-600 dark:focus:border-blue-500 dark:text-white"
+                          className="w-full px-4 py-2 bg-muted border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-foreground placeholder-muted-foreground"
                           placeholder="Enter patient name"
                           ref={newPatientInputRef}
                           autoFocus
@@ -460,7 +470,7 @@ export default function SupabasePatientList({
               onChange={(e) => setSearchQuery(e.target.value)}
               autoFocus={!isAddingPatient}
               onKeyDown={(e) => e.key === 'Escape' && setSearchQuery('')}
-              className="w-full px-4 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-0 dark:text-white"
+              className="w-full px-4 py-2 bg-muted border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 text-foreground placeholder-muted-foreground"
               placeholder="Search patients..."
             />
             {searchQuery && (
@@ -490,11 +500,12 @@ export default function SupabasePatientList({
           </div>
         ) : (
           // Group patients by date and display with date headers
-          groupPatientsByDate(searchQuery ? filteredPatients : patients).map(group => (
+          groupPatientsByDate(searchQuery ? filteredPatients : patients).map((group, groupIndex) => (
             <div key={group.date.toISOString()}>
+              {groupIndex > 0 && <Separator />}
               {/* Date header */}
-              <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 sticky top-0 z-10 border-t border-b border-gray-200 dark:border-gray-600">
-                <p className="font-medium text-gray-700 dark:text-gray-300">
+              <div className="bg-muted/80 px-4 py-2 sticky top-0 z-10 backdrop-blur-sm">
+                <p className="font-medium text-muted-foreground">
                   {group.date.toLocaleDateString(undefined, {
                     weekday: 'long',
                     month: 'long',
@@ -505,16 +516,18 @@ export default function SupabasePatientList({
               </div>
 
               {/* Patients for this date */}
-              <div className="divide-y dark:divide-gray-700">
+              <div className="divide-y divide-border">
                 {group.patients.map(patient => (
                   <button
                     key={patient.id}
                     type="button"
-                    className={`w-full text-left pl-4 pr-2 py-3.5 cursor-pointer transition-colors group relative ${
+                    className={`w-full text-left pl-4 pr-2 py-3.5 cursor-pointer transition-all duration-200 group relative animate-in fade-in duration-200 ${
                       selectedPatientId === patient.id
-                        ? 'bg-zinc-700/80 dark:bg-zinc-700/80 gradient-border-left'
-                        : 'bg-white dark:bg-gray-800 hover:bg-zinc-800/60 dark:hover:bg-zinc-800/60 focus:bg-zinc-800/60 dark:focus:bg-zinc-800/60 focus:outline-none'
+                        ? 'bg-muted/80 dark:bg-muted/80 border-l-4 border-l-blue-500 dark:border-l-blue-400 text-foreground'
+                        : 'bg-card hover:bg-muted/50 focus:bg-muted/50 focus:outline-none text-foreground'
                     }`}
+                    onMouseEnter={() => setHoveredPatientId(patient.id)}
+                    onMouseLeave={() => setHoveredPatientId(null)}
                     onClick={() => {
                       if (isEditing === patient.id) return;
                       handlePatientSelect(patient.id);
@@ -526,8 +539,8 @@ export default function SupabasePatientList({
                         onClick={(e) => e.stopPropagation()}
                         onKeyDown={(e) => e.stopPropagation()}
                         className="flex items-center">
-                        <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full mr-3">
-                          <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                        <div className="p-2 bg-muted rounded-full mr-3">
+                          <User className="w-5 h-5 text-muted-foreground" />
                         </div>
                         <form
                           onSubmit={(e) => handleEditSubmit(patient.id, e)}
@@ -541,7 +554,7 @@ export default function SupabasePatientList({
                                 type="text"
                                 value={editName}
                                 onChange={(e) => setEditName(e.target.value)}
-                                className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:border-blue-600 dark:focus:border-blue-500 dark:text-white"
+                                className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:border-blue-600 dark:focus:border-blue-500 text-foreground"
                                 placeholder="Enter patient name"
                               />
                             </div>
@@ -581,37 +594,41 @@ export default function SupabasePatientList({
                       // Display mode
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3 flex-1 min-w-0">
-                          <div className="p-2 bg-gray-100 dark:bg-gray-600 rounded-full flex-shrink-0">
-                            <FiUser className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                          <div className="p-2 bg-muted rounded-full flex-shrink-0">
+                            <User className="w-5 h-5 text-muted-foreground" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h3 className="text-sm font-medium dark:text-white truncate">
+                            <h3 className="text-sm font-medium text-foreground truncate">
                               {patient.name}
                             </h3>
                           </div>
                         </div>
                         <div className="flex items-center gap-0.5 ml-1 flex-shrink-0 pr-0.5">
-                          {!showTrash && (
+                          {!showTrash && hoveredPatientId === patient.id && (
                             <button
                               type="button"
                               onClick={(e) => handleEditClick(patient.id, e, patient.name)}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded-full transition-all duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600"
+                              className={iconButtonVariants({ variant: "ghost", size: "sm", visibility: "always" })}
                               title="Edit patient name"
                             >
-                              <FiEdit2 className="w-4 h-4" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={(e) => showTrash ? handleRestorePatient(patient.id, e) : handleMoveToTrash(patient.id, e)}
-                            className={`opacity-0 group-hover:opacity-100 p-1 rounded-full transition-all duration-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-500 dark:hover:text-gray-300 dark:hover:bg-gray-600 ${
-                              isProcessing === patient.id ? 'animate-spin' : ''
-                            }`}
-                            title={showTrash ? 'Restore patient' : 'Move to trash'}
-                            disabled={isProcessing === patient.id}
-                          >
-                            {showTrash ? <FiRefreshCw className="w-4 h-4" /> : <FiTrash2 className="w-4 h-4" />}
-                          </button>
+                          {hoveredPatientId === patient.id && (
+                            <button
+                              type="button"
+                              onClick={(e) => showTrash ? handleRestorePatient(patient.id, e) : handleMoveToTrash(patient.id, e)}
+                              className={`${iconButtonVariants({ 
+                                variant: showTrash ? "primary" : "destructive", 
+                                size: "sm", 
+                                visibility: "always" 
+                              })} ${isProcessing === patient.id ? 'animate-spin' : ''}`}
+                              title={showTrash ? 'Restore patient' : 'Move to trash'}
+                              disabled={isProcessing === patient.id}
+                            >
+                              {showTrash ? <RefreshCw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}

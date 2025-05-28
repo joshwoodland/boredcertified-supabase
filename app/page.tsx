@@ -10,7 +10,7 @@ import SoapNoteGenerator from './components/SoapNoteGenerator';
 import FollowUpModal from './components/FollowUpModal';
 import InitialVisitModal from './components/InitialVisitModal';
 import ManualTranscriptModal from './components/ManualTranscriptModal';
-import { FiSettings, FiTrash2, FiPlayCircle, FiSearch, FiUser } from 'react-icons/fi';
+import { Settings as SettingsIcon, Trash2, PlayCircle, Search, User } from 'lucide-react';
 import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
 import DynamicLogo from './components/DynamicLogo';
@@ -85,6 +85,11 @@ export default function Home() {
   const [trashedPatientsData, setTrashedPatientsData] = useState<AppPatient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  // Enable dark mode
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
 
   // Handle clicks outside of the search dropdown
   useEffect(() => {
@@ -752,394 +757,396 @@ export default function Home() {
 
   return (
     <>
-      <div className="container mx-auto px-4 py-0 -mt-12 -mb-14">
-        <div className="flex justify-between items-center mb-0">
-          <div className="flex items-center space-x-3">
-            <div className="h-72 flex items-center">
-              <DynamicLogo
-                style={{
-                  height: '100%',
-                  width: 'auto',
-                  objectFit: 'contain'
-                }}
-              />
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto px-4 py-0 -mt-12 -mb-14">
+          <div className="flex justify-between items-center mb-0">
+            <div className="flex items-center space-x-3">
+              <div className="h-72 flex items-center">
+                <DynamicLogo
+                  style={{
+                    height: '100%',
+                    width: 'auto',
+                    objectFit: 'contain'
+                  }}
+                />
+              </div>
+              <span className="px-3 py-1 text-xs uppercase tracking-widest bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md font-bold shadow-md">BETA</span>
             </div>
-            <span className="px-3 py-1 text-xs uppercase tracking-widest bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md font-bold shadow-md">BETA</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="relative" ref={searchRef}>
-              <button
-                onClick={() => {
-                  setShowPatientSearch(!showPatientSearch);
-                  if (!showPatientSearch) {
-                    setPatientSearchQuery('');
-                  }
-                }}
-                className="flex items-center px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all shadow-md hover:shadow-lg"
-              >
-                <FiSearch className="mr-2" />
-                Search Patient
-              </button>
+            <div className="flex items-center gap-4">
+              <div className="relative" ref={searchRef}>
+                <button
+                  onClick={() => {
+                    setShowPatientSearch(!showPatientSearch);
+                    if (!showPatientSearch) {
+                      setPatientSearchQuery('');
+                    }
+                  }}
+                  className="flex items-center px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all shadow-md hover:shadow-lg"
+                >
+                  <Search className="mr-2" />
+                  Search Patient
+                </button>
 
-              {showPatientSearch && (
-                <div className="absolute z-50 mt-2 w-64 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700">
-                  <div className="p-2">
-                    <input
-                      type="text"
-                      value={patientSearchQuery}
-                      onChange={(e) => setPatientSearchQuery(e.target.value)}
-                      placeholder="Type to search patients..."
-                      className="w-full p-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      autoFocus
-                    />
-                  </div>
+                {showPatientSearch && (
+                  <div className="absolute z-50 mt-2 w-64 bg-popover rounded-md shadow-lg border border-border">
+                    <div className="p-2">
+                      <input
+                        type="text"
+                        value={patientSearchQuery}
+                        onChange={(e) => setPatientSearchQuery(e.target.value)}
+                        placeholder="Type to search patients..."
+                        className="w-full p-2 border rounded-md bg-background border-border text-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        autoFocus
+                      />
+                    </div>
 
-                  <div className="max-h-60 overflow-y-auto">
-                    {filteredPatients.length > 0 ? (
-                      filteredPatients.map((patient: AppPatient) => (
-                        <div
-                          key={patient.id}
-                          className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
-                          onClick={() => {
-                            setSelectedPatientId(patient.id);
-                            setShowPatientSearch(false);
-                            setPatientSearchQuery('');
-                          }}
-                        >
-                          <div className="flex items-center space-x-2">
-                            <div className="p-1 bg-gray-100 dark:bg-gray-600 rounded-full">
-                              <FiUser className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                    <div className="max-h-60 overflow-y-auto">
+                      {filteredPatients.length > 0 ? (
+                        filteredPatients.map((patient: AppPatient) => (
+                          <div
+                            key={patient.id}
+                            className="px-4 py-2 hover:bg-muted cursor-pointer"
+                            onClick={() => {
+                              setSelectedPatientId(patient.id);
+                              setShowPatientSearch(false);
+                              setPatientSearchQuery('');
+                            }}
+                          >
+                            <div className="flex items-center space-x-2">
+                              <div className="p-1 bg-muted rounded-full">
+                                <User className="w-4 h-4 text-muted-foreground" />
+                              </div>
+                              <span className="text-foreground">{patient.name}</span>
                             </div>
-                            <span className="dark:text-white">{patient.name}</span>
                           </div>
+                        ))
+                      ) : patientSearchQuery.trim() ? (
+                        <div className="px-4 py-2 text-sm text-muted-foreground">
+                          No patients found
                         </div>
-                      ))
-                    ) : patientSearchQuery.trim() ? (
-                      <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-                        No patients found
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => setShowTrash(!showTrash)}
-              className={`p-2 rounded-full transition-colors shadow-md ${
-                showTrash
-                  ? 'bg-red-500 text-white dark:bg-red-600'
-                  : 'bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700'
-              }`}
-              title={showTrash ? 'Show active patients' : 'Show trash'}
-            >
-              <FiTrash2 className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => {
-                document.documentElement.classList.add('modal-open');
-                setIsSettingsOpen(true);
-              }}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-dark-accent rounded-full transition-colors dark:text-dark-text"
-              title="Settings"
-            >
-              <FiSettings className="w-5 h-5" />
-            </button>
-            <UserProfile />
-          </div>
-        </div>
-
-        {(error || settingsError) && (
-          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
-            {typeof error === 'string' ? error : (typeof settingsError === 'string' ? settingsError : 'An error occurred')}
-          </div>
-        )}
-
-        <div className="grid md:grid-cols-12 gap-6 -mt-6">
-          {/* Patient List - Using Supabase integration */}
-          <div className="md:col-span-3">
-            <SupabasePatientList
-              selectedPatientId={selectedPatientId}
-              onSelectPatient={setSelectedPatientId}
-              onMoveToTrash={handleMoveToTrash}
-              onRestorePatient={handleRestorePatient}
-              onUpdatePatient={handleUpdatePatient}
-              showTrash={showTrash}
-              onPatientsLoaded={handlePatientsLoaded}
-            />
-          </div>
-
-          {/* Main Content Area */}
-          <div className="md:col-span-9 space-y-4 -mt-2">
-            <div className="bg-white dark:bg-gray-900 rounded-lg shadow">
-              <div className="flex items-center justify-between py-4 px-4 dark:border-dark-border">
-                {selectedPatientId ? (
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                    <button
-                      onClick={handleStartNewVisit}
-                      className="flex items-center gap-2 px-4 py-1.5 text-sm font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-xl transition transform hover:scale-105 active:scale-95 shadow-md hover:brightness-110"
-                      disabled={isProcessing}
-                    >
-                      <FiPlayCircle className="w-4 h-4" />
-                      <span>Start New Visit</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        // First check if patient is selected
-                        if (!selectedPatientId) {
-                          setError('Please select a patient before pasting in transcript');
-                          return;
-                        }
-
-                        // Check if there's at least one previous note
-                        if (patientNotes.length === 0) {
-                          console.log('Opening manual transcript modal for first visit with patientId:', selectedPatientId);
-                          // Show the manual transcript modal for visit type selection
-                          setShowManualTranscriptModal(true);
-                        } else {
-                          console.log('Opening manual input form for existing patient with patientId:', selectedPatientId);
-                          // For patients with existing notes, show the manual input directly
-                          setIsManualInput(true);
-                          setIsActiveRecordingSession(true);
-                        }
-                      }}
-                      className="flex items-center gap-2 px-4 py-1.5 text-sm border border-gray-300 dark:border-white bg-white dark:bg-transparent text-gray-800 dark:text-white rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 transition transform hover:scale-105 active:scale-95"
-                      disabled={isProcessing || !selectedPatientId}
-                    >
-                      <span>Paste in Transcript</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="text-gray-600 dark:text-dark-muted">Please select a patient to start</div>
-                )}
-
-                {selectedPatient && (
-                  <div className="text-gray-600 dark:text-white flex items-center gap-2">
-                    <FiUser className="w-4 h-4" />
-                    <span className="font-medium">{selectedPatient.name}</span>
+                      ) : null}
+                    </div>
                   </div>
                 )}
               </div>
+              <button
+                onClick={() => setShowTrash(!showTrash)}
+                className={`p-2 rounded-full transition-colors shadow-md border-2 ${
+                  showTrash
+                    ? 'bg-red-500 text-white dark:bg-red-600 border-red-500 dark:border-red-600'
+                    : 'bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 border-white text-white'
+                }`}
+                title={showTrash ? 'Show active patients' : 'Show trash'}
+              >
+                <Trash2 className="w-5 h-5" fill="none" strokeWidth={2} />
+              </button>
+              <button
+                onClick={() => {
+                  document.documentElement.classList.add('modal-open');
+                  setIsSettingsOpen(true);
+                }}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-dark-accent rounded-full transition-colors dark:text-dark-text"
+                title="Settings"
+              >
+                <SettingsIcon className="w-5 h-5" />
+              </button>
+              <UserProfile />
+            </div>
+          </div>
 
-              <div className="p-0">
-                {selectedPatientId ? (
-                  <div className="space-y-6">
+          {(error || settingsError) && (
+            <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
+              {typeof error === 'string' ? error : (typeof settingsError === 'string' ? settingsError : 'An error occurred')}
+            </div>
+          )}
 
-                    {/* Manual Transcript Input Section */}
-                    {isManualInput && !showInitialVisitModal && (
-                      <div className="w-full bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md m-6">
-                        <h2 className="text-lg font-semibold mb-4 dark:text-white">Transcript Entry</h2>
-                        <textarea
-                          value={manualTranscript}
-                          onChange={(e) => setManualTranscript(e.target.value)}
-                          placeholder="Paste or type the visit transcript here..."
-                          className="w-full min-h-[300px] p-4 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          disabled={isProcessing}
-                        />
+          <div className="grid md:grid-cols-12 gap-6 -mt-6">
+            {/* Patient List - Using Supabase integration */}
+            <div className="md:col-span-3">
+              <SupabasePatientList
+                selectedPatientId={selectedPatientId}
+                onSelectPatient={setSelectedPatientId}
+                onMoveToTrash={handleMoveToTrash}
+                onRestorePatient={handleRestorePatient}
+                onUpdatePatient={handleUpdatePatient}
+                showTrash={showTrash}
+                onPatientsLoaded={handlePatientsLoaded}
+              />
+            </div>
 
-                        {/* Replace the manual buttons with the SoapNoteGenerator component */}
-                        <SoapNoteGenerator
-                          patientId={selectedPatientId}
-                          transcript={manualTranscript}
-                          onNoteGenerated={(note) => {
-                            // Convert the note to match the expected Note type
-                            const typedNote: Note = {
-                              id: note.id,
-                              patientId: note.patientId,
-                              transcript: note.transcript || '', // Ensure transcript is not undefined
-                              content: note.content,
-                              summary: note.summary || null,
-                              isInitialVisit: note.isInitialVisit || false,
-                              createdAt: note.createdAt ? new Date(note.createdAt) : new Date(),
-                              updatedAt: note.updatedAt ? new Date(note.updatedAt) : new Date()
-                            };
-                            setCurrentNote(typedNote);
-                            setManualTranscript('');
-                            setIsManualInput(false);
-                            setForceCollapse(prev => !prev);
-                            setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
-                            fetchPatientNotes(selectedPatientId!);
-                          }}
-                          onError={(errorMessage) => setError(errorMessage)}
-                          disabled={isProcessing || !selectedPatientId || !manualTranscript.trim()}
-                        />
+            {/* Main Content Area */}
+            <div className="md:col-span-9 space-y-4 -mt-2">
+              <div className="bg-card rounded-lg shadow-lg border border-border">
+                <div className="flex items-center justify-between py-4 px-4 dark:border-dark-border">
+                  {selectedPatientId ? (
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                      <button
+                        onClick={handleStartNewVisit}
+                        className="flex items-center gap-2 px-4 py-1.5 text-sm font-semibold bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white rounded-xl transition transform hover:scale-105 active:scale-95 shadow-md hover:brightness-110"
+                        disabled={isProcessing}
+                      >
+                        <PlayCircle className="w-4 h-4" />
+                        <span>Start New Visit</span>
+                      </button>
 
-                        {isProcessing && (
-                          <div className="mt-4 text-center">
-                            <div className="flex justify-center mb-2">
-                              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                      <button
+                        onClick={() => {
+                          // First check if patient is selected
+                          if (!selectedPatientId) {
+                            setError('Please select a patient before pasting in transcript');
+                            return;
+                          }
+
+                          // Check if there's at least one previous note
+                          if (patientNotes.length === 0) {
+                            console.log('Opening manual transcript modal for first visit with patientId:', selectedPatientId);
+                            // Show the manual transcript modal for visit type selection
+                            setShowManualTranscriptModal(true);
+                          } else {
+                            console.log('Opening manual input form for existing patient with patientId:', selectedPatientId);
+                            // For patients with existing notes, show the manual input directly
+                            setIsManualInput(true);
+                            setIsActiveRecordingSession(true);
+                          }
+                        }}
+                        className="flex items-center gap-2 px-4 py-1.5 text-sm border-2 border-white bg-transparent text-white rounded-xl hover:bg-white/10 transition transform hover:scale-105 active:scale-95"
+                        disabled={isProcessing || !selectedPatientId}
+                      >
+                        <span>Paste in Transcript</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-muted-foreground">Please select a patient to start</div>
+                  )}
+
+                  {selectedPatient && (
+                    <div className="text-foreground flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      <span className="font-medium">{selectedPatient.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-0">
+                  {selectedPatientId ? (
+                    <div className="space-y-6">
+
+                      {/* Manual Transcript Input Section */}
+                      {isManualInput && !showInitialVisitModal && (
+                        <div className="w-full bg-card p-6 rounded-lg shadow-lg border border-border m-6">
+                          <h2 className="text-lg font-semibold mb-4 text-foreground">Transcript Entry</h2>
+                          <textarea
+                            value={manualTranscript}
+                            onChange={(e) => setManualTranscript(e.target.value)}
+                            placeholder="Paste or type the visit transcript here..."
+                            className="w-full min-h-[300px] p-4 border rounded-lg bg-background border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                            disabled={isProcessing}
+                          />
+
+                          {/* Replace the manual buttons with the SoapNoteGenerator component */}
+                          <SoapNoteGenerator
+                            patientId={selectedPatientId}
+                            transcript={manualTranscript}
+                            onNoteGenerated={(note) => {
+                              // Convert the note to match the expected Note type
+                              const typedNote: Note = {
+                                id: note.id,
+                                patientId: note.patientId,
+                                transcript: note.transcript || '', // Ensure transcript is not undefined
+                                content: note.content,
+                                summary: note.summary || null,
+                                isInitialVisit: note.isInitialVisit || false,
+                                createdAt: note.createdAt ? new Date(note.createdAt) : new Date(),
+                                updatedAt: note.updatedAt ? new Date(note.updatedAt) : new Date()
+                              };
+                              setCurrentNote(typedNote);
+                              setManualTranscript('');
+                              setIsManualInput(false);
+                              setForceCollapse(prev => !prev);
+                              setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
+                              fetchPatientNotes(selectedPatientId!);
+                            }}
+                            onError={(errorMessage) => setError(errorMessage)}
+                            disabled={isProcessing || !selectedPatientId || !manualTranscript.trim()}
+                          />
+
+                          {isProcessing && (
+                            <div className="mt-4 text-center">
+                              <div className="flex justify-center mb-2">
+                                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+                              </div>
+                              <p className="text-gray-600 dark:text-gray-400">{loadingMessage}</p>
+                              <button
+                                onClick={handleCancel}
+                                className="mt-4 px-4 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              >
+                                Cancel
+                              </button>
                             </div>
-                            <p className="text-gray-600 dark:text-gray-400">{loadingMessage}</p>
+                          )}
+
+                          <div className="flex justify-end mt-4">
                             <button
-                              onClick={handleCancel}
-                              className="mt-4 px-4 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              onClick={() => {
+                                setIsManualInput(false);
+                                setManualTranscript('');
+                              }}
+                              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                             >
                               Cancel
                             </button>
                           </div>
-                        )}
-
-                        <div className="flex justify-end mt-4">
-                          <button
-                            onClick={() => {
-                              setIsManualInput(false);
-                              setManualTranscript('');
-                            }}
-                            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                          >
-                            Cancel
-                          </button>
                         </div>
-                      </div>
-                    )}
+                      )}
 
 
-                    {isProcessing && !isManualInput && (
-                      <div className="text-center py-4 p-6">
-                        <div className="flex flex-col items-center gap-4">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
-                          <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
-                          <button
-                            onClick={handleCancel}
-                            className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                          >
-                            cancel
-                          </button>
+                      {isProcessing && !isManualInput && (
+                        <div className="text-center py-4 p-6">
+                          <div className="flex flex-col items-center gap-4">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
+                            <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                            <button
+                              onClick={handleCancel}
+                              className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                            >
+                              cancel
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            {/* SOAP Notes Display */}
-            {selectedPatientId && (
-              <SupabasePatientNotes
-                patientId={selectedPatientId}
-                selectedNoteId={currentNote?.id}
-                onNoteSelect={(note) => {
-                  // Convert from the Supabase Note format to the format expected by page.tsx
-                  setCurrentNote({
-                    id: note.id,
-                    patientId: note.patientId,
-                    transcript: note.transcript,
-                    content: note.content,
-                    summary: note.summary,
-                    isInitialVisit: note.isInitialVisit,
-                    createdAt: note.createdAt,
-                    updatedAt: note.updatedAt
-                  });
-
-                  // Set the lastVisitNote for the follow-up modal
-                  setLastVisitNote(extractContent(note.content));
-                }}
-                forceCollapse={forceCollapse}
-                refreshTrigger={notesRefreshTrigger} // Pass the refresh trigger
-                onDeleteNote={async (noteId) => {
-                  try {
-                    // Call the API to delete the note
-                    const response = await fetch(`/api/notes/${noteId}`, {
-                      method: 'DELETE',
+              {/* SOAP Notes Display */}
+              {selectedPatientId && (
+                <SupabasePatientNotes
+                  patientId={selectedPatientId}
+                  selectedNoteId={currentNote?.id}
+                  onNoteSelect={(note) => {
+                    // Convert from the Supabase Note format to the format expected by page.tsx
+                    setCurrentNote({
+                      id: note.id,
+                      patientId: note.patientId,
+                      transcript: note.transcript,
+                      content: note.content,
+                      summary: note.summary,
+                      isInitialVisit: note.isInitialVisit,
+                      createdAt: note.createdAt,
+                      updatedAt: note.updatedAt
                     });
 
-                    if (!response.ok) {
-                      throw new Error('Failed to delete note');
-                    }
+                    // Set the lastVisitNote for the follow-up modal
+                    setLastVisitNote(extractContent(note.content));
+                  }}
+                  forceCollapse={forceCollapse}
+                  refreshTrigger={notesRefreshTrigger} // Pass the refresh trigger
+                  onDeleteNote={async (noteId) => {
+                    try {
+                      // Call the API to delete the note
+                      const response = await fetch(`/api/notes/${noteId}`, {
+                        method: 'DELETE',
+                      });
 
-                    // If the deleted note was the current note, clear it
-                    if (currentNote?.id === noteId) {
-                      setCurrentNote(null);
-                    }
+                      if (!response.ok) {
+                        throw new Error('Failed to delete note');
+                      }
 
-                    // Refresh the notes list
-                    if (selectedPatientId) {
-                      fetchPatientNotes(selectedPatientId);
+                      // If the deleted note was the current note, clear it
+                      if (currentNote?.id === noteId) {
+                        setCurrentNote(null);
+                      }
+
+                      // Refresh the notes list
+                      if (selectedPatientId) {
+                        fetchPatientNotes(selectedPatientId);
+                      }
+                    } catch (error) {
+                      console.error('Error deleting note:', error);
+                      setError(error instanceof Error ? error.message : 'Failed to delete note');
                     }
-                  } catch (error) {
-                    console.error('Error deleting note:', error);
-                    setError(error instanceof Error ? error.message : 'Failed to delete note');
-                  }
-                }}
-              />
-            )}
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Settings Modal - Outside the container */}
-      <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+        {/* Settings Modal - Outside the container */}
+        <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
-      {/* Audio Recordings Modal */}
-      {isAudioRecordingsOpen && (
-        <AudioRecordings isOpen={isAudioRecordingsOpen} onClose={() => setIsAudioRecordingsOpen(false)} />
-      )}
+        {/* Audio Recordings Modal */}
+        {isAudioRecordingsOpen && (
+          <AudioRecordings isOpen={isAudioRecordingsOpen} onClose={() => setIsAudioRecordingsOpen(false)} />
+        )}
 
-      {/* Live Deepgram Recorder - Only display during active recording sessions when no modals are open */}
-      {selectedPatientId && !isManualInput && isActiveRecordingSession && !isProcessing && !showInitialVisitModal && !showFollowUpModal && (
-        <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-40 max-w-md">
-          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recording Session Active</div>
-          <LiveDeepgramRecorder
-            onRecordingComplete={(audioBlob, transcript) => handleRecordingComplete(audioBlob, transcript, false)}
-            isProcessing={isProcessing}
-            isRecordingFromModal={isRecordingFromModal}
-            onTranscriptUpdate={handleTranscriptUpdate}
-            lowEchoCancellation={settings?.lowEchoCancellation || false}
+        {/* Live Deepgram Recorder - Only display during active recording sessions when no modals are open */}
+        {selectedPatientId && !isManualInput && isActiveRecordingSession && !isProcessing && !showInitialVisitModal && !showFollowUpModal && (
+          <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-40 max-w-md">
+            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recording Session Active</div>
+            <LiveDeepgramRecorder
+              onRecordingComplete={(audioBlob, transcript) => handleRecordingComplete(audioBlob, transcript, false)}
+              isProcessing={isProcessing}
+              isRecordingFromModal={isRecordingFromModal}
+              onTranscriptUpdate={handleTranscriptUpdate}
+              lowEchoCancellation={settings?.lowEchoCancellation || false}
+            />
+          </div>
+        )}
+
+        {/* Follow-Up Checklist Modal */}
+        {showFollowUpModal && selectedPatientId && (patientNotes.length > 0 || providedPreviousNote) && (
+          <FollowUpModal
+            lastVisitNote={lastVisitNote}
+            patientId={selectedPatientId}
+            noteId={patientNotes.length > 0 ? patientNotes[0].id : 'provided-note'} // Use the most recent note's ID or a placeholder for provided notes
+            onClose={() => {
+              setShowFollowUpModal(false);
+              setIsRecordingFromModal(false);
+              setIsActiveRecordingSession(false);
+              setProvidedPreviousNote(null); // Clear the provided previous note
+
+              // Refresh notes after closing the modal to show the newly generated note
+              if (selectedPatientId) {
+                fetchPatientNotes(selectedPatientId);
+              }
+            }}
           />
-        </div>
-      )}
+        )}
 
-      {/* Follow-Up Checklist Modal */}
-      {showFollowUpModal && selectedPatientId && (patientNotes.length > 0 || providedPreviousNote) && (
-        <FollowUpModal
-          lastVisitNote={lastVisitNote}
-          patientId={selectedPatientId}
-          noteId={patientNotes.length > 0 ? patientNotes[0].id : 'provided-note'} // Use the most recent note's ID or a placeholder for provided notes
-          onClose={() => {
-            setShowFollowUpModal(false);
-            setIsRecordingFromModal(false);
-            setIsActiveRecordingSession(false);
-            setProvidedPreviousNote(null); // Clear the provided previous note
+        {/* Initial Visit Modal */}
+        {showInitialVisitModal && (
+          <InitialVisitModal
+            onRecordingComplete={handleRecordingComplete}
+            onClose={() => {
+              setShowInitialVisitModal(false);
+              setIsRecordingFromModal(false);
+              setIsActiveRecordingSession(false);
+              // Clear manual transcript if we're closing the modal
+              if (isManualInput) {
+                setManualTranscript('');
+                setIsManualInput(false);
+              }
+            }}
+            manualTranscript={isManualInput ? manualTranscript : undefined}
+            patientId={selectedPatientId}
+            hasPreviousNotes={patientNotes.length > 0}
+            onFollowUpWithPreviousNote={handleFollowUpWithPreviousNote}
+          />
+        )}
 
-            // Refresh notes after closing the modal to show the newly generated note
-            if (selectedPatientId) {
-              fetchPatientNotes(selectedPatientId);
-            }
-          }}
-        />
-      )}
-
-      {/* Initial Visit Modal */}
-      {showInitialVisitModal && (
-        <InitialVisitModal
-          onRecordingComplete={handleRecordingComplete}
-          onClose={() => {
-            setShowInitialVisitModal(false);
-            setIsRecordingFromModal(false);
-            setIsActiveRecordingSession(false);
-            // Clear manual transcript if we're closing the modal
-            if (isManualInput) {
-              setManualTranscript('');
-              setIsManualInput(false);
-            }
-          }}
-          manualTranscript={isManualInput ? manualTranscript : undefined}
-          patientId={selectedPatientId}
-          hasPreviousNotes={patientNotes.length > 0}
-          onFollowUpWithPreviousNote={handleFollowUpWithPreviousNote}
-        />
-      )}
-
-      {/* Manual Transcript Modal */}
-      {showManualTranscriptModal && (
-        <ManualTranscriptModal
-          onTranscriptSubmit={handleManualTranscriptFromModal}
-          onClose={() => {
-            setShowManualTranscriptModal(false);
-          }}
-          selectedPatientId={selectedPatientId}
-        />
-      )}
+        {/* Manual Transcript Modal */}
+        {showManualTranscriptModal && (
+          <ManualTranscriptModal
+            onTranscriptSubmit={handleManualTranscriptFromModal}
+            onClose={() => {
+              setShowManualTranscriptModal(false);
+            }}
+            selectedPatientId={selectedPatientId}
+          />
+        )}
+      </div>
     </>
   );
 }
