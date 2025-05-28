@@ -831,10 +831,10 @@ export default function Home() {
               </div>
               <button
                 onClick={() => setShowTrash(!showTrash)}
-                className={`p-2 rounded-full transition-colors shadow-md border-2 ${
+                className={`p-2 transition-colors ${
                   showTrash
-                    ? 'bg-red-500 text-white dark:bg-red-600 border-red-500 dark:border-red-600'
-                    : 'bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800 border-white text-white'
+                    ? 'text-red-500 dark:text-red-400'
+                    : 'text-white hover:text-gray-200 dark:hover:text-gray-300'
                 }`}
                 title={showTrash ? 'Show active patients' : 'Show trash'}
               >
