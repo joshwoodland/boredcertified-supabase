@@ -37,6 +37,7 @@ export default function FollowUpModal({
   const [editableTranscript, setEditableTranscript] = useState('');
   const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
   const [recorderStatus, setRecorderStatus] = useState('Initializing...');
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(true);
   const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
 
   // Use the recording safeguard hook
@@ -50,7 +51,8 @@ export default function FollowUpModal({
     transcript,
     finalTranscript,
     sessionType: 'follow-up',
-    contextData: { lastVisitNote }
+    contextData: { lastVisitNote, patientId },
+    patientId
   });
 
   // Handle recovered transcript
@@ -360,7 +362,7 @@ export default function FollowUpModal({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-start justify-center z-50 overflow-auto pt-20 pb-8">
       <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg w-full max-w-3xl mx-auto">
-        {recoverySession && (
+        {recoverySession && showRecoveryPrompt && (
           <RecoveryPrompt
             savedSession={recoverySession}
             onRecover={onRecoverTranscript}
@@ -447,14 +449,12 @@ export default function FollowUpModal({
             </h3>
             
             {/* Live transcript display */}
-            {(transcript || finalTranscript) && (
-              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
-                <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
-                <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
-                  {transcript || finalTranscript || "No transcription yet..."}
-                </div>
+            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
+              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
+              <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
+                {transcript || finalTranscript || "Hello? Can you hear me?"}
               </div>
-            )}
+            </div>
           </div>
         ) : loading ? (
           <div className="flex flex-col items-center justify-center py-8">
@@ -621,19 +621,7 @@ export default function FollowUpModal({
           </div>
         )}
 
-        {/* Recorder Status Display - Show when not recording */}
-        {!isRecording && !isEditMode && (
-          <div className="my-4 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recorder Status</div>
-            <div className={`text-sm ${
-              recorderRef.current?.canRecord ? 'text-green-600' :
-              error ? 'text-red-600' :
-              'text-yellow-600'
-            }`}>
-              {error || recorderStatus}
-            </div>
-          </div>
-        )}
+
 
         {/* Recording status indicator */}
         {isRecording && (
@@ -718,6 +706,7 @@ export default function FollowUpModal({
                       recorderRef.current.startRecording();
                       setIsRecording(true);
                       setPreserveTranscript(false);
+                      setShowRecoveryPrompt(false); // Hide recovery prompt when starting recording
                     }
                   }}
                   disabled={loading || !recorderRef.current?.canRecord}
@@ -736,6 +725,7 @@ export default function FollowUpModal({
                       recorderRef.current.startRecording();
                       setIsRecording(true);
                       setPreserveTranscript(false);
+                      setShowRecoveryPrompt(false); // Hide recovery prompt when starting recording
                     }
                   }}
                   disabled={loading || !recorderRef.current?.canRecord}

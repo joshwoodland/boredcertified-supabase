@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { FiCalendar, FiRefreshCw, FiChevronDown, FiChevronUp, FiEdit, FiCopy, FiSend, FiTrash2 } from 'react-icons/fi';
 import { LuWandSparkles } from 'react-icons/lu';
-import { formatSoapNote } from '../utils/formatSoapNote';
+import { formatSoapNote, formatSoapNoteForCopy } from '../utils/formatSoapNote';
 import { safeJsonParse, extractContent } from '../utils/safeJsonParse';
 import Toast from './Toast';
 import type { Note } from '../types/notes';
@@ -73,6 +73,9 @@ export default function SupabasePatientNotes({
 
     setLoading(true);
     setError(null);
+    // Clear existing summaries when loading new notes
+    setSummaries({});
+    setIsFetchingSummary({});
 
     try {
       console.log(`Fetching notes for patient ID: ${patientId}`);
@@ -125,6 +128,16 @@ export default function SupabasePatientNotes({
 
       console.log(`Processed ${formattedNotes.length} valid notes`);
       setNotes(formattedNotes);
+
+      // Extract summaries from the loaded notes and populate the summaries state
+      const extractedSummaries: Record<string, string | null> = {};
+      formattedNotes.forEach((note: Note) => {
+        if (note.summary) {
+          extractedSummaries[note.id] = note.summary;
+        }
+      });
+      setSummaries(extractedSummaries);
+      console.log(`Extracted ${Object.keys(extractedSummaries).length} existing summaries from notes`);
 
       // If there's a selectedNoteId, find and select that note
       if (selectedNoteId) {
@@ -216,9 +229,9 @@ export default function SupabasePatientNotes({
   };
 
   const handleCopy = (note: Note) => {
-    // Extract the actual content before copying
-    const plainText = extractContent(note.content);
-    navigator.clipboard.writeText(plainText).then(() => {
+    // Format the note content for copying (removes markdown symbols, preserves formatting)
+    const formattedText = formatSoapNoteForCopy(note.content);
+    navigator.clipboard.writeText(formattedText).then(() => {
       setToastMessage('Note copied!');
       setToastType('success');
       setShowToast(true);

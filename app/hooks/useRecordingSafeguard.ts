@@ -18,6 +18,7 @@ interface RecordingSafeguardOptions {
   finalTranscript: string;
   sessionType: RecordingSessionType;
   contextData?: any;
+  patientId?: string; // Current patient ID for recovery matching
 }
 
 export function useRecordingSafeguard({
@@ -25,7 +26,8 @@ export function useRecordingSafeguard({
   transcript,
   finalTranscript,
   sessionType,
-  contextData
+  contextData,
+  patientId
 }: RecordingSafeguardOptions) {
   const [recoverySession, setRecoverySession] = useState<SavedRecordingSession | null>(null);
   const [lastBackupTime, setLastBackupTime] = useState<number | null>(null);
@@ -34,8 +36,9 @@ export function useRecordingSafeguard({
   useEffect(() => {
     if (hasInterruptedSession()) {
       const session = getExistingSession();
-      // Only show recovery for matching session type
-      if (session?.sessionType === sessionType) {
+      // Only show recovery for matching session type and patient ID
+      if (session?.sessionType === sessionType && 
+          session?.contextData?.patientId === patientId) {
         setRecoverySession(session);
       }
     }
@@ -43,7 +46,7 @@ export function useRecordingSafeguard({
     // Set up storage cleanup policy
     const cleanup = setupStorageCleanupPolicy();
     return cleanup;
-  }, [sessionType]);
+  }, [sessionType, patientId]);
   
   // Set up periodic saving and heartbeat
   useEffect(() => {

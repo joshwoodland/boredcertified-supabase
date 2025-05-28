@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { formatSoapNote, formatSoapNotePlainText } from '../utils/formatSoapNote';
+import { formatSoapNote, formatSoapNotePlainText, formatSoapNoteForCopy } from '../utils/formatSoapNote';
 import { extractContent } from '../utils/safeJsonParse';
 import { FiCopy } from 'react-icons/fi';
 
@@ -39,13 +39,14 @@ export default function SoapNoteFormatter() {
 3. Follow up in 2 weeks`
   );
   
-  const [outputFormat, setOutputFormat] = useState<'html' | 'text' | 'raw'>('html');
+  const [outputFormat, setOutputFormat] = useState<'html' | 'text' | 'copy' | 'raw'>('html');
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   
   // Safely extract content from potential JSON before formatting
   const safeInputText = extractContent(inputText);
   const formattedHtml = formatSoapNote(safeInputText);
   const formattedText = formatSoapNotePlainText(safeInputText);
+  const formattedForCopy = formatSoapNoteForCopy(safeInputText);
   
   const handleCopy = () => {
     let textToCopy = '';
@@ -58,6 +59,9 @@ export default function SoapNoteFormatter() {
         break;
       case 'text':
         textToCopy = formattedText;
+        break;
+      case 'copy':
+        textToCopy = formattedForCopy;
         break;
       case 'raw':
         textToCopy = safeInputText;
@@ -95,6 +99,7 @@ export default function SoapNoteFormatter() {
               >
                 <option value="html">HTML</option>
                 <option value="text">Plain Text</option>
+                <option value="copy">Copy Format</option>
                 <option value="raw">Raw Markdown</option>
               </select>
               
@@ -114,6 +119,9 @@ export default function SoapNoteFormatter() {
             )}
             {outputFormat === 'text' && (
               <div className="whitespace-pre-wrap">{formattedText}</div>
+            )}
+            {outputFormat === 'copy' && (
+              <div className="whitespace-pre-wrap">{formattedForCopy}</div>
             )}
             {outputFormat === 'raw' && (
               <div className="whitespace-pre-wrap font-mono text-sm">{safeInputText}</div>

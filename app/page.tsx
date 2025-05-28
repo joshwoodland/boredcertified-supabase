@@ -58,32 +58,33 @@ function normalizePatientId(id: any): string {
 export default function Home() {
   const { settings, isLoading: settingsLoading, error: settingsError, refreshSettings } = useAppSettings();
   const [patients, setPatients] = useState<AppPatient[]>([]);
-  const [selectedPatientId, setSelectedPatientId] = useState<string>();
-  const [currentNote, setCurrentNote] = useState<Note | null>(null);
+  const [selectedPatientId, setSelectedPatientId] = useState<string | undefined>(undefined);
   const [patientNotes, setPatientNotes] = useState<Note[]>([]);
+  const [currentNote, setCurrentNote] = useState<Note | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [liveTranscript, setLiveTranscript] = useState<string>('');
-  const [showTrash, setShowTrash] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [manualTranscript, setManualTranscript] = useState('');
-  const [isManualInput, setIsManualInput] = useState(false);
-  const [showManualTranscriptModal, setShowManualTranscriptModal] = useState(false);
-  const [forceCollapse, setForceCollapse] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('Processing...');
-  const [trashedPatientsData, setTrashedPatientsData] = useState<AppPatient[]>([]);
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [isActiveRecordingSession, setIsActiveRecordingSession] = useState(false);
+  const [isRecordingFromModal, setIsRecordingFromModal] = useState(false);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showInitialVisitModal, setShowInitialVisitModal] = useState(false);
+  const [showManualTranscriptModal, setShowManualTranscriptModal] = useState(false);
   const [lastVisitNote, setLastVisitNote] = useState('');
-  const [isRecordingFromModal, setIsRecordingFromModal] = useState(false);
-  const [isActiveRecordingSession, setIsActiveRecordingSession] = useState(false);
-  const [patientSearchQuery, setPatientSearchQuery] = useState('');
-  const [showPatientSearch, setShowPatientSearch] = useState(false);
+  const [manualTranscript, setManualTranscript] = useState('');
+  const [isManualInput, setIsManualInput] = useState(false);
+  const [forceCollapse, setForceCollapse] = useState(false);
+  const [notesRefreshTrigger, setNotesRefreshTrigger] = useState(0);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState('Generating SOAP note...');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAudioRecordingsOpen, setIsAudioRecordingsOpen] = useState(false);
-  const [notesRefreshTrigger, setNotesRefreshTrigger] = useState(0); // Add refresh trigger state
-  const searchRef = useRef<HTMLDivElement>(null);
+  const [showPatientSearch, setShowPatientSearch] = useState(false);
+  const [patientSearchQuery, setPatientSearchQuery] = useState('');
+  const [showTrash, setShowTrash] = useState(false);
+  const [providedPreviousNote, setProvidedPreviousNote] = useState<string | null>(null);
+  const [trashedPatientsData, setTrashedPatientsData] = useState<AppPatient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   // Handle clicks outside of the search dropdown
   useEffect(() => {
@@ -734,6 +735,21 @@ export default function Home() {
 
   const selectedPatient = patients.find(p => p.id === selectedPatientId);
 
+  // Handler for when user provides a previous note for follow-up
+  const handleFollowUpWithPreviousNote = async (previousNote: string) => {
+    if (!selectedPatientId) {
+      setError('Please select a patient first');
+      return;
+    }
+
+    // Store the provided previous note
+    setProvidedPreviousNote(previousNote);
+    setLastVisitNote(previousNote);
+    
+    // Show the follow-up modal with the provided previous note
+    setShowFollowUpModal(true);
+  };
+
   return (
     <>
       <div className="container mx-auto px-4 py-0 -mt-12 -mb-14">
@@ -1074,15 +1090,16 @@ export default function Home() {
       )}
 
       {/* Follow-Up Checklist Modal */}
-      {showFollowUpModal && selectedPatientId && patientNotes.length > 0 && (
+      {showFollowUpModal && selectedPatientId && (patientNotes.length > 0 || providedPreviousNote) && (
         <FollowUpModal
           lastVisitNote={lastVisitNote}
           patientId={selectedPatientId}
-          noteId={patientNotes[0].id} // Use the most recent note's ID
+          noteId={patientNotes.length > 0 ? patientNotes[0].id : 'provided-note'} // Use the most recent note's ID or a placeholder for provided notes
           onClose={() => {
             setShowFollowUpModal(false);
             setIsRecordingFromModal(false);
             setIsActiveRecordingSession(false);
+            setProvidedPreviousNote(null); // Clear the provided previous note
 
             // Refresh notes after closing the modal to show the newly generated note
             if (selectedPatientId) {
@@ -1107,6 +1124,9 @@ export default function Home() {
             }
           }}
           manualTranscript={isManualInput ? manualTranscript : undefined}
+          patientId={selectedPatientId}
+          hasPreviousNotes={patientNotes.length > 0}
+          onFollowUpWithPreviousNote={handleFollowUpWithPreviousNote}
         />
       )}
 

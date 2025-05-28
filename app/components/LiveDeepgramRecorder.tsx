@@ -141,7 +141,7 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
   // Setup microphone on mount
   useEffect(() => {
     setupMicrophone();
-  }, [setupMicrophone]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Notify parent components of state changes in headless mode
   useEffect(() => {
@@ -350,26 +350,7 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
 
   return (
     <div className="flex flex-col space-y-4">
-      {/* Status Display */}
-      <div className="flex flex-col md:flex-row gap-4 mb-4">
-        <div className="flex-1 bg-gray-50 p-3 rounded-lg">
-          <div className="text-sm font-medium text-gray-700 mb-1">Status</div>
-          <div className={`text-sm ${
-            canRecord ? 'text-green-600' :
-            error ? 'text-red-600' :
-            'text-yellow-600'
-          }`}>
-            {error || getStatusMessage()}
-          </div>
-        </div>
-        
-        <div className="flex-1 bg-gray-50 p-3 rounded-lg">
-          <div className="text-sm font-medium text-gray-700 mb-1">Recording</div>
-          <div className={`text-sm ${isRecording ? 'text-red-600' : 'text-gray-600'}`}>
-            {isRecording ? 'Active' : 'Stopped'}
-          </div>
-        </div>
-      </div>
+
 
       {/* Controls */}
       <div className="flex gap-3">

@@ -20,7 +20,7 @@ export default function TestDeepgramPage() {
     addLog('Component mounted, initializing...');
     setStatus('Setting up microphone...');
     setupMicrophone();
-  }, [setupMicrophone]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     addLog(`Microphone state changed: ${microphoneState}`);

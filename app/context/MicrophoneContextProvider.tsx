@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useState,
+  useCallback,
   ReactNode,
   FunctionComponent,
 } from "react";
@@ -48,7 +49,7 @@ const MicrophoneContextProvider: FunctionComponent<
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const setupMicrophone = async () => {
+  const setupMicrophone = useCallback(async () => {
     if (microphoneState === MicrophoneState.SettingUp) {
       console.log('[MICROPHONE] Already setting up microphone...');
       return;
@@ -143,9 +144,9 @@ const MicrophoneContextProvider: FunctionComponent<
         setErrorMessage('Unknown error occurred during microphone setup');
       }
     }
-  };
+  }, [microphoneState]);
 
-  const startMicrophone = () => {
+  const startMicrophone = useCallback(() => {
     if (microphone && microphoneState === MicrophoneState.Ready) {
       console.log('[MICROPHONE] Starting recording...');
       setMicrophoneState(MicrophoneState.Opening);
@@ -159,9 +160,9 @@ const MicrophoneContextProvider: FunctionComponent<
     } else {
       console.log('[MICROPHONE] Cannot start - microphone not ready. State:', microphoneState);
     }
-  };
+  }, [microphone, microphoneState]);
 
-  const stopMicrophone = () => {
+  const stopMicrophone = useCallback(() => {
     if (microphone && microphoneState === MicrophoneState.Open) {
       console.log('[MICROPHONE] Stopping recording...');
       try {
@@ -170,7 +171,7 @@ const MicrophoneContextProvider: FunctionComponent<
         console.error('[MICROPHONE] Error stopping recording:', error);
       }
     }
-  };
+  }, [microphone, microphoneState]);
 
   return (
     <MicrophoneContext.Provider

@@ -6,17 +6,24 @@ import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
 import LiveDeepgramRecorder, { LiveDeepgramRecorderRef } from './LiveDeepgramRecorder';
+import PreviousNoteModal from './PreviousNoteModal';
 
 interface InitialVisitModalProps {
   onRecordingComplete: (blob: Blob, transcript: string, isInitialEvaluation: boolean) => void;
   onClose: () => void;
   manualTranscript?: string; // Optional manual transcript for paste-in functionality
+  patientId?: string; // Patient ID for recovery session matching
+  hasPreviousNotes?: boolean; // Whether the patient has previous notes
+  onFollowUpWithPreviousNote?: (previousNote: string) => void; // Callback when user provides a previous note for follow-up
 }
 
 export default function InitialVisitModal({
   onRecordingComplete,
   onClose,
-  manualTranscript
+  manualTranscript,
+  patientId,
+  hasPreviousNotes = false,
+  onFollowUpWithPreviousNote
 }: InitialVisitModalProps) {
   const { settings } = useAppSettings();
   const [isRecording, setIsRecording] = useState(false);
@@ -27,6 +34,8 @@ export default function InitialVisitModal({
   const [editableTranscript, setEditableTranscript] = useState(manualTranscript || '');
   const [visitType, setVisitType] = useState<'initial' | 'followup' | null>(null);
   const [recorderStatus, setRecorderStatus] = useState('Initializing...');
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(true);
+  const [showPreviousNoteModal, setShowPreviousNoteModal] = useState(false);
   const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
 
   // Use the recording safeguard hook
@@ -41,7 +50,8 @@ export default function InitialVisitModal({
     transcript,
     finalTranscript,
     sessionType: 'initial-visit',
-    contextData: { visitType }
+    contextData: { visitType, patientId },
+    patientId
   });
 
   // Handle recovered transcript
@@ -64,8 +74,9 @@ export default function InitialVisitModal({
     console.log('InitialVisitModal rendering:', {
       hasManualTranscript: !!manualTranscript,
       transcriptLength: manualTranscript?.length || 0,
+      hasPreviousNotes,
     });
-  }, [manualTranscript]);
+  }, [manualTranscript, hasPreviousNotes]);
 
   // Handle transcript updates from LiveDeepgramRecorder
   const handleTranscriptUpdate = useCallback((newTranscript: string) => {
@@ -87,8 +98,17 @@ export default function InitialVisitModal({
       // Log visit type selection
       console.log(`Visit type selected: ${type}`);
 
+      // If follow-up is selected but there are no previous notes, show the previous note modal
+      if (type === 'followup' && !hasPreviousNotes) {
+        setShowPreviousNoteModal(true);
+        return;
+      }
+
       // Set visit type
       setVisitType(type);
+
+      // Hide recovery prompt when user selects a visit type (indicates they're not recovering)
+      setShowRecoveryPrompt(false);
 
       // Reset state
       setError(null);
@@ -106,6 +126,31 @@ export default function InitialVisitModal({
       console.error('Error starting recording:', error);
       setError(error instanceof Error ? error.message : 'Failed to start recording');
     }
+  };
+
+  // Handle follow-up button click in edit mode
+  const handleFollowUpClick = () => {
+    if (!hasPreviousNotes) {
+      setShowPreviousNoteModal(true);
+    } else {
+      setVisitType('followup');
+    }
+  };
+
+  // Handle previous note submission
+  const handlePreviousNoteSubmit = (previousNote: string) => {
+    setShowPreviousNoteModal(false);
+    if (onFollowUpWithPreviousNote) {
+      onFollowUpWithPreviousNote(previousNote);
+    }
+    onClose();
+  };
+
+  // Handle skipping previous note
+  const handleSkipPreviousNote = () => {
+    setShowPreviousNoteModal(false);
+    // Proceed with follow-up without previous note context
+    setVisitType('followup');
   };
 
   // Stop recording function
@@ -141,10 +186,21 @@ export default function InitialVisitModal({
     onClose();
   };
 
+  // If showing previous note modal, render it instead
+  if (showPreviousNoteModal) {
+    return (
+      <PreviousNoteModal
+        onSubmitNote={handlePreviousNoteSubmit}
+        onSkip={handleSkipPreviousNote}
+        onClose={() => setShowPreviousNoteModal(false)}
+      />
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-start justify-center z-50 overflow-auto pt-20 pb-8">
       <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg w-full max-w-3xl mx-auto">
-        {recoverySession && (
+        {recoverySession && showRecoveryPrompt && (
           <RecoveryPrompt
             savedSession={recoverySession}
             onRecover={onRecoverTranscript}
@@ -204,7 +260,7 @@ export default function InitialVisitModal({
                 </button>
 
                 <button
-                  onClick={() => setVisitType('followup')}
+                  onClick={handleFollowUpClick}
                   className={`flex flex-col items-center justify-center p-4 border-2 ${visitType === 'followup' ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-purple-400'} rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors`}
                 >
                   <span className="text-lg font-medium text-gray-800 dark:text-white">Follow Up</span>
@@ -222,36 +278,15 @@ export default function InitialVisitModal({
               Recording Session
             </h3>
             
-            {/* Status Display */}
-            <div className="flex flex-col md:flex-row gap-4 mb-4">
-              <div className="flex-1 bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</div>
-                <div className={`text-sm ${
-                  recorderRef.current?.canRecord ? 'text-green-600' :
-                  error ? 'text-red-600' :
-                  'text-yellow-600'
-                }`}>
-                  {error || recorderStatus}
-                </div>
-              </div>
-              
-              <div className="flex-1 bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
-                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recording</div>
-                <div className={`text-sm ${isRecording ? 'text-red-600' : 'text-gray-600'}`}>
-                  {isRecording ? 'Active' : 'Stopped'}
-                </div>
-              </div>
-            </div>
+
 
             {/* Transcript Display */}
-            {(transcript || finalTranscript) && (
-              <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
-                <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
-                <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
-                  {transcript || finalTranscript || "No transcription yet..."}
-                </div>
+            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
+              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
+              <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
+                {transcript || finalTranscript || "Hello? Can you hear me?"}
               </div>
-            )}
+            </div>
           </div>
         ) : (
           // Visit type selection
@@ -260,17 +295,7 @@ export default function InitialVisitModal({
               Please select the appropriate visit type for this recording:
             </p>
             
-            {/* Recorder Status Display */}
-            <div className="mb-6 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-              <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Recorder Status</div>
-              <div className={`text-sm ${
-                recorderRef.current?.canRecord ? 'text-green-600' :
-                error ? 'text-red-600' :
-                'text-yellow-600'
-              }`}>
-                {error || recorderStatus}
-              </div>
-            </div>
+
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <button

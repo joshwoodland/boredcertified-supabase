@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createBrowserSupabaseClient, getClientSupabasePatients, convertToAppFormat, supabaseBrowser } from '@/app/lib/supabase';
 import type { AppPatient, SupabasePatient } from '@/app/lib/supabase';
 import { FiUser, FiTrash2, FiRefreshCw, FiEdit2 } from 'react-icons/fi';
@@ -61,6 +61,8 @@ export default function SupabasePatientList({
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredPatients, setFilteredPatients] = useState<Patient[]>([]); // Use Patient type
 
+  const newPatientInputRef = useRef<HTMLInputElement>(null);
+
   // Filter patients when search query changes
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -73,6 +75,13 @@ export default function SupabasePatientList({
     );
     setFilteredPatients(filtered);
   }, [searchQuery, patients]);
+
+  // Auto-focus the new patient input when adding a patient
+  useEffect(() => {
+    if (isAddingPatient && newPatientInputRef.current) {
+      newPatientInputRef.current.focus();
+    }
+  }, [isAddingPatient]);
 
   // Group patients by date (ignoring time)
   const groupPatientsByDate = (patientList: Patient[]) => { // Use Patient type
@@ -408,8 +417,10 @@ export default function SupabasePatientList({
                           type="text"
                           value={newPatientName}
                           onChange={(e) => setNewPatientName(e.target.value)}
-                          className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:border-blue-600 dark:focus:border-blue-500 dark:text-white"
+                          className="w-full px-3 py-1.5 text-base bg-transparent border-0 border-b-2 border-blue-500 dark:border-blue-400 focus:ring-0 focus:outline-none focus:border-blue-600 dark:focus:border-blue-500 dark:text-white"
                           placeholder="Enter patient name"
+                          ref={newPatientInputRef}
+                          autoFocus
                         />
                       </div>
                       <div className="flex items-center gap-2">
