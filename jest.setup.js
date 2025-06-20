@@ -1,5 +1,5 @@
 // Learn more: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom';
+require('@testing-library/jest-dom');
 
 // Mock environment variables that would normally be set in .env files
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://mock-url.supabase.co';

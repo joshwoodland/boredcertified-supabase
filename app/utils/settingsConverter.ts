@@ -17,10 +17,11 @@ export function supabaseToAppSettings(settings: SupabaseSettings | null): AppSet
     id: settings.id,
     darkMode: settings.dark_mode,
     gptModel: settings.gpt_model,
-    initialVisitPrompt: settings.initial_visit_prompt,
-    followUpVisitPrompt: settings.follow_up_visit_prompt,
+    initialVisitPrompt: settings.initial_visit_additional_preferences,
+    followUpVisitPrompt: settings.follow_up_visit_additional_preferences,
     autoSave: settings.auto_save,
-    lowEchoCancellation: settings.low_echo_cancellation,
+    providerName: settings.provider_name,
+    supervisor: settings.supervisor,
     email: settings.email,
     userId: settings.user_id,
     updatedAt: new Date(settings.updated_at),
@@ -38,10 +39,11 @@ export function appToSupabaseSettings(settings: Partial<AppSettings>): Partial<S
   if (settings.id !== undefined) result.id = settings.id;
   if (settings.darkMode !== undefined) result.dark_mode = settings.darkMode;
   if (settings.gptModel !== undefined) result.gpt_model = settings.gptModel;
-  if (settings.initialVisitPrompt !== undefined) result.initial_visit_prompt = settings.initialVisitPrompt;
-  if (settings.followUpVisitPrompt !== undefined) result.follow_up_visit_prompt = settings.followUpVisitPrompt;
+  if (settings.initialVisitPrompt !== undefined) result.initial_visit_additional_preferences = settings.initialVisitPrompt;
+  if (settings.followUpVisitPrompt !== undefined) result.follow_up_visit_additional_preferences = settings.followUpVisitPrompt;
   if (settings.autoSave !== undefined) result.auto_save = settings.autoSave;
-  if (settings.lowEchoCancellation !== undefined) result.low_echo_cancellation = settings.lowEchoCancellation;
+  if (settings.providerName !== undefined) result.provider_name = settings.providerName;
+  if (settings.supervisor !== undefined) result.supervisor = settings.supervisor;
   if (settings.email !== undefined) result.email = settings.email;
   if (settings.userId !== undefined) result.user_id = settings.userId;
   if (settings.updatedAt !== undefined) result.updated_at = settings.updatedAt.toISOString();

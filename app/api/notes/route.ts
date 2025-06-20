@@ -113,7 +113,8 @@ export async function POST(request: NextRequest) {
       isInitialEvaluation,
       patientName,
       previousNote,
-      soapTemplate
+      soapTemplate,
+      sourceNoteId
     } = body;
 
     // Validate required fields
@@ -144,16 +145,70 @@ export async function POST(request: NextRequest) {
 
     // If transcript is provided, generate a SOAP note using OpenAI
     let noteContent = content;
-    if (transcript && useStructuredPrompt && soapTemplate) {
+    if (transcript && useStructuredPrompt) {
       try {
         console.log('[notes/route] Generating SOAP note with OpenAI');
 
+        // Get provider name and supervisor from settings
+        let providerName = 'Josh Woodland, APRN, PMHNP'; // Default fallback
+        let supervisor: string | null = null;
+        try {
+          // Get current user session
+          const { data: { session } } = await supabase.auth.getSession();
+          const userId = session?.user?.id;
+
+          if (userId) {
+            // Fetch user settings to get provider name and supervisor
+            const { data: userSettings } = await supabase
+              .from('app_settings')
+              .select('provider_name, supervisor')
+              .eq('user_id', userId)
+              .single();
+
+            if (userSettings?.provider_name) {
+              providerName = userSettings.provider_name;
+            }
+            if (userSettings?.supervisor) {
+              supervisor = userSettings.supervisor;
+            }
+          } else {
+            // For users not logged in, get default settings
+            const { data: defaultSettings } = await supabase
+              .from('app_settings')
+              .select('provider_name, supervisor')
+              .eq('id', 'default')
+              .single();
+
+            if (defaultSettings?.provider_name) {
+              providerName = defaultSettings.provider_name;
+            }
+            if (defaultSettings?.supervisor) {
+              supervisor = defaultSettings.supervisor;
+            }
+          }
+        } catch (settingsError) {
+          console.warn('[notes/route] Could not fetch provider name and supervisor from settings, using defaults:', settingsError);
+        }
+
         // Use the buildOpenAIMessages utility to structure the messages
+        console.log('[notes/route] Building OpenAI messages with:', {
+          hasTranscript: !!transcript,
+          transcriptLength: transcript?.length || 0,
+          hasPreviousNote: !!previousNote,
+          soapTemplateLength: soapTemplate?.length || 0,
+          patientName: patientName || 'Patient',
+          providerName,
+          supervisor,
+          isInitialEvaluation
+        });
+
         const messages = buildOpenAIMessages({
           previousSoapNote: previousNote || undefined,
           currentTranscript: transcript,
-          soapTemplate: soapTemplate,
+          soapTemplate: soapTemplate || '', // Ensure it's always a string
           patientName: patientName || 'Patient',
+          providerName: providerName,
+          supervisor: supervisor,
           isInitialEvaluation: isInitialEvaluation
         });
 
@@ -166,48 +221,58 @@ export async function POST(request: NextRequest) {
         });
 
         // Extract the generated content
-        noteContent = completion.choices[0]?.message?.content?.trim() || 'New Note';
-        console.log('[notes/route] Successfully generated SOAP note');
+        const generatedContent = completion.choices[0]?.message?.content?.trim();
+        if (!generatedContent) {
+          console.error('[notes/route] OpenAI returned empty content');
+          throw new Error('OpenAI returned empty content');
+        }
+        
+        noteContent = generatedContent;
+        console.log('[notes/route] Successfully generated SOAP note, length:', noteContent.length);
       } catch (error) {
         console.error('[notes/route] Error generating SOAP note with OpenAI:', error);
+        console.error('[notes/route] Error details:', {
+          name: error instanceof Error ? error.name : 'Unknown',
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
         // Fall back to default content if OpenAI generation fails
         noteContent = content || (title ? `# ${title}\n\n` : 'New Note');
+        console.log('[notes/route] Using fallback content:', noteContent);
       }
     } else {
       // Use provided content or default
       noteContent = content || (title ? `# ${title}\n\n` : 'New Note');
     }
 
-    // Create a new note
-    const newNote = {
-      id: uuidv4(),
-      patient_id: patientId,
-      content: noteContent,
-      created_at: visitDate || new Date().toISOString(), // Use visitDate as created_at if provided
-      updated_at: new Date().toISOString(),
-      transcript: transcript || '',
-      summary: null,
-      is_initial_visit: isInitialEvaluation !== undefined ? isInitialEvaluation : visitType === 'initial', // Use explicit flag or convert string visitType
-      audio_file_url: null
-    };
-
-    // Insert the note into Supabase
-    const { data: insertedNote, error } = await supabase
+    // Save the note to Supabase
+    const noteId = uuidv4();
+    const { data: createdNote, error: insertError } = await supabase
       .from('notes')
-      .insert(newNote)
+      .insert({
+        id: noteId,
+        patient_id: patientId,
+        transcript: transcript || '',
+        content: noteContent,
+        summary: '', // Will be updated after summary generation if needed
+        is_initial_visit: isInitialEvaluation || false,
+        source_note_id: sourceNoteId || null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
       .select()
       .single();
 
-    if (error) {
-      console.error('[notes/route] Error creating note:', error);
+    if (insertError) {
+      console.error('[notes/route] Error creating note:', insertError);
       return NextResponse.json(
-        { error: 'Failed to create note', details: error.message },
+        { error: 'Failed to create note', details: insertError.message },
         { status: 500 }
       );
     }
 
     // Convert to app format and return
-    const appNote = convertToAppFormat(insertedNote, 'note') as AppNote;
+    const appNote = convertToAppFormat(createdNote, 'note') as AppNote;
     return NextResponse.json(appNote);
   } catch (error) {
     console.error('[notes/route] Unexpected error:', error);

@@ -225,8 +225,10 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
                   email: email,
                   dark_mode: true,
                   gpt_model: defaultSettings?.gpt_model ?? 'gpt-4o',
-                  initial_visit_prompt: defaultSettings?.initial_visit_prompt ?? '',
-                  follow_up_visit_prompt: defaultSettings?.follow_up_visit_prompt ?? '',
+                  initial_visit_additional_preferences: defaultSettings?.initial_visit_additional_preferences ?? '',
+                  follow_up_visit_additional_preferences: defaultSettings?.follow_up_visit_additional_preferences ?? '',
+                  provider_name: defaultSettings?.provider_name ?? 'Josh Woodland, APRN, PMHNP',
+                  supervisor: defaultSettings?.supervisor ?? null,
                   low_echo_cancellation: defaultSettings?.low_echo_cancellation ?? false,
                   auto_save: defaultSettings?.auto_save ?? false,
                   updated_at: now

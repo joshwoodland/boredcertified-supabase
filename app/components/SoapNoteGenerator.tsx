@@ -150,20 +150,17 @@ export default function SoapNoteGenerator({
       // Use the full transcript without deduplication
       const fullTranscript = transcript;
 
-      // Get the appropriate template based on visit type
-      // Use default templates if settings are not loaded or templates are empty
-      const defaultInitialTemplate = "Please generate a comprehensive SOAP note for this initial psychiatric evaluation.";
-      const defaultFollowUpTemplate = "Please generate a comprehensive SOAP note for this follow-up psychiatric visit.";
+      // Get the additional preferences from settings
+      // The hardcoded templates are used automatically by the API
+      const additionalPreferences = isInitialVisit
+        ? (settings.initialVisitPrompt || '')
+        : (settings.followUpVisitPrompt || '');
 
-      const soapTemplate = isInitialVisit
-        ? (settings.initialVisitPrompt || defaultInitialTemplate)
-        : (settings.followUpVisitPrompt || defaultFollowUpTemplate);
-
-      console.log('Using template:', {
-        isInitialVisit,
-        templateLength: soapTemplate.length,
-        settingsLoaded: settings.settingsLoaded
-      });
+              console.log('Using additional preferences:', {
+          isInitialVisit,
+          additionalPreferencesLength: additionalPreferences.length,
+          settingsLoaded: settings.settingsLoaded
+        });
 
       // Use the API endpoint with explicit visit type, patient name, and previous note
       const response = await fetch('/api/notes', {
@@ -178,7 +175,7 @@ export default function SoapNoteGenerator({
           isInitialEvaluation: isInitialVisit, // Explicitly pass visit type
           patientName: patientName, // Pass patient name for proper formatting
           previousNote: previousNote, // Pass the previous note for context
-          soapTemplate: soapTemplate // Pass the appropriate template
+          soapTemplate: additionalPreferences // Pass the additional preferences
         }),
       });
 
@@ -243,14 +240,11 @@ export default function SoapNoteGenerator({
       const existingNotes = await notesResponse.json();
       const isInitialVisit = existingNotes.length === 0;
 
-      // Select the appropriate system message
-      // Use default templates if settings are not loaded or templates are empty
-      const defaultInitialTemplate = "Please generate a comprehensive SOAP note for this initial psychiatric evaluation.";
-      const defaultFollowUpTemplate = "Please generate a comprehensive SOAP note for this follow-up psychiatric visit.";
-
-      const baseSystemMessage = isInitialVisit
-        ? (settings.initialVisitPrompt || defaultInitialTemplate)
-        : (settings.followUpVisitPrompt || defaultFollowUpTemplate);
+      // Get additional preferences from settings
+      // Note: This method bypasses the hardcoded templates and should not be used
+      const additionalPreferencesForDirect = isInitialVisit
+        ? (settings.initialVisitPrompt || '')
+        : (settings.followUpVisitPrompt || '');
 
       // Add formatting instructions
       const formattingInstructions = `
@@ -261,7 +255,8 @@ FORMATTING INSTRUCTIONS:
 - Keep section headers simple and consistent
 
 `;
-      const systemMessage = formattingInstructions + baseSystemMessage;
+      // WARNING: This method bypasses hardcoded templates - should use the main generateSoapNote method instead
+      const systemMessage = formattingInstructions + additionalPreferencesForDirect;
 
       // Make request to the OpenAI API
       const openaiResponse = await fetch('/api/openai', {

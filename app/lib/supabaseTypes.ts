@@ -18,16 +18,19 @@ export interface SupabaseNote {
   summary: string | null;
   audio_file_url: string | null;
   is_initial_visit: boolean;
+  checklist_content: any | null; // JSON field for storing follow-up checklist items
+  source_note_id: string | null; // Reference to the note this checklist was generated from
 }
 
 export interface SupabaseSettings {
   id: string;
   dark_mode: boolean;
   gpt_model: string;
-  initial_visit_prompt: string;
-  follow_up_visit_prompt: string;
+  initial_visit_additional_preferences: string;
+  follow_up_visit_additional_preferences: string;
   auto_save: boolean;
-  low_echo_cancellation: boolean;
+  provider_name: string;
+  supervisor: string | null;
   email: string | null;
   user_id: string | null;
   updated_at: string;
@@ -52,6 +55,8 @@ export interface AppNote {
   content: string;
   summary: string | null;
   isInitialVisit: boolean;
+  checklistContent: any | null; // JSON field for storing follow-up checklist items
+  sourceNoteId: string | null; // Reference to the note this checklist was generated from
 }
 
 /**
@@ -64,7 +69,8 @@ export interface AppSettings {
   initialVisitPrompt: string;
   followUpVisitPrompt: string;
   autoSave: boolean;
-  lowEchoCancellation: boolean;
+  providerName: string;
+  supervisor: string | null;
   email: string | null;
   userId: string | null;
   updatedAt: Date;
@@ -109,6 +115,8 @@ export function convertToAppFormat(record: SupabaseRecord, type: 'patient' | 'no
       content: noteRecord.content,
       summary: noteRecord.summary,
       isInitialVisit: noteRecord.is_initial_visit,
+      checklistContent: noteRecord.checklist_content,
+      sourceNoteId: noteRecord.source_note_id,
     } as AppNote;
   }
 
@@ -118,10 +126,10 @@ export function convertToAppFormat(record: SupabaseRecord, type: 'patient' | 'no
       id: settingsRecord.id,
       darkMode: settingsRecord.dark_mode,
       gptModel: settingsRecord.gpt_model,
-      initialVisitPrompt: settingsRecord.initial_visit_prompt,
-      followUpVisitPrompt: settingsRecord.follow_up_visit_prompt,
+      initialVisitPrompt: settingsRecord.initial_visit_additional_preferences,
+      followUpVisitPrompt: settingsRecord.follow_up_visit_additional_preferences,
       autoSave: settingsRecord.auto_save,
-      lowEchoCancellation: settingsRecord.low_echo_cancellation,
+      providerName: settingsRecord.provider_name,
       email: settingsRecord.email,
       userId: settingsRecord.user_id,
       updatedAt: new Date(settingsRecord.updated_at),
@@ -164,6 +172,8 @@ export function convertToSupabaseFormat(record: AppRecord, type: 'patient' | 'no
       content: noteRecord.content,
       summary: noteRecord.summary,
       is_initial_visit: noteRecord.isInitialVisit,
+      checklist_content: noteRecord.checklistContent,
+      source_note_id: noteRecord.sourceNoteId,
     } as SupabaseNote;
   }
 
@@ -173,10 +183,10 @@ export function convertToSupabaseFormat(record: AppRecord, type: 'patient' | 'no
       id: settingsRecord.id,
       dark_mode: settingsRecord.darkMode,
       gpt_model: settingsRecord.gptModel,
-      initial_visit_prompt: settingsRecord.initialVisitPrompt,
-      follow_up_visit_prompt: settingsRecord.followUpVisitPrompt,
+      initial_visit_additional_preferences: settingsRecord.initialVisitPrompt,
+      follow_up_visit_additional_preferences: settingsRecord.followUpVisitPrompt,
       auto_save: settingsRecord.autoSave,
-      low_echo_cancellation: settingsRecord.lowEchoCancellation,
+      provider_name: settingsRecord.providerName,
       email: settingsRecord.email,
       user_id: settingsRecord.userId,
       updated_at: settingsRecord.updatedAt.toISOString(),

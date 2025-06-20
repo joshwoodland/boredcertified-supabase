@@ -1,0 +1,65 @@
+/* Modal backdrop effects */
+.modal-open > main {
+  filter: brightness(40%) blur(1px);
+  transition: filter 0.2s ease-in-out;
+  pointer-events: none;
+}
+
+.settings-modal {
+  isolation: isolate;
+  pointer-events: auto;
+  filter: none !important;
+}
+
+/* Modern scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar-track {
+  background: rgba(55, 65, 81, 1);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(209, 213, 219, 1);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(229, 231, 235, 1);
+}
+
+/* Custom scrollbar styles for dark mode textareas */
+.dark textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dark textarea::-webkit-scrollbar-track {
+  background: theme('colors.gray.700');
+  margin-top: 32px;
+}
+
+.dark textarea::-webkit-scrollbar-thumb {
+  background-color: theme('colors.gray.300');
+  border-radius: 4px;
+  min-height: 40px;
+}
+
+.dark textarea::-webkit-scrollbar-corner {
+  background: theme('colors.gray.700');
+} 

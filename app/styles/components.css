@@ -1,0 +1,20 @@
+/* Font classes */
+.font-montserrat {
+  font-family: var(--font-montserrat), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Gradient text effect */
+.gradient-text {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-image: linear-gradient(to right, #4f46e5, #7c3aed, #d946ef);
+  background-size: 200% auto;
+  animation: shine 8s ease-in-out infinite;
+  filter: drop-shadow(0px 0px 1.5px white) drop-shadow(0px 0px 1.5px white) drop-shadow(0px 0px 1px white);
+}
+
+/* Animation utility classes */
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+} 

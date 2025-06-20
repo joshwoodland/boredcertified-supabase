@@ -10,6 +10,8 @@ import SoapNoteGenerator from './components/SoapNoteGenerator';
 import FollowUpModal from './components/FollowUpModal';
 import InitialVisitModal from './components/InitialVisitModal';
 import ManualTranscriptModal from './components/ManualTranscriptModal';
+import ProviderNameModal from './components/ProviderNameModal';
+import InitialEvaluationModal from './components/InitialEvaluationModal';
 import { Settings as SettingsIcon, Trash2, PlayCircle, Search, User } from 'lucide-react';
 import UserProfile from './components/UserProfile';
 import AudioRecordings from './components/AudioRecordings';
@@ -18,6 +20,8 @@ import { supabaseBrowser } from '@/app/lib/supabase';
 import type { AppPatient } from './lib/supabaseTypes';
 import type { Note } from './types/notes';
 import { extractContent } from './utils/safeJsonParse';
+import DefaultChecklistModal from './components/DefaultChecklistModal';
+import { formatSoapNote } from './utils/formatSoapNote';
 
 // Use the singleton browser client for direct database access
 const supabase = supabaseBrowser;
@@ -64,14 +68,19 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState('');
-  const [isActiveRecordingSession, setIsActiveRecordingSession] = useState(false);
   const [isRecordingFromModal, setIsRecordingFromModal] = useState(false);
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [showInitialVisitModal, setShowInitialVisitModal] = useState(false);
   const [showManualTranscriptModal, setShowManualTranscriptModal] = useState(false);
-  const [lastVisitNote, setLastVisitNote] = useState('');
-  const [manualTranscript, setManualTranscript] = useState('');
-  const [isManualInput, setIsManualInput] = useState(false);
+  const [showDefaultChecklistModal, setShowDefaultChecklistModal] = useState(false);
+  const [showInitialEvaluationModal, setShowInitialEvaluationModal] = useState(false);
+  const [lastVisitNote, setLastVisitNote] = useState<string>('');
+  const [providedPreviousNote, setProvidedPreviousNote] = useState<string | null>(null);
+  const [providedIntakeFormContext, setProvidedIntakeFormContext] = useState<string | null>(null);
+  const [trashedPatientsData, setTrashedPatientsData] = useState<AppPatient[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showProviderNameModal, setShowProviderNameModal] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const [forceCollapse, setForceCollapse] = useState(false);
   const [notesRefreshTrigger, setNotesRefreshTrigger] = useState(0);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
@@ -81,10 +90,6 @@ export default function Home() {
   const [showPatientSearch, setShowPatientSearch] = useState(false);
   const [patientSearchQuery, setPatientSearchQuery] = useState('');
   const [showTrash, setShowTrash] = useState(false);
-  const [providedPreviousNote, setProvidedPreviousNote] = useState<string | null>(null);
-  const [trashedPatientsData, setTrashedPatientsData] = useState<AppPatient[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const searchRef = useRef<HTMLDivElement>(null);
 
   // Enable dark mode
   useEffect(() => {
@@ -144,7 +149,7 @@ export default function Home() {
     "Loki is causing mischief in the medical records… let's rein that in. 😈",
     "Stranger Things are happening in these notes… better double-check. 🔮",
     "The Last Airbender is mastering the four elements… of SOAP notes. 🌪️",
-    "Squid Game: Red Light, Green Light… but for medical documentation. 🦑",
+    "Squid Game: Red Light, Green Light… but for medical documentation. 🎲",
     "WandaVision's sitcom-style medical documentation—expect some plot twists. 📺",
     "Bridgerton's Lady Whistledown is reviewing your medical history… and it's quite the scandal. 📜",
     "Welcome to The White Lotus: Medical Scribe Resort Edition! 🌺",
@@ -197,6 +202,18 @@ export default function Home() {
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  // Check if provider name is empty after settings load and show modal if needed
+  useEffect(() => {
+    if (settings && !settingsLoading && !settings.providerName?.trim()) {
+      // Add a small delay to ensure all settings have loaded
+      const timer = setTimeout(() => {
+        setShowProviderNameModal(true);
+      }, 2000); // 2 second delay as requested
+      
+      return () => clearTimeout(timer);
+    }
+  }, [settings, settingsLoading]);
 
   // Handle patients loaded from SupabasePatientList
   const handlePatientsLoaded = (loadedPatients: AppPatient[]) => {
@@ -302,21 +319,14 @@ export default function Home() {
 
   const handleMoveToTrash = async (patientId: string) => {
     try {
-      const response = await fetch('/api/patients', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ id: patientId, action: 'moveToTrash' }),
-      });
-      if (!response.ok) throw new Error('Failed to move patient to trash');
+      // The actual update is already handled in SupabasePatientList
+      // Just update the UI state here
       await fetchPatients();
       if (selectedPatientId === patientId) {
         setSelectedPatientId(undefined);
       }
     } catch (error) {
-      console.error('Error moving patient to trash:', error);
-      setError('Failed to move patient to trash');
+      console.error('Error updating UI after moving patient to trash:', error);
     }
   };
 
@@ -386,72 +396,6 @@ export default function Home() {
     }
   };
 
-  const handleManualTranscriptSubmit = async () => {
-    if (!selectedPatientId || !manualTranscript.trim()) {
-      setError('Please select a patient and enter a transcript');
-      return;
-    }
-
-    setIsProcessing(true);
-    setError(null);
-    const controller = new AbortController();
-    setAbortController(controller);
-
-    try {
-      // Use the full transcript without additional processing
-      const fullTranscript = manualTranscript;
-
-      const soapResponse = await fetch('/api/notes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          patientId: selectedPatientId,
-          transcript: fullTranscript,
-          useStructuredPrompt: true // Ensure we use the structured prompt approach
-        }),
-        signal: controller.signal
-      });
-
-      const responseData = await soapResponse.json();
-
-      if (!soapResponse.ok) {
-        const errorMessage = typeof responseData === 'object' && responseData !== null
-          ? responseData.details || responseData.error || 'Failed to generate SOAP note'
-          : 'Failed to generate SOAP note';
-        console.error('SOAP note generation failed:', responseData);
-        throw new Error(errorMessage);
-      }
-
-      if (!responseData || typeof responseData !== 'object') {
-        throw new Error('Invalid response format from server');
-      }
-
-      setCurrentNote(responseData);
-      setManualTranscript('');
-      setIsManualInput(false);
-      setForceCollapse(prev => !prev);
-      setIsActiveRecordingSession(false);
-      setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
-
-      if (selectedPatientId) {
-        await fetchPatientNotes(selectedPatientId);
-      }
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('Note generation cancelled');
-        return;
-      }
-      console.error('Error processing transcript:', error);
-      setError(error instanceof Error ? error.message : 'Error processing transcript. Please try again.');
-    } finally {
-      setIsProcessing(false);
-      setAbortController(null);
-    }
-  };
-
-  // Handler for manual transcript submission from the modal
   const handleManualTranscriptFromModal = async (transcript: string, isInitialEvaluation: boolean) => {
     // Add extensive debugging for patient ID
     console.log('DEBUG - Raw selectedPatientId:', {
@@ -558,8 +502,8 @@ export default function Home() {
       // Get the appropriate provider preferences from settings
       // These are additional instructions that will be combined with hardcoded templates in the API
       const providerPreferences = isInitialEvaluation
-        ? settings?.initialVisitPrompt || 'Please include detailed medication side effects when mentioned. Use bullet points for medication lists.'
-        : settings?.followUpVisitPrompt || 'Focus on changes since the last visit. Highlight any medication adjustments with "CHANGED" label.';
+        ? settings?.initialVisitPrompt || ''
+        : settings?.followUpVisitPrompt || '';
 
       // Create the request body with all required parameters
       const requestBody = {
@@ -572,7 +516,17 @@ export default function Home() {
         soapTemplate: providerPreferences // Pass provider preferences to be combined with hardcoded templates in the API
       };
 
-      console.log('DEBUG - Request body to be sent:', JSON.stringify(requestBody));
+      console.log('DEBUG - Request body to be sent:', JSON.stringify(requestBody, null, 2));
+      console.log('DEBUG - Request body analysis:', {
+        hasTranscript: !!transcript,
+        transcriptLength: transcript?.length || 0,
+        useStructuredPrompt: requestBody.useStructuredPrompt,
+        isInitialEvaluation: requestBody.isInitialEvaluation,
+        hasPatientName: !!requestBody.patientName,
+        hasPreviousNote: !!requestBody.previousNote,
+        soapTemplateLength: requestBody.soapTemplate?.length || 0,
+        soapTemplateContent: requestBody.soapTemplate || '(empty)'
+      });
 
       // Generate SOAP note
       console.log('Sending request to /api/notes with patientId:', patientId);
@@ -608,10 +562,7 @@ export default function Home() {
       }
 
       setCurrentNote(responseData);
-      setManualTranscript('');
-      setIsManualInput(false);
-      setForceCollapse(prev => !prev);
-      setIsActiveRecordingSession(false);
+      setIsRecordingFromModal(false);
       setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
       if (patientId) {
@@ -661,8 +612,8 @@ export default function Home() {
       // Get the appropriate provider preferences from settings
       // These are additional instructions that will be combined with hardcoded templates in the API
       const providerPreferences = isInitialEvaluation
-        ? settings?.initialVisitPrompt || 'Please include detailed medication side effects when mentioned. Use bullet points for medication lists.'
-        : settings?.followUpVisitPrompt || 'Focus on changes since the last visit. Highlight any medication adjustments with "CHANGED" label.';
+        ? settings?.initialVisitPrompt || ''
+        : settings?.followUpVisitPrompt || '';
 
       console.log('Generating SOAP note with structured prompt approach:', {
         isInitialVisit: isInitialEvaluation,
@@ -705,7 +656,7 @@ export default function Home() {
 
       setCurrentNote(responseData);
       setLiveTranscript('');
-      setIsActiveRecordingSession(false);
+      setIsRecordingFromModal(false);
       setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
 
       await fetchPatientNotes(selectedPatientId);
@@ -724,17 +675,11 @@ export default function Home() {
 
   const handleUpdatePatient = async (patientId: string, name: string) => {
     try {
-      const response = await fetch('/api/patients', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ id: patientId, name }),
-      });
-      if (!response.ok) throw new Error('Failed to update patient');
+      // The actual update is already handled in SupabasePatientList
+      // Just update the UI state here
+      await fetchPatients();
     } catch (error) {
-      console.error('Error updating patient:', error);
-      setError('Failed to update patient');
+      console.error('Error updating UI after patient update:', error);
     }
   };
 
@@ -753,6 +698,51 @@ export default function Home() {
     
     // Show the follow-up modal with the provided previous note
     setShowFollowUpModal(true);
+  };
+
+  const handleSkipToDefaultChecklist = () => {
+    if (!selectedPatientId) {
+      setError('Please select a patient first');
+      return;
+    }
+
+    // Show the default checklist modal
+    setShowDefaultChecklistModal(true);
+  };
+
+  const handleFollowUpWithExistingNotes = () => {
+    if (!selectedPatientId) {
+      setError('Please select a patient first');
+      return;
+    }
+
+    if (patientNotes.length === 0) {
+      setError('No previous notes available for follow-up');
+      return;
+    }
+
+    // Use the most recent note for follow-up, same as handleStartNewVisit
+    const lastNote = patientNotes[0];
+    setLastVisitNote(extractContent(lastNote.content) || '');
+    setShowFollowUpModal(true);
+  };
+
+  // Handler for when user provides intake form for initial evaluation
+  const handleInitialEvaluationWithIntakeForm = async (intakeForm: string) => {
+    if (!selectedPatientId) {
+      setError('Please select a patient first');
+      return;
+    }
+
+    // Store the provided intake form context
+    setProvidedIntakeFormContext(intakeForm);
+    
+    // Show the Initial Evaluation modal with the intake form context
+    setShowInitialEvaluationModal(true);
+  };
+
+  const handleProviderNameComplete = () => {
+    setShowProviderNameModal(false);
   };
 
   return (
@@ -845,7 +835,7 @@ export default function Home() {
                   document.documentElement.classList.add('modal-open');
                   setIsSettingsOpen(true);
                 }}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-dark-accent rounded-full transition-colors dark:text-dark-text"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors dark:text-gray-100"
                 title="Settings"
               >
                 <SettingsIcon className="w-5 h-5" />
@@ -877,7 +867,7 @@ export default function Home() {
             {/* Main Content Area */}
             <div className="md:col-span-9 space-y-4 -mt-2">
               <div className="bg-muted/50 rounded-lg shadow-lg border border-border">
-                <div className="flex items-center justify-between py-4 px-4 dark:border-dark-border">
+                <div className="flex items-center justify-between py-4 px-4 dark:border-gray-700">
                   {selectedPatientId ? (
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                       <button
@@ -897,17 +887,10 @@ export default function Home() {
                             return;
                           }
 
-                          // Check if there's at least one previous note
-                          if (patientNotes.length === 0) {
-                            console.log('Opening manual transcript modal for first visit with patientId:', selectedPatientId);
-                            // Show the manual transcript modal for visit type selection
-                            setShowManualTranscriptModal(true);
-                          } else {
-                            console.log('Opening manual input form for existing patient with patientId:', selectedPatientId);
-                            // For patients with existing notes, show the manual input directly
-                            setIsManualInput(true);
-                            setIsActiveRecordingSession(true);
-                          }
+                          // Always show the manual transcript modal for consistency
+                          // This allows users to paste transcripts and choose visit type
+                          console.log('Opening manual transcript modal for transcript input with patientId:', selectedPatientId);
+                          setShowManualTranscriptModal(true);
                         }}
                         className="flex items-center gap-2 px-4 py-1.5 text-sm border-2 border-white bg-transparent text-white rounded-xl hover:bg-white/10 transition transform hover:scale-105 active:scale-95"
                         disabled={isProcessing || !selectedPatientId}
@@ -927,84 +910,14 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="p-0">
+                <div className="p-6">
                   {selectedPatientId ? (
                     <div className="space-y-6">
-
-                      {/* Manual Transcript Input Section */}
-                      {isManualInput && !showInitialVisitModal && (
-                        <div className="w-full bg-muted/50 p-6 rounded-lg shadow-lg border border-border m-6">
-                          <h2 className="text-lg font-semibold mb-4 text-foreground">Transcript Entry</h2>
-                          <textarea
-                            value={manualTranscript}
-                            onChange={(e) => setManualTranscript(e.target.value)}
-                            placeholder="Paste or type the visit transcript here..."
-                            className="w-full min-h-[300px] p-4 border rounded-lg bg-muted border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-                            disabled={isProcessing}
-                          />
-
-                          {/* Replace the manual buttons with the SoapNoteGenerator component */}
-                          <SoapNoteGenerator
-                            patientId={selectedPatientId}
-                            transcript={manualTranscript}
-                            onNoteGenerated={(note) => {
-                              // Convert the note to match the expected Note type
-                              const typedNote: Note = {
-                                id: note.id,
-                                patientId: note.patientId,
-                                transcript: note.transcript || '', // Ensure transcript is not undefined
-                                content: note.content,
-                                summary: note.summary || null,
-                                isInitialVisit: note.isInitialVisit || false,
-                                createdAt: note.createdAt ? new Date(note.createdAt) : new Date(),
-                                updatedAt: note.updatedAt ? new Date(note.updatedAt) : new Date()
-                              };
-                              setCurrentNote(typedNote);
-                              setManualTranscript('');
-                              setIsManualInput(false);
-                              setForceCollapse(prev => !prev);
-                              setNotesRefreshTrigger(prev => prev + 1); // Increment refresh trigger
-                              fetchPatientNotes(selectedPatientId!);
-                            }}
-                            onError={(errorMessage) => setError(errorMessage)}
-                            disabled={isProcessing || !selectedPatientId || !manualTranscript.trim()}
-                          />
-
-                          {isProcessing && (
-                            <div className="mt-4 text-center">
-                              <div className="flex justify-center mb-2">
-                                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
-                              </div>
-                              <p className="text-gray-600 dark:text-gray-400">{loadingMessage}</p>
-                              <button
-                                onClick={handleCancel}
-                                className="mt-4 px-4 py-2 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-
-                          <div className="flex justify-end mt-4">
-                            <button
-                              onClick={() => {
-                                setIsManualInput(false);
-                                setManualTranscript('');
-                              }}
-                              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-
-                      {isProcessing && !isManualInput && (
+                      {isProcessing && (
                         <div className="text-center py-4 p-6">
                           <div className="flex flex-col items-center gap-4">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-l-2 border-blue-500"></div>
-                            <p className="text-sm text-gray-600 dark:text-dark-muted animate-fade-in">{loadingMessage}</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 animate-fade-in">{loadingMessage}</p>
                             <button
                               onClick={handleCancel}
                               className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-600 dark:text-gray-400 dark:hover:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
@@ -1034,7 +947,9 @@ export default function Home() {
                       summary: note.summary,
                       isInitialVisit: note.isInitialVisit,
                       createdAt: note.createdAt,
-                      updatedAt: note.updatedAt
+                      updatedAt: note.updatedAt,
+                      checklistContent: note.checklistContent,
+                      sourceNoteId: note.sourceNoteId
                     });
 
                     // Set the lastVisitNote for the follow-up modal
@@ -1081,20 +996,6 @@ export default function Home() {
           <AudioRecordings isOpen={isAudioRecordingsOpen} onClose={() => setIsAudioRecordingsOpen(false)} />
         )}
 
-        {/* Live Deepgram Recorder - Only display during active recording sessions when no modals are open */}
-        {selectedPatientId && !isManualInput && isActiveRecordingSession && !isProcessing && !showInitialVisitModal && !showFollowUpModal && (
-          <div className="fixed bottom-4 right-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-40 max-w-md">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recording Session Active</div>
-            <LiveDeepgramRecorder
-              onRecordingComplete={(audioBlob, transcript) => handleRecordingComplete(audioBlob, transcript, false)}
-              isProcessing={isProcessing}
-              isRecordingFromModal={isRecordingFromModal}
-              onTranscriptUpdate={handleTranscriptUpdate}
-              lowEchoCancellation={settings?.lowEchoCancellation || false}
-            />
-          </div>
-        )}
-
         {/* Follow-Up Checklist Modal */}
         {showFollowUpModal && selectedPatientId && (patientNotes.length > 0 || providedPreviousNote) && (
           <FollowUpModal
@@ -1104,7 +1005,6 @@ export default function Home() {
             onClose={() => {
               setShowFollowUpModal(false);
               setIsRecordingFromModal(false);
-              setIsActiveRecordingSession(false);
               setProvidedPreviousNote(null); // Clear the provided previous note
 
               // Refresh notes after closing the modal to show the newly generated note
@@ -1122,17 +1022,13 @@ export default function Home() {
             onClose={() => {
               setShowInitialVisitModal(false);
               setIsRecordingFromModal(false);
-              setIsActiveRecordingSession(false);
-              // Clear manual transcript if we're closing the modal
-              if (isManualInput) {
-                setManualTranscript('');
-                setIsManualInput(false);
-              }
             }}
-            manualTranscript={isManualInput ? manualTranscript : undefined}
             patientId={selectedPatientId}
             hasPreviousNotes={patientNotes.length > 0}
             onFollowUpWithPreviousNote={handleFollowUpWithPreviousNote}
+            onSkipToDefaultChecklist={handleSkipToDefaultChecklist}
+            onFollowUpWithExistingNotes={handleFollowUpWithExistingNotes}
+            onInitialEvaluationWithIntakeForm={handleInitialEvaluationWithIntakeForm}
           />
         )}
 
@@ -1144,6 +1040,43 @@ export default function Home() {
               setShowManualTranscriptModal(false);
             }}
             selectedPatientId={selectedPatientId}
+          />
+        )}
+
+        {/* Default Checklist Modal */}
+        {showDefaultChecklistModal && selectedPatientId && (
+          <DefaultChecklistModal
+            patientId={selectedPatientId}
+            onClose={() => {
+              setShowDefaultChecklistModal(false);
+              // Refresh notes after closing the modal to show the newly generated note
+              if (selectedPatientId) {
+                fetchPatientNotes(selectedPatientId);
+              }
+            }}
+          />
+        )}
+
+        {/* Provider Name Modal */}
+        <ProviderNameModal
+          isOpen={showProviderNameModal}
+          onComplete={handleProviderNameComplete}
+        />
+
+        {/* Initial Evaluation Modal */}
+        {showInitialEvaluationModal && selectedPatientId && (
+          <InitialEvaluationModal
+            patientId={selectedPatientId}
+            intakeFormContext={providedIntakeFormContext || undefined}
+            onClose={() => {
+              setShowInitialEvaluationModal(false);
+              setProvidedIntakeFormContext(null); // Clear the intake form context
+
+              // Refresh notes after closing the modal to show the newly generated note
+              if (selectedPatientId) {
+                fetchPatientNotes(selectedPatientId);
+              }
+            }}
           />
         )}
       </div>

@@ -41,8 +41,8 @@ const sampleSettings = {
   id: 'default',
   darkMode: false,
   gptModel: 'gpt-4o',
-  initialVisitPrompt: 'You are a medical scribe assistant. Your task is to generate a note for an INITIAL VISIT based on the provided medical visit transcript.',
-  followUpVisitPrompt: 'You are a medical scribe assistant. Your task is to generate a note for a FOLLOW-UP VISIT based on the provided medical visit transcript.',
+  initialVisitPrompt: '',
+  followUpVisitPrompt: '',
   autoSave: false,
   lowEchoCancellation: false
 };
@@ -87,8 +87,8 @@ async function uploadToSupabase() {
       id: sampleSettings.id,
       dark_mode: sampleSettings.darkMode,
       gpt_model: sampleSettings.gptModel,
-      initial_visit_prompt: sampleSettings.initialVisitPrompt,
-      follow_up_visit_prompt: sampleSettings.followUpVisitPrompt,
+      initial_visit_additional_preferences: sampleSettings.initialVisitPrompt,
+      follow_up_visit_additional_preferences: sampleSettings.followUpVisitPrompt,
       auto_save: sampleSettings.autoSave,
       low_echo_cancellation: sampleSettings.lowEchoCancellation,
       updated_at: new Date().toISOString(),

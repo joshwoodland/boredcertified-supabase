@@ -56,11 +56,12 @@ export default function SupabasePatientNotes({
   const [isFetchingSummary, setIsFetchingSummary] = useState<Record<string, boolean>>({});
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
+  const [showComingSoon, setShowComingSoon] = useState(false);
 
   // Initialize editedContent when selectedNote changes
   useEffect(() => {
     if (selectedNote) {
-      setEditedContent(selectedNote.content);
+      setEditedContent(extractContent(selectedNote.content));
     }
   }, [selectedNote]);
 
@@ -165,7 +166,7 @@ export default function SupabasePatientNotes({
 
   const handleEditClick = (note: Note) => {
     setSelectedNote(note);
-    setEditedContent(note.content);
+    setEditedContent(extractContent(note.content));
     setIsEditing(true);
   };
 
@@ -370,7 +371,7 @@ export default function SupabasePatientNotes({
   };
 
   // Fetch summary for a note if not available
-  const fetchNoteSummary = async (noteId: string) => {
+  const fetchNoteSummary = async (noteId: string, retryCount = 0) => {
     if (summaries[noteId] !== undefined || isFetchingSummary[noteId]) return;
 
     setIsFetchingSummary(prev => ({ ...prev, [noteId]: true }));
@@ -382,10 +383,40 @@ export default function SupabasePatientNotes({
       if (response.ok) {
         const data = await response.json();
         setSummaries(prev => ({ ...prev, [noteId]: data.summary }));
+      } else {
+        // Log the error details
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error(`Failed to fetch summary for note ${noteId}:`, errorData);
+        
+        // If it's a 404, the note doesn't exist - don't retry
+        if (response.status === 404) {
+          console.error(`Note ${noteId} not found in database`);
+          setSummaries(prev => ({ ...prev, [noteId]: null }));
+        }
+        // If it's a server error and we haven't exceeded retries, try again
+        else if (response.status >= 500 && retryCount < 2) {
+          console.log(`Retrying summary generation for note ${noteId} (attempt ${retryCount + 1})`);
+          setTimeout(() => {
+            setIsFetchingSummary(prev => ({ ...prev, [noteId]: false }));
+            fetchNoteSummary(noteId, retryCount + 1);
+          }, 2000 * (retryCount + 1)); // Exponential backoff
+        } else {
+          // Set null to indicate failure
+          setSummaries(prev => ({ ...prev, [noteId]: null }));
+        }
       }
     } catch (error) {
       console.error('Error fetching summary:', error);
-      setSummaries(prev => ({ ...prev, [noteId]: null }));
+      // If network error and we haven't exceeded retries, try again
+      if (retryCount < 2) {
+        console.log(`Retrying summary generation for note ${noteId} after network error (attempt ${retryCount + 1})`);
+        setTimeout(() => {
+          setIsFetchingSummary(prev => ({ ...prev, [noteId]: false }));
+          fetchNoteSummary(noteId, retryCount + 1);
+        }, 2000 * (retryCount + 1));
+      } else {
+        setSummaries(prev => ({ ...prev, [noteId]: null }));
+      }
     } finally {
       setIsFetchingSummary(prev => ({ ...prev, [noteId]: false }));
     }
@@ -502,16 +533,23 @@ export default function SupabasePatientNotes({
             className={`bg-muted/50 rounded-lg shadow-md overflow-hidden ${
               selectedNote?.id === note.id ? 'gradient-border' : ''
             }`}
-            onClick={() => handleNoteSelect(note)}
           >
             <details open={!isCollapsed && selectedNote?.id === note.id}>
-              <summary className="flex items-center justify-between p-4 cursor-pointer">
-                <div className="flex items-center">
+              <summary 
+                className="flex items-center justify-between p-4 cursor-pointer no-select"
+                onClick={(e) => {
+                  // Only handle click if it's directly on the summary element
+                  if (e.target === e.currentTarget || (e.target as Element).closest('.summary-content')) {
+                    handleNoteSelect(note);
+                  }
+                }}
+              >
+                <div className="flex items-center summary-content">
                   <div className="pl-1">
-                    <div className="text-sm font-medium text-foreground">
+                    <div className="text-sm font-medium text-foreground no-select">
                       {formatDate(note.createdAt)}
                     </div>
-                    <div className="text-xs">
+                    <div className="text-xs no-select">
                       {note.isInitialVisit ?
                         <span className="text-green-600 dark:text-green-400 font-medium">Initial Evaluation</span> :
                         <span className="text-blue-600 dark:text-blue-400 font-medium">Follow-up Visit</span>
@@ -519,18 +557,56 @@ export default function SupabasePatientNotes({
                     </div>
                     {/* Display summary when collapsed, regardless of selection state */}
                     <p className="text-sm text-muted-foreground line-clamp-2 mt-1 pr-4">
-                      {summaries[note.id] || (isFetchingSummary[note.id] ? 'Loading summary...' : getParsedContent(note.content).split('\n')[0])}
+                      {isFetchingSummary[note.id] ? (
+                        'Loading summary...'
+                      ) : summaries[note.id] === null ? (
+                        <span className="flex items-center gap-2">
+                          <span className="text-red-600 dark:text-red-400">Summary generation failed</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Reset the summary state and retry
+                              setSummaries(prev => {
+                                const newSummaries = { ...prev };
+                                delete newSummaries[note.id];
+                                return newSummaries;
+                              });
+                              fetchNoteSummary(note.id);
+                            }}
+                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline no-select"
+                          >
+                            Retry
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Open debug endpoint in new tab
+                              window.open(`/api/notes/debug/${note.id}`, '_blank');
+                            }}
+                            className="text-xs text-gray-600 dark:text-gray-400 hover:underline no-select"
+                            title="Debug note status"
+                          >
+                            Debug
+                          </button>
+                        </span>
+                      ) : summaries[note.id] ? (
+                        summaries[note.id]
+                      ) : (
+                        getParsedContent(note.content).split('\n')[0]
+                      )}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center">
+                <div className="flex items-center no-select">
                   {/* Always show expand/collapse indicator */}
                   <FiChevronDown className="text-muted-foreground" />
                 </div>
               </summary>
               <div className="p-4 border-t border-border">
                 {selectedNote?.id === note.id && (
-                  <div className="flex items-center justify-end space-x-2 mb-4">
+                  <div className="flex items-center justify-end space-x-2 mb-4 no-select">
                     <button
                       type="button"
                       onClick={(e) => {
@@ -568,17 +644,25 @@ export default function SupabasePatientNotes({
                         AI Magic
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSendWebhook(note);
-                      }}
-                      className="p-2 flex items-center gap-2 transition transform hover:scale-105 active:scale-95"
-                    >
-                      <FiSend className="text-blue-600 dark:text-blue-500 hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-                      <span className="text-blue-600 dark:text-blue-500">Ship It</span>
-                    </button>
+                    <div className="relative">
+                      {showComingSoon && (
+                        <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-3 py-1 rounded-md whitespace-nowrap z-10 animate-fade-in">
+                          Feature coming soon!
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowComingSoon(true);
+                          setTimeout(() => setShowComingSoon(false), 2000);
+                        }}
+                        className="p-2 flex items-center gap-2 transition transform hover:scale-105 active:scale-95"
+                      >
+                        <FiSend className="text-blue-600 dark:text-blue-500 hover:drop-shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                        <span className="text-blue-600 dark:text-blue-500">Ship It</span>
+                      </button>
+                    </div>
                     <button
                       type="button"
                       onClick={(e) => {
@@ -591,8 +675,14 @@ export default function SupabasePatientNotes({
                     </button>
                   </div>
                 )}
-
-                {isEditing && selectedNote?.id === note.id ? (
+                <div 
+                  className="compact-soap-note"
+                  onMouseDown={(e) => {
+                    // Allow text selection by preventing click event propagation
+                    e.stopPropagation();
+                  }}
+                >
+                  {isEditing ? (
                   <div className="space-y-4">
                     <textarea
                       value={editedContent}
@@ -619,11 +709,12 @@ export default function SupabasePatientNotes({
                 ) : (
                   <div className="prose dark:prose-invert max-w-none compact-soap-note mono-column">
                     {/* Note content container with lighter background */}
-                    <div className="bg-muted dark:bg-muted p-6 rounded-lg">
+                    <div className="bg-muted dark:bg-muted p-3 rounded-lg">
                       <div dangerouslySetInnerHTML={{ __html: formatSoapNote(extractContent(note.content)) }} />
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             </details>
           </div>

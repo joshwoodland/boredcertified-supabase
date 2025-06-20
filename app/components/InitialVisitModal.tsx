@@ -7,6 +7,8 @@ import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
 import LiveDeepgramRecorder, { LiveDeepgramRecorderRef } from './LiveDeepgramRecorder';
 import PreviousNoteModal from './PreviousNoteModal';
+import DefaultChecklistModal from './DefaultChecklistModal';
+import IntakeFormModal from './IntakeFormModal';
 
 interface InitialVisitModalProps {
   onRecordingComplete: (blob: Blob, transcript: string, isInitialEvaluation: boolean) => void;
@@ -15,6 +17,9 @@ interface InitialVisitModalProps {
   patientId?: string; // Patient ID for recovery session matching
   hasPreviousNotes?: boolean; // Whether the patient has previous notes
   onFollowUpWithPreviousNote?: (previousNote: string) => void; // Callback when user provides a previous note for follow-up
+  onSkipToDefaultChecklist?: () => void; // Callback when user skips to default checklist
+  onFollowUpWithExistingNotes?: () => void; // Callback when user wants follow-up with existing notes
+  onInitialEvaluationWithIntakeForm?: (intakeForm: string) => void; // Callback when user provides intake form for initial evaluation
 }
 
 export default function InitialVisitModal({
@@ -23,20 +28,28 @@ export default function InitialVisitModal({
   manualTranscript,
   patientId,
   hasPreviousNotes = false,
-  onFollowUpWithPreviousNote
+  onFollowUpWithPreviousNote,
+  onSkipToDefaultChecklist,
+  onFollowUpWithExistingNotes,
+  onInitialEvaluationWithIntakeForm
 }: InitialVisitModalProps) {
   const { settings } = useAppSettings();
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [finalTranscript, setFinalTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [isEditMode, setIsEditMode] = useState(!!manualTranscript); // Start in edit mode if manual transcript is provided
+  const [isEditMode, setIsEditMode] = useState(!!manualTranscript);
   const [editableTranscript, setEditableTranscript] = useState(manualTranscript || '');
   const [visitType, setVisitType] = useState<'initial' | 'followup' | null>(null);
   const [recorderStatus, setRecorderStatus] = useState('Initializing...');
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(true);
   const [showPreviousNoteModal, setShowPreviousNoteModal] = useState(false);
+  const [showDefaultChecklistModal, setShowDefaultChecklistModal] = useState(false);
+  const [showIntakeFormModal, setShowIntakeFormModal] = useState(false);
+  const [providedIntakeForm, setProvidedIntakeForm] = useState<string | null>(null);
   const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
+  const [isRefreshingPermissions, setIsRefreshingPermissions] = useState(false);
+  const [quickPermissionsReady, setQuickPermissionsReady] = useState(false);
 
   // Use the recording safeguard hook
   const {
@@ -69,6 +82,17 @@ export default function InitialVisitModal({
     handleRecoverTranscript(recoveredText);
   }, [recoverySession, handleRecoverTranscript]);
 
+  // Clear any cached transcript data on component mount to ensure clean state
+  useEffect(() => {
+    if (!recoverySession && !manualTranscript) {
+      setTranscript('');
+      setFinalTranscript('');
+      setEditableTranscript('');
+      setIsRecording(false);
+      setIsEditMode(false);
+    }
+  }, [recoverySession, manualTranscript]);
+
   // Add debug console log
   useEffect(() => {
     console.log('InitialVisitModal rendering:', {
@@ -77,6 +101,62 @@ export default function InitialVisitModal({
       hasPreviousNotes,
     });
   }, [manualTranscript, hasPreviousNotes]);
+
+  // Function to quickly check microphone permissions without waiting for Deepgram
+  const checkMicrophonePermissions = async () => {
+    setIsRefreshingPermissions(true);
+    
+    try {
+      // First, check if permissions are already granted without requesting stream
+      if (navigator.permissions) {
+        const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        if (permissionStatus.state === 'granted') {
+          setQuickPermissionsReady(true);
+          setIsRefreshingPermissions(false);
+          return;
+        }
+      }
+
+      // If permissions API is not available or permission is not granted, try getUserMedia
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        // Request microphone access to verify permissions
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            deviceId: 'default' // Force a specific device to avoid conflicts
+          }
+        });
+        // Immediately stop the stream since we just needed to check permissions
+        stream.getTracks().forEach(track => {
+          track.stop();
+        });
+        
+        // Set our quick permissions state to true
+        setQuickPermissionsReady(true);
+        setIsRefreshingPermissions(false);
+      } else {
+        setQuickPermissionsReady(false);
+        setIsRefreshingPermissions(false);
+      }
+    } catch (error) {
+      console.error('Error checking microphone permissions:', error);
+      setQuickPermissionsReady(false);
+      setIsRefreshingPermissions(false);
+    }
+  };
+
+  // Check microphone permissions when the modal opens (for visit type selection)
+  useEffect(() => {
+    if (!isEditMode && !isRecording) {
+      // Reset state first to ensure clean check
+      setQuickPermissionsReady(false);
+      setIsRefreshingPermissions(false);
+      
+      // Add a small delay to ensure any previous streams are fully released
+      setTimeout(() => {
+        checkMicrophonePermissions();
+      }, 50);
+    }
+  }, []);
 
   // Handle transcript updates from LiveDeepgramRecorder
   const handleTranscriptUpdate = useCallback((newTranscript: string) => {
@@ -98,9 +178,23 @@ export default function InitialVisitModal({
       // Log visit type selection
       console.log(`Visit type selected: ${type}`);
 
+      // If initial evaluation is selected, show the intake form modal
+      if (type === 'initial') {
+        setShowIntakeFormModal(true);
+        return;
+      }
+
       // If follow-up is selected but there are no previous notes, show the previous note modal
       if (type === 'followup' && !hasPreviousNotes) {
         setShowPreviousNoteModal(true);
+        return;
+      }
+
+      // If follow-up is selected and patient has previous notes, transition to FollowUpModal
+      if (type === 'followup' && hasPreviousNotes && onFollowUpWithExistingNotes) {
+        // Trigger the follow-up modal with existing notes
+        onFollowUpWithExistingNotes();
+        onClose();
         return;
       }
 
@@ -110,22 +204,18 @@ export default function InitialVisitModal({
       // Hide recovery prompt when user selects a visit type (indicates they're not recovering)
       setShowRecoveryPrompt(false);
 
-      // Reset state
-      setError(null);
-      setTranscript('');
-      setFinalTranscript('');
-
-      // Start recording using the ref
-      if (recorderRef.current?.canRecord) {
-        recorderRef.current.startRecording();
-        setIsRecording(true);
-      } else {
-        setError('Recorder not ready. Please wait and try again.');
-      }
+      // Clean up any existing recording resources before starting new session
+      console.log('Cleaning up recording resources before starting new session...');
+      // Note: We don't need to force a page refresh anymore with proper cleanup
     } catch (error) {
       console.error('Error starting recording:', error);
       setError(error instanceof Error ? error.message : 'Failed to start recording');
     }
+  };
+
+  // Handle initial evaluation button click in edit mode
+  const handleInitialEvaluationClick = () => {
+    setShowIntakeFormModal(true);
   };
 
   // Handle follow-up button click in edit mode
@@ -137,20 +227,47 @@ export default function InitialVisitModal({
     }
   };
 
+  // Handle intake form submission
+  const handleIntakeFormSubmit = (intakeForm: string) => {
+    setShowIntakeFormModal(false);
+    setProvidedIntakeForm(intakeForm);
+    if (onInitialEvaluationWithIntakeForm) {
+      onInitialEvaluationWithIntakeForm(intakeForm);
+      // Close this modal after the callback to proceed with initial evaluation
+      onClose();
+    }
+  };
+
+  // Handle skipping intake form
+  const handleSkipIntakeForm = () => {
+    setShowIntakeFormModal(false);
+    // Call the callback to proceed with initial evaluation without intake form context
+    if (onInitialEvaluationWithIntakeForm) {
+      onInitialEvaluationWithIntakeForm('');
+      onClose();
+    }
+  };
+
   // Handle previous note submission
   const handlePreviousNoteSubmit = (previousNote: string) => {
     setShowPreviousNoteModal(false);
     if (onFollowUpWithPreviousNote) {
       onFollowUpWithPreviousNote(previousNote);
+      // Close this modal after the callback to ensure proper transition to FollowUpModal
+      onClose();
     }
-    onClose();
   };
 
   // Handle skipping previous note
   const handleSkipPreviousNote = () => {
     setShowPreviousNoteModal(false);
-    // Proceed with follow-up without previous note context
-    setVisitType('followup');
+    // Use the callback if provided, otherwise show default checklist modal
+    if (onSkipToDefaultChecklist) {
+      onSkipToDefaultChecklist();
+      onClose();
+    } else {
+      setShowDefaultChecklistModal(true);
+    }
   };
 
   // Stop recording function
@@ -197,9 +314,33 @@ export default function InitialVisitModal({
     );
   }
 
+  // If showing intake form modal, render it instead
+  if (showIntakeFormModal) {
+    return (
+      <IntakeFormModal
+        onSubmitIntakeForm={handleIntakeFormSubmit}
+        onSkip={handleSkipIntakeForm}
+        onClose={() => setShowIntakeFormModal(false)}
+      />
+    );
+  }
+
+  // If showing default checklist modal, render it instead
+  if (showDefaultChecklistModal && patientId) {
+    return (
+      <DefaultChecklistModal
+        patientId={patientId}
+        onClose={() => {
+          setShowDefaultChecklistModal(false);
+          onClose();
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-start justify-center z-50 overflow-auto pt-20 pb-8">
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg w-full max-w-3xl mx-auto">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center z-50 overflow-auto pt-20 pb-8">
+      <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-lg w-full max-w-3xl mx-auto border border-gray-200 dark:border-gray-700">
         {recoverySession && showRecoveryPrompt && (
           <RecoveryPrompt
             savedSession={recoverySession}
@@ -209,7 +350,7 @@ export default function InitialVisitModal({
         )}
 
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold dark:text-white">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
             {!isRecording && !isEditMode
               ? "Select Visit Type"
               : isRecording
@@ -220,7 +361,7 @@ export default function InitialVisitModal({
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -231,13 +372,13 @@ export default function InitialVisitModal({
         {isEditMode ? (
           // Transcript edit mode
           <div className="my-4">
-            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-4">
+            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-100 mb-4">
               {manualTranscript ? 'Review Transcript' : 'Edit Transcript'}
             </h3>
             <textarea
               value={editableTranscript}
               onChange={(e) => setEditableTranscript(e.target.value)}
-              className="w-full h-64 p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-muted dark:border-gray-600 dark:text-white resize-none"
+              className="w-full h-64 p-4 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none"
               placeholder="Edit the transcript if needed..."
             />
             {visitType === null && (
@@ -250,10 +391,10 @@ export default function InitialVisitModal({
             {!visitType && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <button
-                  onClick={() => setVisitType('initial')}
-                  className={`flex flex-col items-center justify-center p-4 border-2 ${visitType === 'initial' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-blue-400'} rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors`}
+                  onClick={handleInitialEvaluationClick}
+                  className={`flex flex-col items-center justify-center p-4 border-2 ${visitType === 'initial' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-blue-400 dark:border-blue-500'} rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors`}
                 >
-                  <span className="text-lg font-medium text-gray-800 dark:text-white">Initial Evaluation</span>
+                  <span className="text-lg font-medium text-gray-800 dark:text-gray-100">Initial Evaluation</span>
                   <p className="text-sm text-gray-500 dark:text-gray-400 text-center mt-2">
                     First time seeing this patient
                   </p>
@@ -261,9 +402,9 @@ export default function InitialVisitModal({
 
                 <button
                   onClick={handleFollowUpClick}
-                  className={`flex flex-col items-center justify-center p-4 border-2 ${visitType === 'followup' ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-purple-400'} rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors`}
+                  className={`flex flex-col items-center justify-center p-4 border-2 ${visitType === 'followup' ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-purple-400 dark:border-purple-500'} rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors`}
                 >
-                  <span className="text-lg font-medium text-gray-800 dark:text-white">Follow Up</span>
+                  <span className="text-lg font-medium text-gray-800 dark:text-gray-100">Follow Up</span>
                   <p className="text-sm text-gray-500 dark:text-gray-400 text-center mt-2">
                     Have seen this patient before
                   </p>
@@ -271,27 +412,10 @@ export default function InitialVisitModal({
               </div>
             )}
           </div>
-        ) : isRecording ? (
-          // Recording mode with custom UI
-          <div className="my-4">
-            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-4">
-              Recording Session
-            </h3>
-            
-
-
-            {/* Transcript Display */}
-            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
-              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
-              <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
-                {transcript || finalTranscript || "Hello? Can you hear me?"}
-              </div>
-            </div>
-          </div>
-        ) : (
+        ) : !isRecording ? (
           // Visit type selection
           <div className="py-4">
-            <p className="text-gray-600 dark:text-gray-300 mb-6">
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
               Please select the appropriate visit type for this recording:
             </p>
             
@@ -300,39 +424,68 @@ export default function InitialVisitModal({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <button
                 onClick={() => startRecording('initial')}
-                disabled={!recorderRef.current?.canRecord}
+                disabled={!quickPermissionsReady || isRefreshingPermissions}
                 className={`flex flex-col items-center justify-center p-6 border-2 rounded-xl transition-colors ${
-                  recorderRef.current?.canRecord 
-                    ? 'border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer' 
+                  quickPermissionsReady && !isRefreshingPermissions
+                    ? 'border-blue-400 dark:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer bg-blue-50/30 dark:bg-blue-900/10' 
                     : 'border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
                 }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className={`h-12 w-12 mb-4 ${recorderRef.current?.canRecord ? 'text-blue-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-12 w-12 mb-4 ${quickPermissionsReady && !isRefreshingPermissions ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
-                <span className={`text-lg font-medium ${recorderRef.current?.canRecord ? 'text-gray-800 dark:text-white' : 'text-gray-500'}`}>Initial Evaluation</span>
-                <p className={`text-sm text-center mt-2 ${recorderRef.current?.canRecord ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}`}>
+                <span className={`text-lg font-medium ${quickPermissionsReady && !isRefreshingPermissions ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}>Initial Evaluation</span>
+                <p className={`text-sm text-center mt-2 ${quickPermissionsReady && !isRefreshingPermissions ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}`}>
                   First time seeing this patient
                 </p>
               </button>
 
               <button
                 onClick={() => startRecording('followup')}
-                disabled={!recorderRef.current?.canRecord}
+                disabled={!quickPermissionsReady || isRefreshingPermissions}
                 className={`flex flex-col items-center justify-center p-6 border-2 rounded-xl transition-colors ${
-                  recorderRef.current?.canRecord 
-                    ? 'border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 cursor-pointer' 
+                  quickPermissionsReady && !isRefreshingPermissions
+                    ? 'border-purple-400 dark:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 cursor-pointer bg-purple-50/30 dark:bg-purple-900/10' 
                     : 'border-gray-300 dark:border-gray-600 opacity-50 cursor-not-allowed'
                 }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className={`h-12 w-12 mb-4 ${recorderRef.current?.canRecord ? 'text-purple-500' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-12 w-12 mb-4 ${quickPermissionsReady && !isRefreshingPermissions ? 'text-purple-500 dark:text-purple-400' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
                 </svg>
-                <span className={`text-lg font-medium ${recorderRef.current?.canRecord ? 'text-gray-800 dark:text-white' : 'text-gray-500'}`}>Follow Up</span>
-                <p className={`text-sm text-center mt-2 ${recorderRef.current?.canRecord ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}`}>
+                <span className={`text-lg font-medium ${quickPermissionsReady && !isRefreshingPermissions ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}>Follow Up</span>
+                <p className={`text-sm text-center mt-2 ${quickPermissionsReady && !isRefreshingPermissions ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400'}`}>
                   Have seen this patient before
                 </p>
               </button>
+            </div>
+          </div>
+        ) : (
+          // Recording mode with custom UI
+          <div className="my-4">
+            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-100 mb-4">
+              Recording Session
+            </h3>
+            
+            {/* Transcript Display */}
+            <div className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-700 dark:text-gray-100">Live Transcription</h4>
+                {/* Low Echo Cancellation Indicator */}
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center"
+                    title="Low echo cancellation enabled for video calls"
+                  >
+                    <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Video call optimized</span>
+                </div>
+              </div>
+              <div className={`live-transcription text-gray-800 dark:text-gray-100 ${isRecording ? 'animate-pulse' : ''}`}>
+                {transcript || finalTranscript || "You may now begin speaking..."}
+              </div>
             </div>
           </div>
         )}

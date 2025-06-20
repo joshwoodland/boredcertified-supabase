@@ -1,145 +1,140 @@
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
 import { convertToAppFormat } from '@/app/lib/supabaseTypes';
+import { extractContent } from '@/app/utils/safeJsonParse';
+import OpenAI from 'openai';
+import * as dotenv from 'dotenv';
+import { resolve } from 'path';
 
-// Initialize Supabase client
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Load environment variables from .env.local
+dotenv.config({ path: resolve(process.cwd(), '.env.local') });
 
-// Helper function to check Supabase connection
-async function checkSupabaseConnection(supabaseClient: any): Promise<boolean> {
-  try {
-    const { data, error } = await supabaseClient.from('patients').select('id').limit(1);
-    if (error && error.code !== '42P01') { // 42P01 means table doesn't exist, which is fine
-      console.error('Supabase connection error:', error);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.error('Failed to connect to Supabase:', error);
-    return false;
-  }
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const openaiApiKey = process.env.OPENAI_API_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey || !openaiApiKey) {
+  console.error('Missing required environment variables');
+  console.error('Please ensure NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and OPENAI_API_KEY are set in .env.local');
+  process.exit(1);
 }
 
-// Initialize OpenAI client
-const openai = new OpenAI();
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const openai = new OpenAI({ apiKey: openaiApiKey });
 
-async function generateSummary(content: string, model: string): Promise<string> {
+async function generateSummaryForNote(noteId: string, content: string): Promise<string | null> {
   try {
-    const completion = await openai.chat.completions.create({
-      model: model || 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a medical scribe assistant. Create very concise summaries that prioritize medication changes.'
-        },
-        {
-          role: 'user',
-          content: `Create a brief clinical headline (30-40 words max) summarizing this note. PRIORITIZE any medication changes, then other key clinical information. DO NOT include patient names or identifiers:\n\n${content}`
-        }
-      ],
+    // Extract the actual content from the stored JSON
+    const noteContent = extractContent(content);
+    
+    if (!noteContent || noteContent.trim() === '') {
+      console.error(`No content found for note ${noteId}`);
+      return null;
+    }
+
+    const prompt = `Create a very concise summary (30-40 words max) of this medical note. PRIORITIZE any medication changes, then other key clinical information. DO NOT include patient names or identifiers:
+
+${noteContent}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
-      max_tokens: 200
+      max_tokens: 200,
     });
 
-    return completion.choices[0]?.message?.content || '';
+    const summary = response.choices[0]?.message?.content?.trim() || '';
+    
+    if (!summary) {
+      console.error(`OpenAI returned empty summary for note ${noteId}`);
+      return null;
+    }
+
+    return summary;
   } catch (error) {
-    console.error('Error generating summary:', error);
-    throw error;
+    console.error(`Error generating summary for note ${noteId}:`, error);
+    return null;
   }
 }
 
-async function main() {
-  try {
-    // Check if Supabase is available
-    const isSupabaseAvailable = await checkSupabaseConnection(supabase);
+async function generateAllSummaries() {
+  console.log('Starting summary generation for all notes without summaries...\n');
 
-    if (!isSupabaseAvailable) {
-      throw new Error('Supabase connection unavailable. Please check your connection settings.');
-    }
+  // Fetch all notes without summaries
+  const { data: notes, error } = await supabase
+    .from('notes')
+    .select('id, content, summary')
+    .or('summary.is.null,summary.eq.""')
+    .order('created_at', { ascending: false });
 
-    // Get current settings
-    const { data: settingsData, error: settingsError } = await supabase
-      .from('app_settings')
-      .select('*')
-      .eq('id', 'default')
-      .single();
+  if (error) {
+    console.error('Error fetching notes:', error);
+    process.exit(1);
+  }
 
-    if (settingsError) {
-      throw new Error(`Error fetching settings: ${settingsError.message}`);
-    }
+  if (!notes || notes.length === 0) {
+    console.log('No notes found without summaries. All done!');
+    return;
+  }
 
-    const settings = convertToAppFormat(settingsData, 'settings');
-    if (!settings || !('gptModel' in settings)) {
-      throw new Error('Failed to convert settings data or invalid settings format');
-    }
+  console.log(`Found ${notes.length} notes without summaries.\n`);
 
-    // TypeScript type assertion to ensure gptModel is available
-    const typedSettings = settings as { gptModel: string };
+  let successCount = 0;
+  let failureCount = 0;
 
-    // Get all notes without summaries
-    const { data: notesData, error: notesError } = await supabase
-      .from('notes')
-      .select('*')
-      .or('summary.is.null,summary.eq.,summary.eq.""');
+  // Process notes with rate limiting
+  for (let i = 0; i < notes.length; i++) {
+    const note = notes[i];
+    console.log(`Processing note ${i + 1}/${notes.length} (ID: ${note.id})...`);
 
-    if (notesError) {
-      throw new Error(`Error fetching notes: ${notesError.message}`);
-    }
+    const summary = await generateSummaryForNote(note.id, note.content);
 
-    console.log(`Found ${notesData.length} notes without summaries`);
+    if (summary) {
+      // Update the note with the summary
+      const { error: updateError } = await supabase
+        .from('notes')
+        .update({
+          summary,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', note.id);
 
-    // Process notes in sequence to avoid rate limits
-    for (const noteData of notesData) {
-      try {
-        console.log(`Processing note ${noteData.id}...`);
-
-        // Extract content for summarization
-        let content: string;
-        try {
-          // Try to parse JSON content format
-          const parsedContent = JSON.parse(noteData.content);
-          content = parsedContent.content || noteData.content;
-        } catch {
-          // If not JSON, use as is
-          content = noteData.content;
-        }
-
-        // Skip if note already has a non-empty summary
-        if (noteData.summary && noteData.summary.trim() !== '') {
-          console.log(`Skipping note ${noteData.id} - already has summary`);
-          continue;
-        }
-        
-        const summary = await generateSummary(content, typedSettings.gptModel || 'gpt-4o-mini');
-
-        // Update the note with the summary
-        const { error: updateError } = await supabase
-          .from('notes')
-          .update({
-            summary,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', noteData.id);
-
-        if (updateError) {
-          throw new Error(`Error updating note: ${updateError.message}`);
-        }
-
-        console.log(`✓ Generated summary for note ${noteData.id}`);
-
-        // Add a small delay to avoid hitting rate limits
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        console.error(`Failed to process note ${noteData.id}:`, error);
+      if (updateError) {
+        console.error(`Failed to update note ${note.id}:`, updateError);
+        failureCount++;
+      } else {
+        console.log(`✓ Successfully generated summary for note ${note.id}`);
+        successCount++;
       }
+    } else {
+      console.error(`✗ Failed to generate summary for note ${note.id}`);
+      failureCount++;
     }
 
-    console.log('Finished generating summaries');
-  } catch (error) {
-    console.error('Error:', error);
+    // Add a small delay to avoid rate limiting
+    if (i < notes.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+
+  console.log(`\nSummary generation complete!`);
+  console.log(`Success: ${successCount}`);
+  console.log(`Failures: ${failureCount}`);
+  console.log(`Total processed: ${notes.length}`);
+
+  // Fetch and display settings info
+  const { data: settingsData } = await supabase
+    .from('settings')
+    .select('*')
+    .single();
+
+  if (settingsData) {
+    const settings = convertToAppFormat(settingsData, 'settings');
+    if (settings && 'gptModel' in settings) {
+      console.log(`\nSettings used for generation:`);
+      console.log(`- GPT Model: ${settings.gptModel || 'gpt-4o-mini'}`);
+    }
   }
 }
 
-main();
+// Run the script
+generateAllSummaries().catch(console.error);

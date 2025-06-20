@@ -14,22 +14,25 @@ import {
 } from "../context/MicrophoneContextProvider";
 import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import RecoveryPrompt from './RecoveryPrompt';
+import { CUSTOM_TOPICS } from '../config/topicMappings';
 
 interface LiveDeepgramRecorderProps {
   onRecordingComplete: (blob: Blob, transcript: string) => void;
   isProcessing: boolean;
   isRecordingFromModal?: boolean;
   onTranscriptUpdate?: (transcript: string) => void;
-  lowEchoCancellation?: boolean;
   headless?: boolean; // When true, renders no UI - only provides recording functionality
   onStatusChange?: (status: string) => void; // Callback for status updates in headless mode
   onRecordingStateChange?: (isRecording: boolean) => void; // Callback for recording state changes
   onErrorChange?: (error: string | null) => void; // Callback for error state changes
+  onTopicsDetected?: (topics: Array<{ topic: string; confidence_score: number }>) => void; // New: Topic detection callback
+  enableTopicDetection?: boolean; // New: Enable semantic topic detection
 }
 
 export interface LiveDeepgramRecorderRef {
   startRecording: () => void;
   stopRecording: () => void;
+  cleanup: () => void;
   canRecord: boolean;
   canStop: boolean;
   isRecording: boolean;
@@ -56,11 +59,12 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
   isProcessing,
   isRecordingFromModal = false,
   onTranscriptUpdate,
-  lowEchoCancellation = true,
   headless = false,
   onStatusChange,
   onRecordingStateChange,
-  onErrorChange
+  onErrorChange,
+  onTopicsDetected,
+  enableTopicDetection = false
 }, ref) => {
   const [transcript, setTranscript] = useState("");
   const [finalTranscript, setFinalTranscript] = useState("");
@@ -72,26 +76,34 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
   const [currentLoadingMessage, setCurrentLoadingMessage] = useState('');
 
   const { connection, connectToDeepgram, disconnectFromDeepgram, connectionState } = useDeepgram();
-  const { setupMicrophone, microphone, startMicrophone, stopMicrophone, microphoneState } =
+  const { setupMicrophone, microphone, startMicrophone, stopMicrophone, resetToReady, microphoneState } =
     useMicrophone();
   
   const captionTimeout = useRef<any>();
   const keepAliveInterval = useRef<any>();
   const recordedChunks = useRef<Blob[]>([]);
 
-  // Use the recording safeguard hook
-  const {
-    recoverySession,
-    lastBackupTime,
-    handleRecoverTranscript,
-    handleDiscardRecovery,
-    clearRecordingData
-  } = useRecordingSafeguard({
-    isRecording,
-    transcript,
-    finalTranscript,
-    sessionType: 'general'
-  });
+  // Temporarily disable recording safeguard to match debug page performance
+  // const {
+  //   recoverySession,
+  //   lastBackupTime,
+  //   handleRecoverTranscript,
+  //   handleDiscardRecovery,
+  //   clearRecordingData
+  // } = useRecordingSafeguard({
+  //   isRecording,
+  //   transcript,
+  //   finalTranscript,
+  //   sessionType: 'general'
+  // });
+
+  // Simplified cleanup function
+  const clearRecordingData = useCallback(() => {
+    setTranscript("");
+    setFinalTranscript("");
+    setError(null);
+    recordedChunks.current = [];
+  }, []);
 
   // Get a random unused loading message
   const getRandomLoadingMessage = useCallback(() => {
@@ -138,44 +150,46 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
     }
   }, [isProcessing, getRandomLoadingMessage]);
 
-  // Setup microphone on mount
+  // Setup microphone on mount and cleanup on unmount
   useEffect(() => {
+    console.log('[LIVE RECORDER] Component mounted, setting up microphone...');
     setupMicrophone();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Notify parent components of state changes in headless mode
-  useEffect(() => {
-    if (headless && onRecordingStateChange) {
-      onRecordingStateChange(isRecording);
-    }
-  }, [headless, isRecording, onRecordingStateChange]);
-
-  useEffect(() => {
-    if (headless && onErrorChange) {
-      onErrorChange(error);
-    }
-  }, [headless, error, onErrorChange]);
-
-  useEffect(() => {
-    if (headless && onStatusChange) {
-      onStatusChange(getStatusMessage());
-    }
-  }, [headless, microphoneState, connectionState, isRecording, error, onStatusChange]);
+  }, [setupMicrophone]);
 
   // Connect to Deepgram when microphone is ready
   useEffect(() => {
+    console.log('[LIVE RECORDER] Microphone state changed:', {
+      microphoneState,
+      hasConnection: !!connection,
+      connectionState,
+      enableTopicDetection
+    });
+    
     if (microphoneState === MicrophoneState.Ready && !connection) {
-      connectToDeepgram({
-        model: "nova-2",
+      console.log('[LIVE RECORDER] Connecting to Deepgram with nova-2 model...');
+      
+      const options: any = {
+        model: "nova-2", // Changed from nova-3 to match working debug page
         interim_results: true,
         smart_format: true,
         filler_words: true,
         utterance_end_ms: 3000,
-      });
+      };
+      
+      // Add topic detection if enabled
+      if (enableTopicDetection) {
+        console.log('[LIVE RECORDER] Enabling topic detection with custom medical topics...');
+        options.topics = true;
+        options.custom_topic_mode = 'strict';
+        options.custom_topic = CUSTOM_TOPICS;
+        console.log('[LIVE RECORDER] Custom topics configured:', CUSTOM_TOPICS.length, 'topics');
+      }
+      
+      connectToDeepgram(options);
     }
-  }, [microphoneState, connection, connectToDeepgram]);
+  }, [microphoneState, connection, connectToDeepgram, enableTopicDetection]);
 
-  // Handle transcription and audio data
+  // Handle transcription and audio data - simplified like debug page
   useEffect(() => {
     if (!microphone) return;
     if (!connection) return;
@@ -189,25 +203,59 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
       }
     };
 
-    const onTranscript = (data: LiveTranscriptionEvent) => {
+    const onTranscript = (data: any) => {
       const { is_final: isFinal, speech_final: speechFinal } = data;
       let thisCaption = data.channel.alternatives[0].transcript;
 
-      if (thisCaption !== "") {
-        setTranscript(prev => {
-          const updated = isFinal ? finalTranscript + " " + thisCaption : thisCaption;
-          // Call onTranscriptUpdate if provided
-          onTranscriptUpdate?.(updated);
-          return updated;
+      console.log("thisCaption", thisCaption);
+      
+      // Handle topics if available and enabled
+      if (enableTopicDetection && data.topics && data.topics.segments && onTopicsDetected) {
+        const allTopics: Array<{ topic: string; confidence_score: number }> = [];
+        
+        data.topics.segments.forEach((segment: any) => {
+          if (segment.topics) {
+            segment.topics.forEach((topic: any) => {
+              allTopics.push({
+                topic: topic.topic,
+                confidence_score: topic.confidence_score
+              });
+            });
+          }
         });
+        
+        if (allTopics.length > 0) {
+          console.log('[LIVE RECORDER] Topics detected:', allTopics);
+          // Defer topic callback to avoid setState during render
+          setTimeout(() => {
+            onTopicsDetected(allTopics);
+          }, 0);
+        }
+      }
+      
+      if (thisCaption !== "") {
+        console.log('thisCaption !== ""', thisCaption);
+        setTranscript(thisCaption);
+        
+        // Send complete accumulated transcript to modals for keyword analysis
+        // This includes previous final segments plus current interim
+        const completeTranscript = finalTranscript + (finalTranscript ? " " : "") + thisCaption;
+        
+        // Defer onTranscriptUpdate call to avoid setState during render
+        setTimeout(() => {
+          onTranscriptUpdate?.(completeTranscript);
+        }, 0);
 
         if (isFinal && speechFinal) {
+          // Accumulate final transcripts for the complete recording
           setFinalTranscript(prev => prev + " " + thisCaption);
+          
           clearTimeout(captionTimeout.current);
           captionTimeout.current = setTimeout(() => {
-            setTranscript(finalTranscript + " " + thisCaption);
+            // Reset live caption after 3 seconds like the debug page
+            setTranscript("");
             clearTimeout(captionTimeout.current);
-          }, 1000);
+          }, 3000);
         }
       }
     };
@@ -222,9 +270,9 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
       microphone.removeEventListener(MicrophoneEvents.DataAvailable, onData);
       clearTimeout(captionTimeout.current);
     };
-  }, [connectionState, microphone, connection, finalTranscript, onTranscriptUpdate]);
+  }, [connectionState, microphone, connection, onTranscriptUpdate, enableTopicDetection, onTopicsDetected]);
 
-  // Keep connection alive
+  // Keep connection alive - simplified like debug page
   useEffect(() => {
     if (!connection) return;
 
@@ -246,24 +294,67 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
     };
   }, [microphoneState, connectionState, connection]);
 
+  // Notify parent components of state changes in headless mode
+  useEffect(() => {
+    if (headless && onRecordingStateChange) {
+      onRecordingStateChange(isRecording);
+    }
+  }, [headless, isRecording, onRecordingStateChange]);
+
+  useEffect(() => {
+    if (headless && onErrorChange) {
+      onErrorChange(error);
+    }
+  }, [headless, error, onErrorChange]);
+
+  useEffect(() => {
+    if (headless && onStatusChange) {
+      onStatusChange(getStatusMessage());
+    }
+  }, [headless, microphoneState, connectionState, isRecording, error, onStatusChange]);
+
   const startRecording = useCallback(async () => {
-    try {
-      setError(null);
-      recordedChunks.current = [];
-      
-      if (microphoneState === MicrophoneState.Ready && connectionState === LiveConnectionState.OPEN) {
-        startMicrophone();
-        setIsRecording(true);
+    console.log('[LIVE RECORDER] === START RECORDING METHOD CALLED ===');
+    console.log('[LIVE RECORDER] Pre-conditions check:', {
+      microphoneState,
+      connectionState,
+      isRecording,
+      canRecord: microphoneState === MicrophoneState.Ready && connectionState === LiveConnectionState.OPEN && !isRecording
+    });
+
+    // Match debug page pattern - simple and direct
+    if (microphoneState === MicrophoneState.Ready && connectionState === LiveConnectionState.OPEN) {
+      try {
+        console.log('[LIVE RECORDER] Conditions met, starting recording...');
+        setError(null);
+        recordedChunks.current = [];
+        
+        // Clear previous transcripts
         setTranscript("");
         setFinalTranscript("");
-      } else {
-        setError("Please wait for microphone and connection to be ready");
+        
+        // Start microphone immediately like debug page
+        console.log('[LIVE RECORDER] Starting microphone...');
+        startMicrophone();
+        console.log('[LIVE RECORDER] Setting recording state to true...');
+        setIsRecording(true);
+        console.log('[LIVE RECORDER] Recording setup complete');
+        
+      } catch (err) {
+        console.error('[LIVE RECORDER] ERROR in startRecording:', err);
+        setError(err instanceof Error ? err.message : 'Failed to start recording');
       }
-    } catch (err) {
-      console.error('Error starting recording:', err);
-      setError(err instanceof Error ? err.message : 'Failed to start recording');
+    } else {
+      console.error('[LIVE RECORDER] Cannot start recording - conditions not met:', {
+        microphoneReady: microphoneState === MicrophoneState.Ready,
+        connectionOpen: connectionState === LiveConnectionState.OPEN,
+        notAlreadyRecording: !isRecording,
+        microphoneState,
+        connectionState,
+        isRecording
+      });
     }
-  }, [microphoneState, connectionState, startMicrophone]);
+  }, [microphoneState, connectionState, startMicrophone, isRecording]);
 
   const stopRecording = useCallback(async () => {
     try {
@@ -281,12 +372,59 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
       
       // Reset
       recordedChunks.current = [];
-      clearRecordingData();
+      
+      // Only clear recording data if not from modal (to allow resuming)
+      if (!isRecordingFromModal) {
+        clearRecordingData();
+      } else {
+        // For modal context, reset microphone to ready state so it can be resumed
+        setTimeout(() => {
+          resetToReady();
+        }, 100);
+      }
+      
     } catch (err) {
       console.error('Error stopping recording:', err);
       setError(err instanceof Error ? err.message : 'Failed to stop recording');
     }
-  }, [stopMicrophone, finalTranscript, transcript, onRecordingComplete, clearRecordingData]);
+  }, [stopMicrophone, finalTranscript, transcript, onRecordingComplete, clearRecordingData, isRecordingFromModal, resetToReady]);
+
+  const cleanup = useCallback(() => {
+    console.log('[LIVE RECORDER] Cleaning up recording resources...');
+    
+    // Stop recording if active
+    if (isRecording) {
+      try {
+        stopMicrophone();
+      } catch (error) {
+        console.error('[LIVE RECORDER] Error stopping microphone during cleanup:', error);
+      }
+    }
+    
+    // Clear intervals and timeouts
+    if (captionTimeout.current) {
+      clearTimeout(captionTimeout.current);
+      captionTimeout.current = null;
+    }
+    
+    if (keepAliveInterval.current) {
+      clearInterval(keepAliveInterval.current);
+      keepAliveInterval.current = null;
+    }
+    
+    // Disconnect from Deepgram
+    disconnectFromDeepgram();
+    
+    // Reset component state
+    setIsRecording(false);
+    setTranscript("");
+    setFinalTranscript("");
+    setError(null);
+    recordedChunks.current = [];
+    clearRecordingData();
+    
+    console.log('[LIVE RECORDER] Cleanup complete');
+  }, [isRecording, stopMicrophone, disconnectFromDeepgram, clearRecordingData]);
 
   const handleEditSave = () => {
     setTranscript(editableTranscript);
@@ -312,36 +450,67 @@ const LiveDeepgramRecorder = forwardRef<LiveDeepgramRecorderRef, LiveDeepgramRec
 
   const canRecord = microphoneState === MicrophoneState.Ready && 
                    connectionState === LiveConnectionState.OPEN && 
-                   !isRecording && !isProcessing;
+                   !isRecording;
 
   const canStop = isRecording && microphoneState === MicrophoneState.Open;
+
+  // Enhanced debug logging to help identify issues
+  useEffect(() => {
+    console.log('[LIVE RECORDER DEBUG] State check:', {
+      microphoneState,
+      connectionState,
+      isRecording,
+      isProcessing,
+      canRecord,
+      canStop,
+      error,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Log specific blocking conditions
+    if (!canRecord) {
+      const reasons = [];
+      if (microphoneState !== MicrophoneState.Ready) {
+        reasons.push(`Microphone not ready: ${microphoneState}`);
+      }
+      if (connectionState !== LiveConnectionState.OPEN) {
+        reasons.push(`Connection not open: ${connectionState}`);
+      }
+      if (isRecording) {
+        reasons.push('Already recording');
+      }
+      console.log('[LIVE RECORDER DEBUG] Cannot record because:', reasons);
+    }
+  }, [microphoneState, connectionState, isRecording, isProcessing, canRecord, canStop, error]);
 
   // Expose recording controls through ref
   useImperativeHandle(ref, () => ({
     startRecording,
     stopRecording,
+    cleanup,
     canRecord,
     canStop,
     isRecording,
     transcript: transcript || finalTranscript,
     error,
     status: getStatusMessage()
-  }), [startRecording, stopRecording, canRecord, canStop, isRecording, transcript, finalTranscript, error, getStatusMessage]);
+  }), [startRecording, stopRecording, cleanup, canRecord, canStop, isRecording, transcript, finalTranscript, error, getStatusMessage]);
 
   // Show recovery prompt if available (only in non-headless mode)
-  if (recoverySession && !isRecording && !headless) {
-    return (
-      <RecoveryPrompt
-        savedSession={recoverySession}
-        onRecover={(transcript) => {
-          setTranscript(transcript);
-          setFinalTranscript(transcript);
-          handleRecoverTranscript(transcript);
-        }}
-        onDiscard={handleDiscardRecovery}
-      />
-    );
-  }
+  // Disabled to match debug page simplicity
+  // if (recoverySession && !isRecording && !headless) {
+  //   return (
+  //     <RecoveryPrompt
+  //       savedSession={recoverySession}
+  //       onRecover={(transcript) => {
+  //         setTranscript(transcript);
+  //         setFinalTranscript(transcript);
+  //         handleRecoverTranscript(transcript);
+  //       }}
+  //       onDiscard={handleDiscardRecovery}
+  //     />
+  //   );
+  // }
 
   // In headless mode, return null (no UI)
   if (headless) {

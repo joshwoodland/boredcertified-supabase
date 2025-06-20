@@ -56,6 +56,9 @@ export default function SupabasePatientList({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dataSource, setDataSource] = useState<'supabase'>('supabase');
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'info'>('info');
 
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -119,12 +122,20 @@ export default function SupabasePatientList({
     try {
       const isSupabaseAvailable = await checkSupabaseConnection();
       if (isSupabaseAvailable) {
-        const supabasePatients: SupabasePatient[] = await getClientSupabasePatients();
+        // When showTrash is true, fetch only deleted patients
+        // When showTrash is false, fetch only non-deleted patients
+        const supabasePatients: SupabasePatient[] = await getClientSupabasePatients(
+          true, // filterByCurrentUser
+          false, // includeDeleted
+          showTrash // onlyDeleted - when true, only fetch deleted patients
+        );
+        
         const formattedPatients = supabasePatients
           .map((patient: SupabasePatient) => convertToAppFormat(patient, 'patient'))
           .filter((patient): patient is AppPatient => {
             if (!patient || !('isDeleted' in patient)) return false;
-            return patient.isDeleted === showTrash;
+            // Now we rely on the database query to filter correctly
+            return true;
           })
           .sort((a: AppPatient, b: AppPatient) => b.createdAt.getTime() - a.createdAt.getTime()) as Patient[];
 
@@ -206,7 +217,9 @@ export default function SupabasePatientList({
   const handleEditSubmit = async (patientId: string, event: React.FormEvent) => {
     event.preventDefault();
     if (!editName.trim()) {
-      setError('Patient name cannot be empty');
+      setToastMessage('Patient name cannot be empty');
+      setToastType('error');
+      setShowToast(true);
       return;
     }
     setIsProcessing(patientId);
@@ -227,18 +240,30 @@ export default function SupabasePatientList({
           })
           .eq('id', patientId);
 
-        if (error) throw error;
+        if (error) {
+          console.error('Supabase error updating patient name:', error);
+          setToastMessage('Failed to update patient name');
+          setToastType('error');
+          setShowToast(true);
+          return;
+        }
+
+        // Show success toast
+        setToastMessage(`Patient name updated successfully`);
+        setToastType('success');
+        setShowToast(true);
+
+        // Update local state and UI
+        onUpdatePatient(patientId, editName.trim());
+        setIsEditing(null);
+        setEditName('');
+        await loadPatients(); // Reload the list to reflect changes
       }
-
-      onUpdatePatient(patientId, editName.trim());
-      setIsEditing(null);
-      setEditName('');
-
-      // Reload the patient list
-      loadPatients();
     } catch (err) {
-      console.error('Error updating patient name:', err);
-      setError('Failed to update patient name');
+      console.error('Unexpected error updating patient name:', err);
+      setToastMessage('Failed to update patient name');
+      setToastType('error');
+      setShowToast(true);
     } finally {
       setIsProcessing(null);
     }
@@ -266,6 +291,9 @@ export default function SupabasePatientList({
           throw new Error('Supabase client not initialized');
         }
 
+        // Get patient name for the success message
+        const patientName = patients.find(p => p.id === patientId)?.name || 'Patient';
+
         // Update in Supabase
         const now = new Date().toISOString();
         const { error } = await supabase
@@ -277,14 +305,28 @@ export default function SupabasePatientList({
           })
           .eq('id', patientId);
 
-        if (error) throw error;
-      }
+        if (error) {
+          console.error('Supabase error moving patient to trash:', error);
+          setToastMessage('Failed to move patient to trash');
+          setToastType('error');
+          setShowToast(true);
+          return;
+        }
 
-      onMoveToTrash(patientId);
-      loadPatients();
+        // Show success toast
+        setToastMessage(`${patientName} moved to trash`);
+        setToastType('success');
+        setShowToast(true);
+
+        // Update local state and notify parent
+        onMoveToTrash(patientId);
+        await loadPatients(); // Reload the list to reflect changes
+      }
     } catch (err) {
-      console.error('Error moving patient to trash:', err);
-      setError('Failed to move patient to trash');
+      console.error('Unexpected error moving patient to trash:', err);
+      setToastMessage('Failed to move patient to trash');
+      setToastType('error');
+      setShowToast(true);
     } finally {
       setIsProcessing(null);
     }
@@ -319,6 +361,58 @@ export default function SupabasePatientList({
     } catch (err) {
       console.error('Error restoring patient:', err);
       setError('Failed to restore patient');
+    } finally {
+      setIsProcessing(null);
+    }
+  };
+
+  const handlePermanentlyDeletePatient = async (patientId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    
+    // Ask for confirmation before permanent deletion
+    const patientName = patients.find(p => p.id === patientId)?.name || 'this patient';
+    if (!confirm(`Are you sure you want to permanently delete ${patientName}? This action cannot be undone and will also delete all associated notes.`)) {
+      return;
+    }
+
+    setIsProcessing(patientId);
+
+    try {
+      if (dataSource === 'supabase') {
+        if (!supabase) {
+          throw new Error('Supabase client not initialized');
+        }
+
+        // First, delete all notes associated with this patient
+        const { error: notesError } = await supabase
+          .from('notes')
+          .delete()
+          .eq('patient_id', patientId);
+
+        if (notesError) {
+          console.error('Error deleting patient notes:', notesError);
+          throw new Error('Failed to delete patient notes');
+        }
+
+        // Then, permanently delete the patient record
+        const { error: patientError } = await supabase
+          .from('patients')
+          .delete()
+          .eq('id', patientId);
+
+        if (patientError) throw patientError;
+      }
+
+      // Reload the patient list
+      loadPatients();
+      
+      // If this was the selected patient, clear the selection
+      if (selectedPatientId === patientId) {
+        onSelectPatient('');
+      }
+    } catch (err) {
+      console.error('Error permanently deleting patient:', err);
+      setError('Failed to permanently delete patient');
     } finally {
       setIsProcessing(null);
     }
@@ -391,6 +485,13 @@ export default function SupabasePatientList({
 
   return (
     <div className="bg-muted/50 rounded-lg shadow-lg border border-border">
+      {showToast && (
+        <Toast
+          message={toastMessage}
+          type={toastType}
+          onClose={() => setShowToast(false)}
+        />
+      )}
       <div className="p-4 border-b border-border bg-muted/50">
         <div className="flex flex-col gap-2">
           {/* Remove "Patients" header as requested */}
@@ -523,7 +624,7 @@ export default function SupabasePatientList({
                     type="button"
                     className={`w-full text-left pl-4 pr-2 py-3.5 cursor-pointer transition-all duration-200 group relative animate-in fade-in duration-200 ${
                       selectedPatientId === patient.id
-                        ? 'bg-muted/80 dark:bg-muted/80 border-l-4 border-l-blue-500 dark:border-l-blue-400 text-foreground'
+                        ? 'bg-blue-50 dark:bg-blue-900/30 text-foreground'
                         : 'bg-muted/50 hover:bg-muted/60 focus:bg-muted/60 focus:outline-none text-foreground'
                     }`}
                     onMouseEnter={() => setHoveredPatientId(patient.id)}
@@ -614,19 +715,50 @@ export default function SupabasePatientList({
                               <Edit2 className="w-4 h-4" />
                             </button>
                           )}
-                          {hoveredPatientId === patient.id && (
+                          {showTrash && hoveredPatientId === patient.id ? (
+                            // Trash view: Show both restore and permanently delete buttons
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => handleRestorePatient(patient.id, e)}
+                                className={`${iconButtonVariants({ 
+                                  variant: "primary", 
+                                  size: "sm", 
+                                  visibility: "always" 
+                                })} ${isProcessing === patient.id ? 'animate-spin' : ''}`}
+                                title="Restore patient"
+                                disabled={isProcessing === patient.id}
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => handlePermanentlyDeletePatient(patient.id, e)}
+                                className={`${iconButtonVariants({ 
+                                  variant: "destructive", 
+                                  size: "sm", 
+                                  visibility: "always" 
+                                })} ${isProcessing === patient.id ? 'animate-spin' : ''}`}
+                                title="Permanently delete patient"
+                                disabled={isProcessing === patient.id}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : !showTrash && hoveredPatientId === patient.id && (
+                            // Normal view: Show move to trash button
                             <button
                               type="button"
-                              onClick={(e) => showTrash ? handleRestorePatient(patient.id, e) : handleMoveToTrash(patient.id, e)}
+                              onClick={(e) => handleMoveToTrash(patient.id, e)}
                               className={`${iconButtonVariants({ 
-                                variant: showTrash ? "primary" : "destructive", 
+                                variant: "destructive", 
                                 size: "sm", 
                                 visibility: "always" 
                               })} ${isProcessing === patient.id ? 'animate-spin' : ''}`}
-                              title={showTrash ? 'Restore patient' : 'Move to trash'}
+                              title="Move to trash"
                               disabled={isProcessing === patient.id}
                             >
-                              {showTrash ? <RefreshCw className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           )}
                         </div>

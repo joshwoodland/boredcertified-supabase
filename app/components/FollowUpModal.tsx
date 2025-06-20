@@ -7,7 +7,7 @@ import { useRecordingSafeguard } from '../hooks/useRecordingSafeguard';
 import { useAppSettings } from '../providers/AppSettingsProvider';
 import RecoveryPrompt from './RecoveryPrompt';
 import LiveDeepgramRecorder, { LiveDeepgramRecorderRef } from './LiveDeepgramRecorder';
-import { saveChecklistToCache, getChecklistFromCache, getMostRecentChecklist } from '../utils/checklistCache';
+import { saveChecklistToCache, getChecklistFromCache, getMostRecentChecklist, saveChecklistToDatabase, getChecklistFromDatabase } from '../utils/checklistCache';
 import { formatSoapNote } from '../utils/formatSoapNote';
 
 interface FollowUpModalProps {
@@ -38,7 +38,12 @@ export default function FollowUpModal({
   const [isGeneratingSoapNote, setIsGeneratingSoapNote] = useState(false);
   const [recorderStatus, setRecorderStatus] = useState('Initializing...');
   const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(true);
+  const [isFirstRecordingAttempt, setIsFirstRecordingAttempt] = useState(true);
   const recorderRef = useRef<LiveDeepgramRecorderRef>(null);
+  const [savedPoints, setSavedPoints] = useState<Record<string, number>>({});
+  const [visitType, setVisitType] = useState<'initial' | 'followup'>('followup');
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Use the recording safeguard hook
   const {
@@ -65,11 +70,17 @@ export default function FollowUpModal({
     handleRecoverTranscript(recoveredText);
   }, [handleRecoverTranscript]);
 
-  // Keep track of which keywords have been processed to avoid double-counting
-  const processedKeywordsRef = useRef<Map<string, Set<string>>>(new Map());
-
-  // Ref to track the last transcript length that was analyzed
-  const lastAnalyzedLengthRef = useRef<number>(0);
+  // Clear any cached transcript data on component mount to ensure clean state
+  useEffect(() => {
+    if (!recoverySession) {
+      setTranscript('');
+      setFinalTranscript('');
+      setEditableTranscript('');
+      setIsRecording(false);
+      setIsEditMode(false);
+      setPreserveTranscript(false);
+    }
+  }, [recoverySession]);
 
   // Reference to track the previous transcript length when resuming recording
   const previousTranscriptLengthRef = useRef<number>(0);
@@ -99,15 +110,31 @@ export default function FollowUpModal({
         noteId
       });
 
-      // First, try to get the checklist from cache
+      // First, try to get the checklist from the database for this specific note
+      let checklistItems = null;
+      
+      if (noteId && noteId !== 'provided-note') {
+        console.log('Checking database for existing checklist for note:', noteId);
+        checklistItems = await getChecklistFromDatabase(noteId);
+      }
+
+      // If we have database items, use them
+      if (checklistItems && checklistItems.length > 0) {
+        console.log('Using database checklist items for note:', noteId);
+        setItems(checklistItems);
+        setLoading(false);
+        return;
+      }
+
+      // Fallback to localStorage cache
       let cachedItems = null;
 
-      // Try to get the specific checklist for this note
+      // Try to get the specific checklist for this note from cache
       if (patientId && noteId) {
         cachedItems = getChecklistFromCache(patientId, noteId);
       }
 
-      // If no specific checklist, try to get the most recent one for this patient
+      // If no specific checklist in cache, try to get the most recent one for this patient
       if (!cachedItems && patientId) {
         cachedItems = getMostRecentChecklist(patientId);
       }
@@ -120,14 +147,25 @@ export default function FollowUpModal({
         return;
       }
 
-      // Otherwise, fetch from API
+      // Otherwise, fetch from API and save to database
       console.log('Fetching new checklist items from API');
       const fetchedItems = await fetchFollowUps(lastVisitNote);
       setItems(fetchedItems);
 
-      // Save to cache if we have items and patient/note IDs
-      if (fetchedItems.length > 0 && patientId && noteId) {
-        saveChecklistToCache(patientId, noteId, fetchedItems);
+      // Save to database if we have items and a valid source note ID
+      if (fetchedItems.length > 0 && noteId && noteId !== 'provided-note') {
+        console.log('Saving generated checklist to database for note:', noteId);
+        const saved = await saveChecklistToDatabase(noteId, fetchedItems);
+        if (!saved) {
+          console.warn('Failed to save checklist to database, falling back to localStorage cache');
+          // Fallback to localStorage if database save fails
+          if (patientId) {
+            saveChecklistToCache(patientId, noteId, fetchedItems);
+          }
+        }
+      } else if (fetchedItems.length > 0 && patientId) {
+        // For provided notes or when noteId is not available, use localStorage cache
+        saveChecklistToCache(patientId, noteId || 'provided-note', fetchedItems);
       }
 
       setLoading(false);
@@ -189,43 +227,60 @@ export default function FollowUpModal({
     setTranscript(newTranscript);
     setFinalTranscript(newTranscript);
 
-    // Analyze transcript for keywords and update points
-    const currentTranscriptLength = newTranscript.length;
-    
-    // Only analyze new content to avoid double-counting
-    if (currentTranscriptLength > lastAnalyzedLengthRef.current) {
-      const newContent = newTranscript.slice(lastAnalyzedLengthRef.current);
+    // Analyze complete transcript for keywords and update points
+    if (newTranscript && newTranscript.trim()) {
+      const transcriptLower = newTranscript.toLowerCase();
+      const newPoints = { ...itemPoints };
       
-      // Process each item for keyword matches in the new content
-      items.forEach(item => {
-        if (!processedKeywordsRef.current.has(item.id)) {
-          processedKeywordsRef.current.set(item.id, new Set());
-        }
-        
-        const processedKeywords = processedKeywordsRef.current.get(item.id)!;
-        
-        item.keywords.forEach(keyword => {
-          if (!processedKeywords.has(keyword) && matchesWordVariation(newContent.toLowerCase(), keyword.toLowerCase())) {
-            // Mark this keyword as processed for this item
-            processedKeywords.add(keyword);
-            
-            // Add points for this item
-            setItemPoints(prev => ({
-              ...prev,
-              [item.id]: (prev[item.id] || 0) + 1
-            }));
-            
-            // Auto-complete items that reach the threshold
-            if ((itemPoints[item.id] || 0) + 1 >= item.threshold) {
-              setCompletedIds(prev => [...prev.filter(id => id !== item.id), item.id]);
-            }
-          }
-        });
+      console.log('[FOLLOW-UP KEYWORD ANALYSIS] Analyzing transcript:', {
+        transcriptLength: newTranscript.length,
+        transcriptPreview: newTranscript.substring(0, 100) + '...',
+        itemsCount: items.length
       });
       
-      lastAnalyzedLengthRef.current = currentTranscriptLength;
+      let totalKeywordsFound = 0;
+      
+      // Process each item for keyword matches in the complete transcript
+      items.forEach(item => {
+        let totalOccurrences = 0;
+        const foundKeywords: string[] = [];
+        
+        item.keywords.forEach(keyword => {
+          // Count all occurrences of this keyword in the complete transcript
+          const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+          const matches = transcriptLower.match(regex);
+          if (matches) {
+            totalOccurrences += matches.length;
+            foundKeywords.push(`${keyword}(${matches.length})`);
+          }
+        });
+        
+        // Calculate points: 20 points per occurrence, max 100
+        if (totalOccurrences > 0) {
+          const pointsToAdd = totalOccurrences * 20;
+          const newPointsValue = Math.min(100, pointsToAdd);
+          
+          newPoints[item.id] = newPointsValue;
+          totalKeywordsFound += totalOccurrences;
+          
+          console.log(`[FOLLOW-UP KEYWORD ANALYSIS] ${item.text}: ${totalOccurrences} occurrences (${newPointsValue} points) - ${foundKeywords.join(', ')}`);
+          
+          // Auto-complete items that reach 100 points
+          if (newPointsValue >= 100) {
+            setCompletedIds(prev => {
+              if (!prev.includes(item.id)) {
+                return [...prev, item.id];
+              }
+              return prev;
+            });
+          }
+        }
+      });
+      
+      console.log(`[FOLLOW-UP KEYWORD ANALYSIS] Total keywords found: ${totalKeywordsFound}`);
+      setItemPoints(newPoints);
     }
-  }, [items, itemPoints, matchesWordVariation]);
+  }, [items, itemPoints]);
 
   // Handle recording completion from LiveDeepgramRecorder
   const handleRecordingComplete = useCallback((blob: Blob, transcriptText: string) => {
@@ -324,7 +379,8 @@ export default function FollowUpModal({
           isInitialEvaluation: isInitialVisit, // Explicitly pass visit type
           patientName: patientName, // Pass patient name for proper formatting
           previousNote: previousNote, // Pass the previous note for context
-          soapTemplate: soapTemplate // Pass the appropriate template
+          soapTemplate: soapTemplate, // Pass the appropriate template
+          sourceNoteId: noteId && noteId !== 'provided-note' ? noteId : null // Link to the source note if available
         }),
       });
 
@@ -357,6 +413,16 @@ export default function FollowUpModal({
     } finally {
       setIsGeneratingSoapNote(false);
     }
+  };
+
+  // Get progress color based on points (matching DefaultChecklistModal system)
+  const getProgressColor = (progress: number, isComplete: boolean) => {
+    if (isComplete) return 'bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700';
+    if (progress >= 80) return 'bg-lime-100 dark:bg-lime-900/30 border-lime-300 dark:border-lime-700';
+    if (progress >= 60) return 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-300 dark:border-yellow-700';
+    if (progress >= 40) return 'bg-orange-100 dark:bg-orange-900/30 border-orange-300 dark:border-orange-700';
+    if (progress > 0) return 'bg-red-100 dark:bg-red-900/30 border-red-300 dark:border-red-700';
+    return 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600';
   };
 
   return (
@@ -428,6 +494,85 @@ export default function FollowUpModal({
           </p>
         </div>
 
+        {/* Top Recording Controls */}
+        {!isEditMode && !loading && items.length > 0 && (
+          <div className="mb-4 flex justify-center">
+            {isRecording ? (
+              <button
+                onClick={() => {
+                  if (recorderRef.current?.canStop) {
+                    recorderRef.current.stopRecording();
+                  }
+                  setIsRecording(false);
+                  setPreserveTranscript(false);
+                }}
+                className="bg-red-600 text-white px-6 py-3 rounded-xl hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 transition-colors flex items-center gap-2 text-lg font-medium"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+                </svg>
+                Stop Recording
+              </button>
+            ) : preserveTranscript ? (
+              <button
+                onClick={() => {
+                  if (recorderRef.current?.canRecord) {
+                    recorderRef.current.startRecording();
+                    setIsRecording(true);
+                    setPreserveTranscript(false);
+                    setShowRecoveryPrompt(false);
+                  }
+                }}
+                disabled={!recorderRef.current?.canRecord}
+                className="bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 text-lg font-medium disabled:opacity-50"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Resume Recording
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  // If this is the first recording attempt, cleanup any existing resources
+                  if (isFirstRecordingAttempt) {
+                    console.log('First recording attempt - cleaning up resources...');
+                    if (recorderRef.current?.cleanup) {
+                      recorderRef.current.cleanup();
+                    }
+                    setIsFirstRecordingAttempt(false);
+                    // Give a moment for cleanup to complete, then try recording
+                    setTimeout(() => {
+                      if (recorderRef.current?.canRecord) {
+                        recorderRef.current.startRecording();
+                        setIsRecording(true);
+                        setPreserveTranscript(false);
+                        setShowRecoveryPrompt(false);
+                      }
+                    }, 500);
+                    return;
+                  }
+                  
+                  if (recorderRef.current?.canRecord) {
+                    recorderRef.current.startRecording();
+                    setIsRecording(true);
+                    setPreserveTranscript(false);
+                    setShowRecoveryPrompt(false);
+                  }
+                }}
+                disabled={!recorderRef.current?.canRecord}
+                className="bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 text-lg font-medium disabled:opacity-50"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                </svg>
+                Start Recording
+              </button>
+            )}
+          </div>
+        )}
+
         {isEditMode ? (
           // Transcript edit mode
           <div className="my-4">
@@ -450,10 +595,185 @@ export default function FollowUpModal({
             
             {/* Live transcript display */}
             <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg mb-4">
-              <h4 className="font-medium text-gray-700 dark:text-gray-300 mb-2">Live Transcription</h4>
-              <div className={`text-gray-800 dark:text-gray-200 ${isRecording ? 'animate-pulse' : ''}`}>
-                {transcript || finalTranscript || "Hello? Can you hear me?"}
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-gray-700 dark:text-gray-300">Live Transcription</h4>
+                {/* Low Echo Cancellation Indicator */}
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center"
+                    title="Low echo cancellation enabled for video calls"
+                  >
+                    <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Video call optimized</span>
+                </div>
               </div>
+              <div className={`live-transcription text-gray-800 dark:text-gray-200 max-h-32 overflow-y-auto ${isRecording ? 'animate-pulse' : ''}`}>
+                {transcript || finalTranscript || "You may now begin speaking..."}
+              </div>
+            </div>
+
+            {/* Checklist items during recording */}
+            <div className="my-4 space-y-6">
+              {getItemsByCategory().map(({ category, items }) => (
+                <div key={category} className="space-y-2">
+                  <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2 flex items-center">
+                    <span className="mr-2">{getCategoryEmoji(category)}</span>
+                    <span>{getCategoryName(category)}</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {items.map((item) => {
+                      // Special rendering for Clinical Expertise items
+                      if (item.category === 'clinical-expertise') {
+                        // Format the text to add emoji and color-coded severity levels
+                        const formatExpertiseText = (text: string) => {
+                          // Split the text into sections and lines
+                          const parts = text.split(/\n\n/);
+
+                          return parts.map((part, partIndex) => {
+                            // Check if this is the drug interactions section
+                            if (part.startsWith('Potential Drug Interactions:')) {
+                              const lines = part.split('\n');
+                              const header = lines[0];
+                              const interactions = lines.slice(1).filter(line => line.trim().length > 0);
+
+                              return (
+                                <div key={`part-${partIndex}`}>
+                                  <div className="font-medium mb-2">{header}</div>
+                                  {interactions.map((line, lineIndex) => {
+                                    const trimmedLine = line.trim();
+                                    
+                                    // Skip empty lines
+                                    if (!trimmedLine) {
+                                      return null;
+                                    }
+
+                                    // Format the new structure: "MedicationA and MedicationB. Severity severity. Brief mechanism. Watch for: symptoms."
+                                    const formatInteractionLine = (line: string) => {
+                                      // Split by "Watch for:" to separate main content from symptoms
+                                      const watchForMatch = line.match(/^(.*?)\s*Watch for:\s*(.*)$/);
+                                      
+                                      if (watchForMatch) {
+                                        const [, mainContent, symptoms] = watchForMatch;
+                                        
+                                        // Format the main content with severity coloring
+                                        const formatMainContent = (content: string) => {
+                                          const tokens = content.split(/(\s+)/);
+                                          return tokens.map((token, i) => {
+                                            if (token === 'Moderate') {
+                                              return <span key={i} style={{color: '#f97316'}}>Moderate</span>;
+                                            } else if (token === 'Mild') {
+                                              return <span key={i} style={{color: '#eab308'}}>Mild</span>;
+                                            } else if (token === 'Severe') {
+                                              return <span key={i} style={{color: '#ef4444'}}>Severe</span>;
+                                            }
+                                            return token;
+                                          });
+                                        };
+
+                                        return (
+                                          <div key={`line-${lineIndex}`} className="ml-2 mb-2">
+                                            <div className="mb-1">
+                                              🚨 {formatMainContent(mainContent.trim())}
+                                            </div>
+                                            <div className="ml-4 text-sm text-gray-600 dark:text-gray-400">
+                                              <span className="font-medium">Watch for:</span> {symptoms.trim()}
+                                            </div>
+                                          </div>
+                                        );
+                                      } else {
+                                        // Fallback for lines that don't match the expected format
+                                        const tokens = line.split(/(\s+)/);
+                                        const formattedTokens = tokens.map((token, i) => {
+                                          if (token === 'Moderate') {
+                                            return <span key={i} style={{color: '#f97316'}}>Moderate</span>;
+                                          } else if (token === 'Mild') {
+                                            return <span key={i} style={{color: '#eab308'}}>Mild</span>;
+                                          } else if (token === 'Severe') {
+                                            return <span key={i} style={{color: '#ef4444'}}>Severe</span>;
+                                          }
+                                          return token;
+                                        });
+
+                                        return (
+                                          <div key={`line-${lineIndex}`} className="ml-2 mb-1">
+                                            🚨 {formattedTokens}
+                                          </div>
+                                        );
+                                      }
+                                    };
+
+                                    return formatInteractionLine(trimmedLine);
+                                  })}
+                                </div>
+                              );
+                            } else {
+                              // For other sections (like Expert Tip), just render with normal formatting
+                              return (
+                                <div key={`part-${partIndex}`} className="mt-3">
+                                  {part.split('\n').map((line, lineIndex) => (
+                                    <div key={`line-${lineIndex}`} className={lineIndex === 0 ? "font-medium mb-2" : "ml-2 mb-1"}>
+                                      {line}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                          });
+                        };
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="px-3 py-3 rounded-lg bg-gray-100 dark:bg-gray-700 dark:text-gray-200"
+                          >
+                            {formatExpertiseText(item.text)}
+                          </div>
+                        );
+                      }
+
+                      // Standard rendering for regular checklist items
+                      const progress = itemPoints[item.id] || 0;
+                      const isComplete = completedIds.includes(item.id);
+
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => toggleItem(item.id)}
+                          className={`cursor-pointer px-3 py-3 rounded-lg border-2 transition-all duration-200 hover:shadow-md ${getProgressColor(progress, isComplete)}`}
+                          title={`Discussion coverage: ${progress} points`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-800 dark:text-gray-200 font-medium">
+                              {item.text}
+                            </span>
+                            <div className="flex items-center space-x-2">
+                              {progress > 0 && (
+                                <div className="text-xs text-gray-600 dark:text-gray-400">
+                                  {Math.round(progress)}%
+                                </div>
+                              )}
+                              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                isComplete 
+                                  ? 'bg-green-500 border-green-500' 
+                                  : 'border-gray-300 dark:border-gray-600'
+                              }`}>
+                                {isComplete && (
+                                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                  </svg>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         ) : loading ? (
@@ -487,25 +807,55 @@ export default function FollowUpModal({
                           if (part.startsWith('Potential Drug Interactions:')) {
                             const lines = part.split('\n');
                             const header = lines[0];
-                            const interactions = lines.slice(1);
+                            const interactions = lines.slice(1).filter(line => line.trim().length > 0);
 
                             return (
                               <div key={`part-${partIndex}`}>
                                 <div className="font-medium mb-2">{header}</div>
                                 {interactions.map((line, lineIndex) => {
-                                  // Apply formatting only to drug interaction lines starting with a dash
-                                  if (line.trim().startsWith('-')) {
-                                    // We'll replace the dash with the alert emoji in the formatLine function
+                                  const trimmedLine = line.trim();
+                                  
+                                  // Skip empty lines
+                                  if (!trimmedLine) {
+                                    return null;
+                                  }
 
-                                    // Tokenize and format the line
-                                    const formatLine = (line: string) => {
-                                      // Replace dash with emoji first
-                                      line = line.replace(/^(\s*)-/, '$1🚨');
+                                  // Format the new structure: "MedicationA and MedicationB. Severity severity. Brief mechanism. Watch for: symptoms."
+                                  const formatInteractionLine = (line: string) => {
+                                    // Split by "Watch for:" to separate main content from symptoms
+                                    const watchForMatch = line.match(/^(.*?)\s*Watch for:\s*(.*)$/);
+                                    
+                                    if (watchForMatch) {
+                                      const [, mainContent, symptoms] = watchForMatch;
+                                      
+                                      // Format the main content with severity coloring
+                                      const formatMainContent = (content: string) => {
+                                        const tokens = content.split(/(\s+)/);
+                                        return tokens.map((token, i) => {
+                                          if (token === 'Moderate') {
+                                            return <span key={i} style={{color: '#f97316'}}>Moderate</span>;
+                                          } else if (token === 'Mild') {
+                                            return <span key={i} style={{color: '#eab308'}}>Mild</span>;
+                                          } else if (token === 'Severe') {
+                                            return <span key={i} style={{color: '#ef4444'}}>Severe</span>;
+                                          }
+                                          return token;
+                                        });
+                                      };
 
-                                      // Split the line into tokens while preserving spaces
+                                      return (
+                                        <div key={`line-${lineIndex}`} className="ml-2 mb-2">
+                                          <div className="mb-1">
+                                            🚨 {formatMainContent(mainContent.trim())}
+                                          </div>
+                                          <div className="ml-4 text-sm text-gray-600 dark:text-gray-400">
+                                            <span className="font-medium">Watch for:</span> {symptoms.trim()}
+                                          </div>
+                                        </div>
+                                      );
+                                    } else {
+                                      // Fallback for lines that don't match the expected format
                                       const tokens = line.split(/(\s+)/);
-
-                                      // Process each token
                                       const formattedTokens = tokens.map((token, i) => {
                                         if (token === 'Moderate') {
                                           return <span key={i} style={{color: '#f97316'}}>Moderate</span>;
@@ -519,16 +869,13 @@ export default function FollowUpModal({
 
                                       return (
                                         <div key={`line-${lineIndex}`} className="ml-2 mb-1">
-                                          {formattedTokens}
+                                          🚨 {formattedTokens}
                                         </div>
                                       );
-                                    };
+                                    }
+                                  };
 
-                                    return formatLine(line.trim());
-                                  }
-
-                                  // Return other lines as-is
-                                  return <div key={`line-${lineIndex}`} className="ml-0 mb-1">{line}</div>;
+                                  return formatInteractionLine(trimmedLine);
                                 })}
                               </div>
                             );
@@ -565,46 +912,32 @@ export default function FollowUpModal({
                       <div
                         key={item.id}
                         onClick={() => toggleItem(item.id)}
-                        /* Always use the color gradient, regardless of completion status */
-                        className={`cursor-pointer px-3 py-2 rounded-lg transition-all flex items-start ${
-                          progress === 0 ? 'bg-gray-100 dark:bg-gray-700 dark:text-gray-200' :
-                          progress < item.threshold ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' :
-                          progress < 2 * item.threshold ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                          progress < 3 * item.threshold ? 'bg-lime-100 text-lime-800 dark:bg-lime-900/30 dark:text-lime-300' :
-                          'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                        }`}
-                        title={`Discussion coverage: ${progress}/${item.threshold}`}
+                        className={`cursor-pointer px-3 py-3 rounded-lg border-2 transition-all duration-200 hover:shadow-md ${getProgressColor(progress, isComplete)}`}
+                        title={`Discussion coverage: ${progress} points`}
                       >
-                        <div className="relative flex-shrink-0 mr-3">
-                          {/* Circle indicator */}
-                          <span className={`inline-block w-5 h-5 mt-0.5 rounded-full border
-                            ${isComplete ? "border-green-500 dark:border-green-500" : "border-gray-400 dark:border-gray-500"}`}>
-                            {/* Only show checkmark when complete */}
-                            {isComplete && (
-                              <svg className="w-5 h-5 text-green-500 dark:text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-800 dark:text-gray-200 font-medium">
+                            {item.text}
                           </span>
-
-                          {/* Always show progress bar with appropriate fill */}
-                          {progress > 0 && (
-                            <div
-                              className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden"
-                              style={{ width: '20px' }}
-                            >
-                              <div
-                                className={`h-full ${
-                                  progress < item.threshold ? "bg-orange-500" :
-                                  progress < 2 * item.threshold ? "bg-yellow-500" :
-                                  progress < 3 * item.threshold ? "bg-lime-500" : "bg-green-500"
-                                }`}
-                                style={{ width: `${progress / item.threshold * 100}%` }}
-                              ></div>
+                          <div className="flex items-center space-x-2">
+                            {progress > 0 && (
+                              <div className="text-xs text-gray-600 dark:text-gray-400">
+                                {Math.round(progress)}%
+                              </div>
+                            )}
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                              isComplete 
+                                ? 'bg-green-500 border-green-500' 
+                                : 'border-gray-300 dark:border-gray-600'
+                            }`}>
+                              {isComplete && (
+                                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
-                        <span>{item.text}</span>
                       </div>
                     );
                   })}
@@ -620,8 +953,6 @@ export default function FollowUpModal({
             <p className="text-red-600 dark:text-red-400 font-medium">{error}</p>
           </div>
         )}
-
-
 
         {/* Recording status indicator */}
         {isRecording && (
@@ -721,14 +1052,33 @@ export default function FollowUpModal({
               ) : (
                 <button
                   onClick={() => {
+                    // If this is the first recording attempt, cleanup any existing resources
+                    if (isFirstRecordingAttempt) {
+                      console.log('First recording attempt - cleaning up resources...');
+                      if (recorderRef.current?.cleanup) {
+                        recorderRef.current.cleanup();
+                      }
+                      setIsFirstRecordingAttempt(false);
+                      // Give a moment for cleanup to complete, then try recording
+                      setTimeout(() => {
+                        if (recorderRef.current?.canRecord) {
+                          recorderRef.current.startRecording();
+                          setIsRecording(true);
+                          setPreserveTranscript(false);
+                          setShowRecoveryPrompt(false);
+                        }
+                      }, 500);
+                      return;
+                    }
+                    
                     if (recorderRef.current?.canRecord) {
                       recorderRef.current.startRecording();
                       setIsRecording(true);
                       setPreserveTranscript(false);
-                      setShowRecoveryPrompt(false); // Hide recovery prompt when starting recording
+                      setShowRecoveryPrompt(false);
                     }
                   }}
-                  disabled={loading || !recorderRef.current?.canRecord}
+                  disabled={!recorderRef.current?.canRecord}
                   className="bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -757,19 +1107,17 @@ export default function FollowUpModal({
               </button>
             </>
           )}
+        </div>
 
-        {/* Hidden LiveDeepgramRecorder in headless mode */}
-        <LiveDeepgramRecorder
-          ref={recorderRef}
-          onRecordingComplete={handleRecordingComplete}
-          isProcessing={false}
-          isRecordingFromModal={true}
-          onTranscriptUpdate={handleTranscriptUpdate}
-          headless={true}
-          onStatusChange={setRecorderStatus}
-          onRecordingStateChange={setIsRecording}
-          onErrorChange={setError}
-        />
+        {/* Hidden LiveDeepgramRecorder positioned off-screen */}
+        <div className="absolute -top-96 left-0 w-80 h-20 opacity-0 pointer-events-none">
+          <LiveDeepgramRecorder
+            ref={recorderRef}
+            onRecordingComplete={handleRecordingComplete}
+            isProcessing={false}
+            isRecordingFromModal={true}
+            onTranscriptUpdate={handleTranscriptUpdate}
+          />
         </div>
       </div>
     </div>

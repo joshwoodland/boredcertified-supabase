@@ -2,34 +2,40 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useState,
-  useCallback,
+  useRef,
   ReactNode,
-  FunctionComponent,
 } from "react";
 
-export enum MicrophoneState {
-  NotSetup = "NotSetup",
-  SettingUp = "SettingUp",
-  Ready = "Ready",
-  Opening = "Opening",
-  Open = "Open",
-  Error = "Error",
-  Closed = "Closed",
+interface MicrophoneContextType {
+  microphone: MediaRecorder | null;
+  startMicrophone: () => void;
+  stopMicrophone: () => void;
+  setupMicrophone: () => void;
+  resetToReady: () => void;
+  microphoneState: MicrophoneState | null;
 }
 
 export enum MicrophoneEvents {
   DataAvailable = "dataavailable",
+  Error = "error",
+  Pause = "pause",
+  Resume = "resume",
+  Start = "start",
+  Stop = "stop",
 }
 
-interface MicrophoneContextType {
-  microphone: MediaRecorder | null;
-  microphoneState: MicrophoneState;
-  setupMicrophone: () => Promise<void>;
-  startMicrophone: () => void;
-  stopMicrophone: () => void;
-  errorMessage: string | null;
+export enum MicrophoneState {
+  NotSetup = -1,
+  SettingUp = 0,
+  Ready = 1,
+  Opening = 2,
+  Open = 3,
+  Error = 4,
+  Pausing = 5,
+  Paused = 6,
 }
 
 const MicrophoneContext = createContext<MicrophoneContextType | undefined>(
@@ -40,148 +46,111 @@ interface MicrophoneContextProviderProps {
   children: ReactNode;
 }
 
-const MicrophoneContextProvider: FunctionComponent<
-  MicrophoneContextProviderProps
-> = ({ children }) => {
+const MicrophoneContextProvider = ({ children }: MicrophoneContextProviderProps) => {
   const [microphone, setMicrophone] = useState<MediaRecorder | null>(null);
   const [microphoneState, setMicrophoneState] = useState<MicrophoneState>(
     MicrophoneState.NotSetup
   );
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isSettingUpRef = useRef(false);
 
   const setupMicrophone = useCallback(async () => {
-    if (microphoneState === MicrophoneState.SettingUp) {
-      console.log('[MICROPHONE] Already setting up microphone...');
+    console.log("[MICROPHONE CONTEXT] === SETUP MICROPHONE CALLED ===");
+    console.log("[MICROPHONE CONTEXT] Current state:", microphoneState);
+    console.log("[MICROPHONE CONTEXT] IsSettingUp ref:", isSettingUpRef.current);
+    console.log("[MICROPHONE CONTEXT] Low echo cancellation always enabled for video calls");
+    
+    if (isSettingUpRef.current) {
+      console.log("[MICROPHONE CONTEXT] Already setting up, returning early");
       return;
     }
 
-    console.log('[MICROPHONE] Starting microphone setup...');
+    console.log("[MICROPHONE CONTEXT] Setting up microphone...");
+    isSettingUpRef.current = true;
     setMicrophoneState(MicrophoneState.SettingUp);
-    setErrorMessage(null);
 
     try {
-      // Check if getUserMedia is available
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('getUserMedia is not supported in this browser');
-      }
-
-      console.log('[MICROPHONE] Requesting microphone access...');
-      const stream = await navigator.mediaDevices.getUserMedia({
+      console.log("[MICROPHONE CONTEXT] Requesting user media...");
+      const userMedia = await navigator.mediaDevices.getUserMedia({
         audio: {
-          noiseSuppression: true,
-          echoCancellation: true,
+          channelCount: 1,
+          echoCancellation: false, // Always disabled for low echo cancellation (better for video calls)
           autoGainControl: true,
-          sampleRate: 16000,
+          noiseSuppression: true,
         },
       });
 
-      console.log('[MICROPHONE] Microphone access granted');
-
-      // Check if MediaRecorder is supported
-      if (!window.MediaRecorder) {
-        throw new Error('MediaRecorder is not supported in this browser');
-      }
-
-      // Try different MIME types for better compatibility
-      let mimeType = "audio/webm;codecs=opus";
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        console.log('[MICROPHONE] opus codec not supported, trying alternatives...');
-        if (MediaRecorder.isTypeSupported("audio/webm")) {
-          mimeType = "audio/webm";
-        } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-          mimeType = "audio/mp4";
-        } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
-          mimeType = "audio/ogg";
-        } else {
-          // Use default (no mimeType specified)
-          mimeType = "";
-        }
-      }
-
-      console.log('[MICROPHONE] Creating MediaRecorder with mimeType:', mimeType || 'default');
-      
-      const recorderOptions = mimeType ? { mimeType } : {};
-      const recorder = new MediaRecorder(stream, recorderOptions);
-
-      recorder.addEventListener("start", () => {
-        console.log('[MICROPHONE] Recording started');
-        setMicrophoneState(MicrophoneState.Open);
+      console.log("[MICROPHONE CONTEXT] User media granted, creating MediaRecorder...");
+      const microphone = new MediaRecorder(userMedia, {
+        mimeType: "audio/webm",
       });
 
-      recorder.addEventListener("stop", () => {
-        console.log('[MICROPHONE] Recording stopped');
-        setMicrophoneState(MicrophoneState.Closed);
-      });
-
-      recorder.addEventListener("error", (event) => {
-        console.error('[MICROPHONE] Recording error:', event);
-        setMicrophoneState(MicrophoneState.Error);
-        setErrorMessage(`Recording error: ${event}`);
-      });
-
-      recorder.addEventListener("dataavailable", (event) => {
-        console.log('[MICROPHONE] Data available, size:', event.data.size);
-      });
-
-      setMicrophone(recorder);
+      console.log("[MICROPHONE CONTEXT] MediaRecorder created successfully");
+      setMicrophone(microphone);
       setMicrophoneState(MicrophoneState.Ready);
-      console.log('[MICROPHONE] Microphone setup complete');
+      console.log("[MICROPHONE CONTEXT] Microphone setup successful - state set to Ready");
     } catch (error) {
-      console.error('[MICROPHONE] Error setting up microphone:', error);
-      setMicrophoneState(MicrophoneState.Error);
+      console.error("[MICROPHONE CONTEXT] Error setting up microphone:", error);
       
-      if (error instanceof Error) {
-        if (error.name === 'NotAllowedError') {
-          setErrorMessage('Microphone access denied. Please allow microphone access and refresh the page.');
-        } else if (error.name === 'NotFoundError') {
-          setErrorMessage('No microphone found. Please connect a microphone and try again.');
-        } else if (error.name === 'NotReadableError') {
-          setErrorMessage('Microphone is being used by another application.');
-        } else {
-          setErrorMessage(`Microphone setup failed: ${error.message}`);
+      // Log specific error types
+      if (error instanceof DOMException) {
+        console.error("[MICROPHONE CONTEXT] DOMException details:", {
+          name: error.name,
+          message: error.message,
+          code: error.code
+        });
+        
+        switch (error.name) {
+          case 'NotAllowedError':
+            console.error("[MICROPHONE CONTEXT] Microphone permission denied by user");
+            break;
+          case 'NotFoundError':
+            console.error("[MICROPHONE CONTEXT] No microphone device found");
+            break;
+          case 'NotReadableError':
+            console.error("[MICROPHONE CONTEXT] Microphone is already in use");
+            break;
+          default:
+            console.error("[MICROPHONE CONTEXT] Unknown microphone error");
         }
-      } else {
-        setErrorMessage('Unknown error occurred during microphone setup');
       }
+      
+      setMicrophoneState(MicrophoneState.Error);
+    } finally {
+      // Reset the ref flag when setup is complete (success or failure)
+      isSettingUpRef.current = false;
     }
-  }, [microphoneState]);
+  }, []); // No dependencies needed since we're hard-coding the behavior
 
   const startMicrophone = useCallback(() => {
     if (microphone && microphoneState === MicrophoneState.Ready) {
-      console.log('[MICROPHONE] Starting recording...');
-      setMicrophoneState(MicrophoneState.Opening);
-      try {
-        microphone.start(100); // Send data every 100ms
-      } catch (error) {
-        console.error('[MICROPHONE] Error starting recording:', error);
-        setMicrophoneState(MicrophoneState.Error);
-        setErrorMessage('Failed to start recording');
-      }
-    } else {
-      console.log('[MICROPHONE] Cannot start - microphone not ready. State:', microphoneState);
+      // Use 250ms chunks like the official demo (instead of 100ms)
+      microphone.start(250);
+      setMicrophoneState(MicrophoneState.Open);
     }
   }, [microphone, microphoneState]);
 
   const stopMicrophone = useCallback(() => {
     if (microphone && microphoneState === MicrophoneState.Open) {
-      console.log('[MICROPHONE] Stopping recording...');
-      try {
-        microphone.stop();
-      } catch (error) {
-        console.error('[MICROPHONE] Error stopping recording:', error);
-      }
+      microphone.stop();
+      setMicrophoneState(MicrophoneState.Paused);
     }
   }, [microphone, microphoneState]);
+
+  const resetToReady = useCallback(() => {
+    if (microphoneState === MicrophoneState.Paused) {
+      setMicrophoneState(MicrophoneState.Ready);
+    }
+  }, [microphoneState]);
 
   return (
     <MicrophoneContext.Provider
       value={{
         microphone,
-        microphoneState,
-        setupMicrophone,
         startMicrophone,
         stopMicrophone,
-        errorMessage,
+        setupMicrophone,
+        resetToReady,
+        microphoneState,
       }}
     >
       {children}
@@ -199,7 +168,4 @@ function useMicrophone(): MicrophoneContextType {
   return context;
 }
 
-export {
-  MicrophoneContextProvider,
-  useMicrophone,
-}; 
+export { MicrophoneContextProvider, useMicrophone }; 

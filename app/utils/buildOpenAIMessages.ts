@@ -1,5 +1,5 @@
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { INITIAL_EVALUATION_TEMPLATE, FOLLOW_UP_VISIT_TEMPLATE } from "./soapTemplates";
+import { getInitialEvaluationTemplate, getFollowUpVisitTemplate } from "./soapTemplates";
 
 /**
  * Builds a structured array of messages for OpenAI API requests
@@ -14,23 +14,38 @@ export const buildOpenAIMessages = ({
   currentTranscript,
   soapTemplate,
   patientName,
+  providerName,
+  supervisor,
   isInitialEvaluation = false
 }: {
   previousSoapNote?: string;
   currentTranscript: string;
-  soapTemplate: string; // User preferences from settings
+  soapTemplate: string; // Additional preferences from settings (appended to hardcoded templates)
   patientName: string;
+  providerName: string;
+  supervisor?: string | null;
   isInitialEvaluation?: boolean;
 }): ChatCompletionMessageParam[] => {
   console.log('======= BUILDING STRUCTURED MESSAGES =======');
   console.log(`Previous note provided: ${!!previousSoapNote}`);
   console.log(`Current transcript length: ${currentTranscript.length} chars`);
   console.log(`Visit type: ${isInitialEvaluation ? 'Initial Evaluation' : 'Follow-up Visit'}`);
+  console.log(`Provider name: ${providerName}`);
+  console.log(`Supervisor: ${supervisor || 'None'}`);
+  console.log(`Additional preferences length: ${soapTemplate?.length || 0} chars`);
 
-  // Select the appropriate hardcoded template based on visit type
+  // Append ", PMHNP" to provider name if it doesn't already contain it
+  const formattedProviderName = providerName.includes('PMHNP') 
+    ? providerName 
+    : `${providerName}, PMHNP`;
+
+  // Select the appropriate hardcoded template based on visit type, provider name, and supervisor
   const hardcodedTemplate = isInitialEvaluation
-    ? INITIAL_EVALUATION_TEMPLATE
-    : FOLLOW_UP_VISIT_TEMPLATE;
+    ? getInitialEvaluationTemplate(formattedProviderName, supervisor)
+    : getFollowUpVisitTemplate(formattedProviderName, supervisor);
+    
+  console.log(`Using hardcoded template: ${isInitialEvaluation ? 'Initial Evaluation' : 'Follow-up Visit'} (${hardcodedTemplate.length} chars)`);
+  console.log(`Additional preferences: ${soapTemplate ? 'Yes' : 'None'}`);
 
   // Create system message with clinical focus
   const systemMessage = {
@@ -45,18 +60,16 @@ Prioritize clarity, medical accuracy, and professional language. If new diagnose
 
 IMPORTANT: The patient's name is "${patientName}". Always use this exact name throughout the note, regardless of any other names mentioned in the transcript.
 
-FORMATTING INSTRUCTIONS:
-- Use clean section headers like "Subjective", "Objective", "Assessment", "Plan" without any prefixes
-- Do NOT use "S-", "O-", "A-", "P-" prefixes before section headers
-- Use proper markdown formatting with ## for main sections
-- Keep section headers simple and consistent
+**CRITICAL FORMATTING RULES: 
+1. NEVER break lines before colons - Always format as "Label: Content" on the same line, not "Label\\n: Content"
+2. For telehealth details, write "**Mode of Communication**: Content" NOT "**Mode of Communication**\\n: Content" 
+3. Keep all label-colon combinations on single lines without line breaks**
 
 Follow this format strictly:
 
 ${hardcodedTemplate}
 
-Additional provider preferences:
-${soapTemplate}`
+${soapTemplate ? `\n\nADDITIONAL PROVIDER PREFERENCES:\n${soapTemplate}` : ''}`
   };
 
   // Create the messages array

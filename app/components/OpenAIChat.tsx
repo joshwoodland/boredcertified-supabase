@@ -26,9 +26,9 @@ const OpenAIChat: React.FC<OpenAIChatProps> = ({ openSettings }) => {
         const response = await fetch('/api/settings');
         if (response.ok) {
           const data = await response.json();
-          // Remove format tags if they exist
-          setInitialEvalPrompt(data.initialVisitPrompt.replace(/^format:\{[^}]*\}\n/gm, ''));
-          setFollowUpPrompt(data.followUpVisitPrompt.replace(/^format:\{[^}]*\}\n/gm, ''));
+          // Set user preferences directly (no format string cleanup needed)
+          setInitialEvalPrompt(data.initialVisitPrompt || '');
+          setFollowUpPrompt(data.followUpVisitPrompt || '');
         }
       } catch (error) {
         console.error('Error fetching settings:', error);

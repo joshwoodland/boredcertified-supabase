@@ -9,8 +9,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { createServerClient } from '@/app/lib/supabase';
+import { createClient } from '@/app/utils/supabase/server';
 import { convertToAppFormat, type AppNote } from '@/app/lib/supabaseTypes';
+import { extractContent } from '@/app/utils/safeJsonParse';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -20,7 +21,7 @@ const openai = new OpenAI({
 // Helper function to check Supabase connection
 async function checkSupabaseConnection(): Promise<boolean> {
   try {
-    const supabase = createServerClient();
+    const supabase = createClient();
     if (!supabase) {
       console.error('[notes/[id]/route] Failed to initialize Supabase client');
       return false;
@@ -67,7 +68,7 @@ export async function GET(
     }
 
     // Use standardized client initialization
-    const supabase = createServerClient();
+    const supabase = createClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -75,12 +76,12 @@ export async function GET(
       );
     }
 
-    // Get the note from Supabase
-    const { data: note, error } = await supabase
+    // Get the note from Supabase - first check if it exists
+    console.log(`[notes/[id]/route] Fetching note with ID: ${noteId}`);
+    const { data: notes, error } = await supabase
       .from('notes')
       .select('*')
-      .eq('id', noteId)
-      .single();
+      .eq('id', noteId);
 
     if (error) {
       console.error('[notes/[id]/route] Error fetching note:', error);
@@ -89,6 +90,24 @@ export async function GET(
         { status: 500 }
       );
     }
+
+    if (!notes || notes.length === 0) {
+      console.error(`[notes/[id]/route] Note with ID ${noteId} not found`);
+      return NextResponse.json(
+        { error: 'Note not found', details: `No note exists with ID: ${noteId}` },
+        { status: 404 }
+      );
+    }
+
+    if (notes.length > 1) {
+      console.error(`[notes/[id]/route] Multiple notes found with ID ${noteId}`);
+      return NextResponse.json(
+        { error: 'Data integrity error', details: `Multiple notes found with ID: ${noteId}` },
+        { status: 500 }
+      );
+    }
+
+    const note = notes[0];
 
     // Check if a summary already exists
     if (note.summary && note.summary.trim() !== '') {
@@ -100,18 +119,46 @@ export async function GET(
 
     console.log(`[notes/[id]/route] No existing summary found for note ${noteId}. Generating new summary.`);
 
+    // Extract the actual content from the note
+    const noteContent = extractContent(note.content);
+    
+    if (!noteContent || noteContent.trim() === '') {
+      console.error(`[notes/[id]/route] No content found for note ${noteId}`);
+      return NextResponse.json(
+        { error: 'No content available to generate summary' },
+        { status: 400 }
+      );
+    }
+
     // Generate summary using OpenAI
     const prompt = `Create a very concise summary (30-40 words max) of this medical note. PRIORITIZE any medication changes, then other key clinical information. DO NOT include patient names or identifiers:
 
-${note.content}`;
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 200,
-    });
+${noteContent}`;
+    
+    let summary = '';
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 200,
+      });
 
-    const summary = response.choices[0]?.message?.content?.trim() || '';
+      summary = response.choices[0]?.message?.content?.trim() || '';
+      
+      if (!summary) {
+        console.error(`[notes/[id]/route] OpenAI returned empty summary for note ${noteId}`);
+      }
+    } catch (openaiError) {
+      console.error(`[notes/[id]/route] OpenAI API error for note ${noteId}:`, openaiError);
+      return NextResponse.json(
+        { 
+          error: 'Failed to generate summary', 
+          details: openaiError instanceof Error ? openaiError.message : 'OpenAI API error'
+        },
+        { status: 500 }
+      );
+    }
 
     // Update the note with the summary
     const { data: updatedNote, error: updateError } = await supabase
@@ -148,43 +195,38 @@ ${note.content}`;
 }
 
 /**
- * PUT handler for updating a note (content and/or summary)
+ * PUT handler for updating a note
  */
 export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Get the note ID from route parameters
-    const { id: noteId } = await context.params;
+    const params = await context.params;
+    const noteId = params.id;
+
     if (!noteId) {
-      return NextResponse.json(
-        { error: 'Note ID missing from URL.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Note ID not found in URL' }, { status: 400 });
     }
 
-    const body = await request.json().catch(() => ({}));
-    const { content, summary, aiMagicRequest } = body as {
-      content?: unknown;
-      summary?: unknown;
-      aiMagicRequest?: string;
-    };
+    // Parse request body
+    const body = await request.json();
+    const { content, summary, checklistContent } = body;
 
     // Check if Supabase is available
     const isSupabaseAvailable = await checkSupabaseConnection();
     if (!isSupabaseAvailable) {
       return NextResponse.json(
         {
-          error: 'Database unavailable',
-          details: 'Failed health-check against Supabase.',
+          error: 'Database connection unavailable',
+          details: 'Please check your database connection settings.',
         },
         { status: 503 }
       );
     }
 
     // Use standardized client initialization
-    const supabase = createServerClient();
+    const supabase = createClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -192,60 +234,12 @@ export async function PUT(
       );
     }
 
-    // Prepare update data
-    const updateData: Record<string, unknown> = {
+    // Build update object with only provided fields
+    const updateData: any = {
       updated_at: new Date().toISOString(),
     };
 
-    // If this is an AI Magic request, process it with OpenAI
-    if (aiMagicRequest && typeof content === 'string') {
-      try {
-        console.log('[notes/[id]/route] Processing AI Magic request');
-
-        // Create a prompt for OpenAI that includes both the edit request and original content
-        const prompt = `Please use these edit requests and apply them to the entire SOAP note.
-Return the full SOAP note in edited form without any extra words or comments.
-
-Edit Request: ${aiMagicRequest}
-
-Original SOAP Note:
-${content}`;
-
-        // Call OpenAI API to process the edit
-        const response = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3,
-          max_tokens: 2000,
-        });
-
-        // Get the edited content from OpenAI
-        const editedContent = response.choices[0]?.message?.content?.trim() || '';
-
-        // Format the content before saving
-        const formattedContent = editedContent; // We'll use the raw content as is
-
-        // Create the content object with both raw and formatted content
-        const contentToSave = JSON.stringify({
-          content: editedContent,
-          formattedContent
-        });
-
-        // Use the edited content as the new content
-        updateData.content = contentToSave;
-
-        console.log('[notes/[id]/route] AI Magic processing complete');
-      } catch (error) {
-        console.error('[notes/[id]/route] Error processing AI Magic request:', error);
-        return NextResponse.json(
-          {
-            error: 'Failed to process AI Magic request',
-            message: error instanceof Error ? error.message : 'Unknown error'
-          },
-          { status: 500 }
-        );
-      }
-    } else if (content !== undefined) {
+    if (content !== undefined) {
       updateData.content = content;
     }
 
@@ -253,7 +247,11 @@ ${content}`;
       updateData.summary = summary;
     }
 
-    // Update the note in Supabase
+    if (checklistContent !== undefined) {
+      updateData.checklist_content = checklistContent;
+    }
+
+    // Update the note
     const { data: updatedNote, error } = await supabase
       .from('notes')
       .update(updateData)
@@ -269,16 +267,21 @@ ${content}`;
       );
     }
 
-    // Convert to app format and return
+    if (!updatedNote) {
+      return NextResponse.json(
+        { error: 'Note not found', details: `No note exists with ID: ${noteId}` },
+        { status: 404 }
+      );
+    }
+
+    // Convert to app format
     const appNote = convertToAppFormat(updatedNote, 'note') as AppNote;
+
     return NextResponse.json(appNote);
   } catch (error) {
-    console.error('[notes/[id]/route] Unexpected error:', error);
+    console.error('[notes/[id]/route] Error in PUT:', error);
     return NextResponse.json(
-      {
-        error: 'Server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
@@ -313,7 +316,7 @@ export async function POST(
     }
 
     // Use standardized client initialization
-    const supabase = createServerClient();
+    const supabase = createClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },
@@ -321,12 +324,12 @@ export async function POST(
       );
     }
 
-    // Get the note from Supabase
-    const { data: note, error } = await supabase
+    // Get the note from Supabase - first check if it exists
+    console.log(`[notes/[id]/route] Fetching note with ID: ${noteId}`);
+    const { data: notes, error } = await supabase
       .from('notes')
       .select('*')
-      .eq('id', noteId)
-      .single();
+      .eq('id', noteId);
 
     if (error) {
       console.error('[notes/[id]/route] Error fetching note:', error);
@@ -335,6 +338,24 @@ export async function POST(
         { status: 500 }
       );
     }
+
+    if (!notes || notes.length === 0) {
+      console.error(`[notes/[id]/route] Note with ID ${noteId} not found`);
+      return NextResponse.json(
+        { error: 'Note not found', details: `No note exists with ID: ${noteId}` },
+        { status: 404 }
+      );
+    }
+
+    if (notes.length > 1) {
+      console.error(`[notes/[id]/route] Multiple notes found with ID ${noteId}`);
+      return NextResponse.json(
+        { error: 'Data integrity error', details: `Multiple notes found with ID: ${noteId}` },
+        { status: 500 }
+      );
+    }
+
+    const note = notes[0];
 
     // Check if a summary already exists
     if (note.summary && note.summary.trim() !== '') {
@@ -346,18 +367,46 @@ export async function POST(
 
     console.log(`[notes/[id]/route] No existing summary found for note ${noteId}. Generating new summary.`);
 
+    // Extract the actual content from the note
+    const noteContent = extractContent(note.content);
+    
+    if (!noteContent || noteContent.trim() === '') {
+      console.error(`[notes/[id]/route] No content found for note ${noteId}`);
+      return NextResponse.json(
+        { error: 'No content available to generate summary' },
+        { status: 400 }
+      );
+    }
+
     // Generate summary using OpenAI
     const prompt = `Create a very concise summary (30-40 words max) of this medical note. PRIORITIZE any medication changes, then other key clinical information. DO NOT include patient names or identifiers:
 
-${note.content}`;
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 200,
-    });
+${noteContent}`;
+    
+    let summary = '';
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 200,
+      });
 
-    const summary = response.choices[0]?.message?.content?.trim() || '';
+      summary = response.choices[0]?.message?.content?.trim() || '';
+      
+      if (!summary) {
+        console.error(`[notes/[id]/route] OpenAI returned empty summary for note ${noteId}`);
+      }
+    } catch (openaiError) {
+      console.error(`[notes/[id]/route] OpenAI API error for note ${noteId}:`, openaiError);
+      return NextResponse.json(
+        { 
+          error: 'Failed to generate summary', 
+          details: openaiError instanceof Error ? openaiError.message : 'OpenAI API error'
+        },
+        { status: 500 }
+      );
+    }
 
     // Update the note with the summary
     const { data: updatedNote, error: updateError } = await supabase
@@ -422,7 +471,7 @@ export async function DELETE(
     }
 
     // Use standardized client initialization
-    const supabase = createServerClient();
+    const supabase = createClient();
     if (!supabase) {
       return NextResponse.json(
         { error: 'Failed to initialize database client' },

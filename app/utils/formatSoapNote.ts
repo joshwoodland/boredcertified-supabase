@@ -13,22 +13,19 @@ export function formatSoapNote(inputText: string): string {
   let markdownText = typeof inputText === 'string' ? extractContent(inputText) : inputText;
 
   // Remove AI instruction text that might appear at the beginning of the note
-  // This pattern matches from the beginning of the text up to the first occurrence of "Telehealth Session Details"
   const telehealthSectionIndex = markdownText.indexOf('Telehealth Session Details');
   if (telehealthSectionIndex > 0) {
-    // Find the last line break before "Telehealth Session Details"
     const lastBreakBeforeTelehealth = markdownText.lastIndexOf('\n', telehealthSectionIndex);
     if (lastBreakBeforeTelehealth > 0) {
-      // Remove everything before the section
       markdownText = markdownText.substring(lastBreakBeforeTelehealth + 1);
     }
   }
 
-  // Define the standard section headers we want to identify
+  // Define the standard section headers
   const sectionHeaders = [
     'Telehealth Session Details',
     'Subjective',
-    'Objective',
+    'Objective', 
     'Assessment',
     'Plan',
     'Therapy Note',
@@ -39,119 +36,94 @@ export function formatSoapNote(inputText: string): string {
   const mainSoapHeaders = [
     'Subjective',
     'Objective',
-    'Assessment',
+    'Assessment', 
     'Plan'
   ];
 
-  // Replace dashed lines (---) with a temporary marker
-  let formattedText = markdownText.replace(/^---+$/gm, '{{SECTION_DIVIDER}}');
+  let formattedText = markdownText;
 
-  // Process headings (### Heading -> <strong>Heading</strong>)
+  // AGGRESSIVE CLEANUP: Remove all stray formatting artifacts first
+  // Remove isolated colons and dashes
+  formattedText = formattedText.replace(/^[\s\-]*:\s*$/gm, '');
+  formattedText = formattedText.replace(/\n[\s\-]*:\s*\n/g, '\n');
+  formattedText = formattedText.replace(/:\s*-\s*/g, ': ');
+  formattedText = formattedText.replace(/-\s*:\s*/g, '');
+  formattedText = formattedText.replace(/^-\s*$/gm, '');
+  formattedText = formattedText.replace(/\n-\s*\n/g, '\n');
+  
+  // Remove "Added Today:" artifacts and standalone colons
+  formattedText = formattedText.replace(/^[\s\-]*Added Today[\s\-]*:?\s*$/gm, '');
+  formattedText = formattedText.replace(/\n[\s\-]*Added Today[\s\-]*:?\s*\n/g, '\n');
+  formattedText = formattedText.replace(/Added Today\s*:\s*/g, '');
+  
+  // COMPREHENSIVE COLON FIXING: Handle all possible line-break-before-colon patterns
+  
+  // 1. Fix patterns like "Label\n: Content" -> "Label: Content" (most common case)
+  formattedText = formattedText.replace(/([A-Za-z0-9\s\*\-\.]+)\n\s*:\s*/g, '$1: ');
+  
+  // 2. Fix patterns where colon is completely on its own line with content after
+  formattedText = formattedText.replace(/\n\s*:\s*([A-Za-z])/g, ': $1');
+  
+  // 3. Remove standalone colons at beginning of lines
+  formattedText = formattedText.replace(/^:\s*/gm, '');
+  
+  // 4. Fix specific problematic telehealth section patterns
+  formattedText = formattedText.replace(/(Mode of Communication|Patient Location|Provider Location|Consent Obtained|Other Participants|Before Visit|After Visit)\s*\n\s*:\s*/g, '$1: ');
+  
+  // 5. Fix bold markdown patterns that got broken: "**Label**\n: Content" -> "**Label**: Content"
+  formattedText = formattedText.replace(/(\*\*[^*]+\*\*)\s*\n\s*:\s*/g, '$1: ');
+  
+  // 6. Fix any remaining word-colon-newline patterns
+  formattedText = formattedText.replace(/([A-Za-z])\n\s*:\s*([A-Za-z])/g, '$1: $2');
+  
+  // 7. Fix patterns where there are multiple spaces or tabs before the colon
+  formattedText = formattedText.replace(/([A-Za-z0-9\s\*]+)\s{2,}:\s*/g, '$1: ');
+  
+  // 8. Remove any remaining standalone colons in the middle of lines
+  formattedText = formattedText.replace(/\n\s*:\s*\n/g, '\n');
+  formattedText = formattedText.replace(/\n\s*:\s*$/gm, '');
+  
+  // 9. Final cleanup for any remaining broken colon patterns
+  formattedText = formattedText.replace(/([A-Za-z0-9\s\*\-]+[A-Za-z0-9\*])\s*\n+\s*:\s*/g, '$1: ');
+
+  // Process headings (## Heading -> styled headers)
   formattedText = formattedText.replace(/^#{1,3}\s+(.*?)$/gm, (_, heading) => {
-    // Check if this is one of our standard section headers
     const cleanHeading = heading.trim();
-
-    // Check if this is a numbered item in the Plan section (like "5. Safety Plan")
     const isNumberedPlanItem = /^\d+\.\s+.*?Plan$/i.test(cleanHeading);
-
+    
     const isStandardSection = sectionHeaders.some(header =>
       cleanHeading.toLowerCase().includes(header.toLowerCase())
-    ) && !isNumberedPlanItem; // Exclude numbered plan items
+    ) && !isNumberedPlanItem;
 
     if (isStandardSection) {
-      // Check if this is one of the main SOAP headers that should be emphasized
       const isMainSoapHeader = mainSoapHeaders.some(header =>
         cleanHeading.toLowerCase().includes(header.toLowerCase())
       );
-
-      // Create a section header with proper styling and spacing
       return `<div class="soap-section-header${isMainSoapHeader ? ' soap-main-header' : ''}">${cleanHeading}</div>`;
     }
 
-    // Regular heading formatting with proper spacing
     return `<strong>${cleanHeading}</strong>`;
   });
 
-  // Process subsections with bold (**Mood:** -> <strong>Mood:</strong>)
+  // Process bold text
   formattedText = formattedText.replace(/\*\*(.*?):\*\*/g, '<strong>$1:</strong>');
-
-  // Process any remaining bold text
   formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 
-  // Add special formatting for Diagnosis and Rule Out sections
-  formattedText = formattedText.replace(
-    /(Diagnosis:|Assessment:|Rule Out:)\s*(<br>)?([^<]*)/gi,
-    (match, label, _, content) => {
-      // If the content is empty, don't format
-      if (!content.trim()) return match;
-
-      // Split content by lines, process each numbered/bulleted item
-      const lines = content.split(/\n/).filter((line: string) => line.trim().length > 0);
-      const items = lines.map((line: string) => {
-        // Check if line has numbering (1. Something) or bullets (- Something)
-        const trimmed = line.trim();
-        if (trimmed.match(/^\d+\.\s+/) || trimmed.match(/^-\s+/)) {
-          return `<li>${trimmed.replace(/^\d+\.\s+|-\s+/, '')}</li>`;
-        }
-        return `<li>${trimmed}</li>`;
-      });
-
-      // Return a properly formatted section with list (reduced spacing)
-      return `<strong>${label}</strong><br><ul class="pl-4 my-1">${items.join('')}</ul>`;
-    }
-  );
-
-  // Clean up any stray dashes or colons that might appear in the Telehealth Session Details section
-  formattedText = formattedText.replace(/(<br>|^)\s*-\s*(<br>|$)/g, '<br>');
-  formattedText = formattedText.replace(/(<br>|^)\s*:\s*(<br>|$)/g, '<br>');
-  formattedText = formattedText.replace(/(<br>|^)\s*-\s*:/g, '');
-
-  // Clean up specific sections that might have formatting issues
-  formattedText = formattedText.replace(/Patient Location\s*:/g, '<strong>Patient Location</strong>:');
-  formattedText = formattedText.replace(/Consent Obtained\s*:/g, '<strong>Consent Obtained</strong>:');
-  formattedText = formattedText.replace(/Provider Location\s*:/g, '<strong>Provider Location</strong>:');
-  formattedText = formattedText.replace(/Mode of Communication\s*:/g, '<strong>Mode of Communication</strong>:');
-  formattedText = formattedText.replace(/Other Participants\s*:/g, '<strong>Other Participants</strong>:');
-
-  // Convert paragraphs (double newlines) to proper HTML paragraphs
-  formattedText = formattedText.replace(/\n\n/g, '</p><p>');
-
-  // Convert single newlines to breaks with reduced spacing
-  formattedText = formattedText.replace(/\n/g, '<br>');
-
-  // Wrap content in paragraph tags if not already wrapped
-  if (!formattedText.startsWith('<p>')) {
-    formattedText = `<p>${formattedText}</p>`;
-  }
-
-  // Convert bullet points to HTML lists (for remaining bullets not in Diagnosis/Rule Out)
-  formattedText = formattedText.replace(/(<br>|^)- (.*?)(<br>|$)/g, (_, p1, p2, p3) => {
-    // Check if we need to start a new list
-    const startList = p1 && !p1.includes('</li>') ? '<ul>' : '';
-    // Check if we need to end the list
-    const endList = p3 && !p3.includes('<li>') ? '</ul>' : '';
-
-    return `${startList}<li>${p2}</li>${endList}`;
+  // Convert bullet points to HTML lists (simple approach)
+  formattedText = formattedText.replace(/^[\s]*-\s+(.+)$/gm, '<li>$1</li>');
+  
+  // Wrap consecutive list items in ul tags
+  formattedText = formattedText.replace(/(<li>.*<\/li>)(\n<li>.*<\/li>)*/g, (match) => {
+    return `<ul class="pl-4 my-1">${match}</ul>`;
   });
 
-  // Replace section dividers with properly styled dividers
-  formattedText = formattedText.replace(/{{SECTION_DIVIDER}}/g, '<div class="soap-section-divider"></div>');
+  // Convert newlines to breaks
+  formattedText = formattedText.replace(/\n/g, '<br>');
 
-  // Identify and wrap standard sections that might not have proper headers
-  for (const header of sectionHeaders) {
-    // Look for the section header in various formats (with or without colons, case insensitive)
-    const regex = new RegExp(`(^|<br>)(${header}:?\\s*)`, 'gi');
-    formattedText = formattedText.replace(regex, (_, prefix) => {
-      // Check if this is one of the main SOAP headers that should be emphasized
-      const isMainSoapHeader = mainSoapHeaders.some(mainHeader =>
-        header.toLowerCase().includes(mainHeader.toLowerCase())
-      );
-
-      return `${prefix}<div class="soap-section-header${isMainSoapHeader ? ' soap-main-header' : ''}">${header}</div>`;
-    });
-  }
-
-  // Wrap the entire content in a container for section-based styling
+  // Final cleanup - remove multiple consecutive breaks
+  formattedText = formattedText.replace(/(<br>\s*){3,}/g, '<br><br>');
+  
+  // Wrap in container
   formattedText = `<div class="soap-note-container">${formattedText}</div>`;
 
   return formattedText;

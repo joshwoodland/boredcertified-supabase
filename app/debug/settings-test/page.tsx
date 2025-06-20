@@ -201,7 +201,7 @@ export default function SettingsDebugPage() {
 - id (TEXT PRIMARY KEY)
 - dark_mode (BOOLEAN)
 - gpt_model (TEXT)
-- initial_visit_prompt (TEXT)
+- initial_visit_additional_preferences (TEXT)
 - follow_up_visit_prompt (TEXT)
 - auto_save (BOOLEAN)
 - low_echo_cancellation (BOOLEAN)

@@ -107,6 +107,8 @@ export const supabaseBrowser =
  * 
  * @param filterByCurrentUser - Whether to filter patients by the current user's email.
  *                             Defaults to true. Set to false to retrieve all patients.
+ * @param includeDeleted - Whether to include deleted patients. Defaults to false.
+ * @param onlyDeleted - Whether to only fetch deleted patients (for trash view). Defaults to false.
  * @returns An array of patient records or an empty array if retrieval fails
  * 
  * @example
@@ -118,10 +120,15 @@ export const supabaseBrowser =
  * 
  * // To get all patients regardless of current user
  * const allPatients = await getClientSupabasePatients(false);
+ * 
+ * // To get deleted patients for trash view
+ * const deletedPatients = await getClientSupabasePatients(true, false, true);
  * ```
  */
 export async function getClientSupabasePatients(
-  filterByCurrentUser = true
+  filterByCurrentUser = true,
+  includeDeleted = false,
+  onlyDeleted = false
 ) {
   if (!supabaseBrowser) {
     console.error('[supabase/browser] Supabase client not initialized');
@@ -141,8 +148,15 @@ export async function getClientSupabasePatients(
   let query = supabaseBrowser
     .from('patients')
     .select('*')
-    .eq('is_deleted', false)
     .order('created_at', { ascending: false });
+
+  // Handle deletion filtering
+  if (onlyDeleted) {
+    query = query.eq('is_deleted', true);
+  } else if (!includeDeleted) {
+    query = query.eq('is_deleted', false);
+  }
+  // If includeDeleted is true and onlyDeleted is false, we don't filter by is_deleted
 
   if (filterByCurrentUser && userEmail) {
     query = query.eq('provider_email', userEmail);

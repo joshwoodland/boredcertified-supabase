@@ -21,15 +21,21 @@ CREATE TABLE IF NOT EXISTS public.notes (
   content TEXT NOT NULL,
   summary TEXT,
   audio_file_url TEXT,
-  is_initial_visit BOOLEAN NOT NULL DEFAULT false
+  is_initial_visit BOOLEAN NOT NULL DEFAULT false,
+  checklist_content JSONB, -- Stores follow-up checklist items when this note is used as source
+  source_note_id UUID -- References the note this checklist was generated from (if this is a follow-up visit)
 );
+
+-- Add foreign key constraint for source_note_id
+ALTER TABLE public.notes ADD CONSTRAINT fk_source_note_id 
+  FOREIGN KEY (source_note_id) REFERENCES public.notes(id) ON DELETE SET NULL;
 
 -- Create app_settings table
 CREATE TABLE IF NOT EXISTS public.app_settings (
   id TEXT PRIMARY KEY,
   dark_mode BOOLEAN NOT NULL DEFAULT false,
   gpt_model TEXT NOT NULL DEFAULT 'gpt-4o',
-  initial_visit_prompt TEXT NOT NULL DEFAULT 'You are a medical scribe assistant. Your task is to generate a note for an INITIAL VISIT based on the provided medical visit transcript.',
+  initial_visit_additional_preferences TEXT NOT NULL DEFAULT '',
   follow_up_visit_prompt TEXT NOT NULL DEFAULT 'You are a medical scribe assistant. Your task is to generate a note for a FOLLOW-UP VISIT based on the provided medical visit transcript.',
   auto_save BOOLEAN NOT NULL DEFAULT false,
   low_echo_cancellation BOOLEAN NOT NULL DEFAULT false,
@@ -40,6 +46,8 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
 CREATE INDEX IF NOT EXISTS idx_patients_name ON public.patients(name);
 CREATE INDEX IF NOT EXISTS idx_notes_patient_id ON public.notes(patient_id);
 CREATE INDEX IF NOT EXISTS idx_notes_is_initial_visit ON public.notes(is_initial_visit);
+CREATE INDEX IF NOT EXISTS idx_notes_source_note_id ON public.notes(source_note_id);
+CREATE INDEX IF NOT EXISTS idx_notes_checklist_content ON public.notes USING GIN (checklist_content);
 
 -- Enable Row Level Security
 ALTER TABLE public.patients ENABLE ROW LEVEL SECURITY;

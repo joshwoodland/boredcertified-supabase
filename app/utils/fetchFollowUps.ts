@@ -39,7 +39,7 @@ FORMAT your response exactly as follows:
 
 Clinical Expertise:
 Potential Drug Interactions:
-[Analyze the list of medications in the SOAP note and identify any potential drug interactions. Format as a list including: medications involved, severity (mild, moderate, severe), and a brief note about the interaction.]
+[Analyze the list of medications in the SOAP note and identify any potential drug interactions. Format each interaction as: "MedicationA and MedicationB. [Severity] severity. [Brief mechanism]. Watch for: [comma-separated symptoms]." For example: "Lexapro and Lamotrigine. Moderate severity. Increased Lamotrigine levels. Watch for: dizziness, ataxia, nausea, headache, rash."]
 
 Expert Tip:
 [Review the Plan section of the SOAP note and provide a forward-looking clinical suggestion in the format: "If the patient does not show improvement in these target symptoms or treatment goals, consider the following next steps..." Include potential dosage changes, alternative medication options, or therapy/diagnostic considerations if relevant. Keep to 1-2 sentences per suggestion.]

@@ -1,0 +1,71 @@
+/* Basic theme styles */
+body {
+  background: rgb(var(--background-rgb));
+}
+
+.dark body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+}
+
+/* Force dark mode for all modal-related elements */
+.dark *,
+.dark *::before,
+.dark *::after {
+  border-color: theme('colors.gray.700');
+}
+
+/* Modal specific overrides */
+.dark [class*="modal"],
+.dark [class*="Modal"],
+.dark [role="dialog"],
+.dark [class*="dialog"] {
+  background-color: theme('colors.gray.900') !important;
+  color: theme('colors.gray.100') !important;
+}
+
+/* Dark mode enforcement from layout */
+html.dark {
+  background-color: #111827 !important;
+  color: #f3f4f6 !important;
+}
+
+/* Textarea dark mode fixes */
+.dark textarea {
+  background-color: theme('colors.gray.800') !important;
+  color: theme('colors.gray.100') !important;
+  border-color: theme('colors.gray.700') !important;
+}
+
+.dark textarea::placeholder {
+  color: theme('colors.gray.500') !important;
+  opacity: 1 !important;
+}
+
+
+
+/* Target textareas in Settings modal specifically */
+.dark [role="dialog"] textarea,
+.dark .z-50 textarea {
+  background-color: theme('colors.gray.800') !important;
+  color: theme('colors.gray.100') !important;
+  border-color: theme('colors.gray.700') !important;
+}
+
+/* SOAP note dark mode styles */
+.dark .soap-note-container p {
+  color: #94a3b8; /* Consistent color in dark mode */
+}
+
+.dark .soap-section-header {
+  border-bottom-color: rgba(156, 163, 175, 0.2);
+  color: #f1f5f9; /* Even brighter in dark mode */
+}
+
+.dark .soap-main-header {
+  border-bottom-color: rgba(156, 163, 175, 0.3); /* Slightly more visible border in dark mode */
+}
+
+.dark .soap-section-divider {
+  background-color: rgba(156, 163, 175, 0.2);
+} 

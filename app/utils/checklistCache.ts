@@ -71,7 +71,7 @@ export function getChecklistFromCache(
 }
 
 /**
- * Gets the most recent checklist for a patient
+ * Gets the most recent checklist for a patient from localStorage
  */
 export function getMostRecentChecklist(patientId: string): FollowUpItem[] | null {
   try {
@@ -89,6 +89,65 @@ export function getMostRecentChecklist(patientId: string): FollowUpItem[] | null
     return parsedData.items;
   } catch (error) {
     console.error('Error retrieving most recent checklist:', error);
+    return null;
+  }
+}
+
+/**
+ * Saves a checklist to the database linked to a specific source note
+ */
+export async function saveChecklistToDatabase(
+  sourceNoteId: string,
+  items: FollowUpItem[]
+): Promise<boolean> {
+  try {
+    const response = await fetch(`/api/notes/${sourceNoteId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        checklistContent: items,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Failed to save checklist to database:', await response.text());
+      return false;
+    }
+
+    console.log('Checklist saved to database for note:', sourceNoteId);
+    return true;
+  } catch (error) {
+    console.error('Error saving checklist to database:', error);
+    return false;
+  }
+}
+
+/**
+ * Retrieves a checklist from the database for a specific source note
+ */
+export async function getChecklistFromDatabase(
+  sourceNoteId: string
+): Promise<FollowUpItem[] | null> {
+  try {
+    const response = await fetch(`/api/notes/${sourceNoteId}`);
+    
+    if (!response.ok) {
+      console.error('Failed to fetch note from database:', await response.text());
+      return null;
+    }
+
+    const note = await response.json();
+    
+    if (note && note.checklistContent) {
+      console.log('Retrieved checklist from database for note:', sourceNoteId);
+      return note.checklistContent;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error retrieving checklist from database:', error);
     return null;
   }
 }

@@ -24,55 +24,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <head>
-        <style dangerouslySetInnerHTML={{ __html: `
-          .modal-open > main {
-            filter: brightness(40%) blur(1px);
-            transition: filter 0.2s ease-in-out;
-            pointer-events: none;
-          }
-          .settings-modal {
-            isolation: isolate;
-            pointer-events: auto;
-            filter: none !important;
-          }
-
-          /* Modern scrollbar */
-          ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-          }
-
-          ::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.05);
-            border-radius: 8px;
-          }
-
-          ::-webkit-scrollbar-thumb {
-            background: rgba(0, 0, 0, 0.15);
-            border-radius: 8px;
-          }
-
-          ::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 0, 0, 0.25);
-          }
-
-          /* Dark mode scrollbar */
-          .dark ::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.05);
-          }
-
-          .dark ::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.15);
-          }
-
-          .dark ::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.25);
-          }
-        `}} />
-      </head>
-      <body className={`${inter.className} ${montserrat.variable} min-h-screen bg-background text-foreground`}>
+    <html lang="en" className="dark" style={{ colorScheme: 'dark' }}>
+      <body className={`${inter.className} ${montserrat.variable} min-h-screen bg-background text-foreground dark`}>
         <AppSettingsProvider>
           <DeepgramContextProvider>
             <MicrophoneContextProvider>

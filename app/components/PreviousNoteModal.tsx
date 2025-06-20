@@ -37,14 +37,14 @@ export default function PreviousNoteModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 overflow-auto p-4">
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg w-full max-w-2xl mx-auto">
+      <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-lg w-full max-w-2xl mx-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold dark:text-white">
+          <h2 className="text-xl font-semibold dark:text-gray-100">
             Add Previous Note Context
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-100"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -64,7 +64,7 @@ export default function PreviousNoteModal({
                 No Previous Notes Found
               </h3>
               <p className="text-gray-600 dark:text-gray-300 text-center">
-                This patient doesn't have any previous notes in the system. Would you like to paste in the patient's most recent previous note to add greater context for the follow-up checklist?
+                This patient doesn't have any previous notes in the system. Would you like to paste in the patient's most recent previous note to add greater context?
               </p>
             </div>
 

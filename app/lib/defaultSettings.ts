@@ -10,13 +10,16 @@ export const DEFAULT_SETTINGS = {
   // Model settings
   gptModel: 'gpt-4o',
 
-  // Additional preferences for SOAP note templates
-  initialVisitPrompt: 'Please include detailed medication side effects when mentioned. Use bullet points for medication lists.',
-  followUpVisitPrompt: 'Focus on changes since the last visit. Highlight any medication adjustments with "CHANGED" label.',
+  // Additional preferences for providers (should be empty by default)
+  initialVisitPrompt: '',
+  followUpVisitPrompt: '',
+
+  // Provider information - empty by default, will be set on first login
+  providerName: '',
+  supervisor: null as string | null,
 
   // Feature settings
   autoSave: true,
-  lowEchoCancellation: false,
 
   // User settings
   email: null as string | null,

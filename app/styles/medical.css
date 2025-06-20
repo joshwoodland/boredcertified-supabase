@@ -1,0 +1,51 @@
+/* SOAP Note Section Styling */
+.soap-note-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0 0.75rem; /* Add consistent horizontal padding */
+}
+
+.soap-note-container strong {
+  font-weight: 600;
+  color: #cbd5e1; /* Slightly brighter than paragraph text */
+}
+
+.soap-note-container p {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.5; /* Reduce vertical line spacing in paragraph text */
+  color: #94a3b8; /* Lighter color for paragraph text to contrast with headers */
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem; /* Slightly smaller than headers */
+}
+
+.soap-section-header {
+  font-family: var(--font-montserrat), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem; /* Increased font size for main headers */
+  margin-top: 1.5rem; /* Full blank line before headers */
+  margin-bottom: 0.25rem; /* Tight margin below headers */
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(156, 163, 175, 0.3);
+  color: #e2e8f0; /* Brighter color for headers to differentiate */
+  letter-spacing: 0.01em; /* Slightly increased letter spacing for headers */
+}
+
+/* Special styling for main SOAP headers (Subjective, Objective, Assessment, Plan) */
+.soap-main-header {
+  font-size: 1.35rem; /* Larger font size for main SOAP headers */
+  margin-top: 1.75rem; /* More space above */
+  border-bottom-width: 2px; /* Thicker bottom border */
+}
+
+/* First section header shouldn't have the large top margin */
+.soap-note-container > .soap-section-header:first-child {
+  margin-top: 0.5rem;
+}
+
+.soap-section-divider {
+  height: 1px;
+  background-color: rgba(156, 163, 175, 0.3);
+  margin: 0.5rem 0;
+} 

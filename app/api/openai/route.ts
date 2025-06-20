@@ -95,35 +95,23 @@ export async function POST(request: NextRequest) {
       // Legacy format with prompt parameter
       // Add system message if provided
       if (systemMessage) {
-        // Add formatting instructions to the system message
-        const formattingInstructions = `
-FORMATTING INSTRUCTIONS:
-- Use clean section headers like "Subjective", "Objective", "Assessment", "Plan" without any prefixes
-- Do NOT use "S-", "O-", "A-", "P-" prefixes before section headers
-- Use proper markdown formatting with ## for main sections
-- Keep section headers simple and consistent
-`;
         messages.push({
           role: 'system',
-          content: formattingInstructions + systemMessage,
+          content: systemMessage,
         } as ChatCompletionMessageParam);
       } else if (settings && 'initialVisitPrompt' in settings && 'followUpVisitPrompt' in settings) {
-        // Use the appropriate prompt based on isInitialVisit flag from request
+        // Use provider preferences if available (these are now additional preferences, not main templates)
         const appSettings = settings as AppSettings;
-        const promptContent = isInitialVisit ? appSettings.initialVisitPrompt : appSettings.followUpVisitPrompt;
+        const userPreferences = isInitialVisit ? appSettings.initialVisitPrompt : appSettings.followUpVisitPrompt;
 
-        // Add formatting instructions to the prompt
-        const formattingInstructions = `
-FORMATTING INSTRUCTIONS:
-- Use clean section headers like "Subjective", "Objective", "Assessment", "Plan" without any prefixes
-- Do NOT use "S-", "O-", "A-", "P-" prefixes before section headers
-- Use proper markdown formatting with ## for main sections
-- Keep section headers simple and consistent
+        // Create a basic system message with user preferences
+        const basicInstructions = `You are a medical documentation assistant. Generate a comprehensive SOAP note for this ${isInitialVisit ? 'initial psychiatric evaluation' : 'follow-up psychiatric visit'}.
 
-`;
+${userPreferences ? `Additional provider preferences: ${userPreferences}` : ''}`;
+        
         messages.push({
           role: 'system',
-          content: formattingInstructions + promptContent,
+          content: basicInstructions,
         } as ChatCompletionMessageParam);
       }
 
