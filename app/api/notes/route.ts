@@ -6,6 +6,7 @@ import {
 } from '@/app/lib/supabaseTypes';
 import OpenAI from 'openai';
 import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages';
+import { getModelForPurpose } from '@/app/utils/masterSettings';
 import { v4 as uuidv4 } from 'uuid';
 
 // Add checkSupabaseConnection function if it doesn't exist in supabaseTypes
@@ -148,8 +149,12 @@ export async function POST(request: NextRequest) {
       try {
         console.log('[notes/route] Generating SOAP note with OpenAI');
 
+        // Get the appropriate AI model from master settings
+        const model = await getModelForPurpose('generate_soap');
+        console.log(`[notes/route] Using model: ${model}`);
+
         // Use the buildOpenAIMessages utility to structure the messages
-        const messages = buildOpenAIMessages({
+        const messages = await buildOpenAIMessages({
           previousSoapNote: previousNote || undefined,
           currentTranscript: transcript,
           soapTemplate: soapTemplate,
@@ -159,7 +164,7 @@ export async function POST(request: NextRequest) {
 
         // Call OpenAI API
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o', // Use a capable model for medical content
+          model: model, // Use model from master settings
           messages,
           temperature: 0.3, // Lower temperature for more consistent output
           max_tokens: 2000,

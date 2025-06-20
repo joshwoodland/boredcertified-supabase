@@ -1,5 +1,5 @@
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { INITIAL_EVALUATION_TEMPLATE, FOLLOW_UP_VISIT_TEMPLATE } from "./soapTemplates";
+import { getSoapTemplate } from "./masterSettings";
 
 /**
  * Builds a structured array of messages for OpenAI API requests
@@ -9,7 +9,7 @@ import { INITIAL_EVALUATION_TEMPLATE, FOLLOW_UP_VISIT_TEMPLATE } from "./soapTem
  * @param params Configuration parameters
  * @returns Array of messages for OpenAI chat completion
  */
-export const buildOpenAIMessages = ({
+export const buildOpenAIMessages = async ({
   previousSoapNote,
   currentTranscript,
   soapTemplate,
@@ -21,70 +21,45 @@ export const buildOpenAIMessages = ({
   soapTemplate: string; // User preferences from settings
   patientName: string;
   isInitialEvaluation?: boolean;
-}): ChatCompletionMessageParam[] => {
+}): Promise<ChatCompletionMessageParam[]> => {
   console.log('======= BUILDING STRUCTURED MESSAGES =======');
   console.log(`Previous note provided: ${!!previousSoapNote}`);
   console.log(`Current transcript length: ${currentTranscript.length} chars`);
   console.log(`Visit type: ${isInitialEvaluation ? 'Initial Evaluation' : 'Follow-up Visit'}`);
+  console.log(`Patient name: ${patientName}`);
+  console.log(`User template length: ${soapTemplate.length} chars`);
 
-  // Select the appropriate hardcoded template based on visit type
-  const hardcodedTemplate = isInitialEvaluation
-    ? INITIAL_EVALUATION_TEMPLATE
-    : FOLLOW_UP_VISIT_TEMPLATE;
+  // Get the appropriate hardcoded template from master settings
+  const baseTemplate = await getSoapTemplate(isInitialEvaluation);
+  console.log(`Base template length: ${baseTemplate.length} chars`);
 
-  // Create system message with clinical focus
-  const systemMessage = {
-    role: "system" as const,
-    content: `You are an expert AI medical scribe specializing in psychiatry. You will receive two types of input:
-1. The SOAP note from the patient's **previous visit** for clinical context
-2. The **transcript from the current visit**, which should be used to generate today's SOAP note
+  // Combine the hardcoded base template with user preferences
+  const systemMessage = `${baseTemplate}\n\n--- USER PREFERENCES ---\n${soapTemplate}`;
 
-Use the previous note only for background understanding. Do **not** copy or reuse information unless it was re-discussed or confirmed today.
+  const messages: ChatCompletionMessageParam[] = [
+    {
+      role: 'system',
+      content: systemMessage
+    }
+  ];
 
-Prioritize clarity, medical accuracy, and professional language. If new diagnoses or medications are discussed today, add them with the label "**added today**".
-
-IMPORTANT: The patient's name is "${patientName}". Always use this exact name throughout the note, regardless of any other names mentioned in the transcript.
-
-FORMATTING INSTRUCTIONS:
-- Use clean section headers like "Subjective", "Objective", "Assessment", "Plan" without any prefixes
-- Do NOT use "S-", "O-", "A-", "P-" prefixes before section headers
-- Use proper markdown formatting with ## for main sections
-- Keep section headers simple and consistent
-
-Follow this format strictly:
-
-${hardcodedTemplate}
-
-Additional provider preferences:
-${soapTemplate}`
-  };
-
-  // Create the messages array
-  const messages: ChatCompletionMessageParam[] = [systemMessage];
-
-  // Add previous SOAP note if provided
-  if (previousSoapNote) {
+  // Add previous note context if available (for follow-up visits)
+  if (previousSoapNote && !isInitialEvaluation) {
+    console.log(`Adding previous note context (${previousSoapNote.length} chars)`);
     messages.push({
-      role: "user" as const,
-      content: `Here is the SOAP note from the **previous visit**, to give you clinical context for today's session:\n\n${previousSoapNote}`
+      role: 'user',
+      content: `PREVIOUS SOAP NOTE FOR CONTEXT:\n\n${previousSoapNote}\n\n---END OF PREVIOUS NOTE---`
     });
   }
 
-  // Add current transcript
+  // Add the current transcript
   messages.push({
-    role: "user" as const,
-    content: `Here is the **transcript from the current visit**. Use this to generate the SOAP note for today:\n\n${currentTranscript}`
+    role: 'user',
+    content: `CURRENT VISIT TRANSCRIPT FOR ${patientName}:\n\n${currentTranscript}`
   });
 
-  // Log message structure for debugging
-  console.log('Message structure:');
-  messages.forEach((msg, index) => {
-    const content = typeof msg.content === 'string'
-      ? msg.content.substring(0, 50) + '...'
-      : '[Complex content structure]';
-    console.log(`[${index}] ${msg.role}: ${content}`);
-  });
-  console.log('======= END OF STRUCTURED MESSAGES =======');
+  console.log(`Total messages created: ${messages.length}`);
+  console.log('======= END MESSAGE BUILDING =======');
 
   return messages;
 };

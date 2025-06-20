@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { createServerClient } from '@/app/lib/supabase';
 import { convertToAppFormat, AppSettings } from '@/app/lib/supabaseTypes';
+import { getModelForPurpose, getSoapTemplate } from '@/app/utils/masterSettings';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -81,9 +82,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get app settings for default values
+    // Get app settings for default values and master settings for backend configuration
     const settings = await getAppSettings();
-
+    
     // Prepare OpenAI request
     let messages: ChatCompletionMessageParam[] = [];
 
@@ -110,7 +111,10 @@ FORMATTING INSTRUCTIONS:
       } else if (settings && 'initialVisitPrompt' in settings && 'followUpVisitPrompt' in settings) {
         // Use the appropriate prompt based on isInitialVisit flag from request
         const appSettings = settings as AppSettings;
-        const promptContent = isInitialVisit ? appSettings.initialVisitPrompt : appSettings.followUpVisitPrompt;
+        
+        // Get the base template from master settings
+        const baseTemplate = await getSoapTemplate(isInitialVisit);
+        const userPreferences = isInitialVisit ? appSettings.initialVisitPrompt : appSettings.followUpVisitPrompt;
 
         // Add formatting instructions to the prompt
         const formattingInstructions = `
@@ -121,9 +125,13 @@ FORMATTING INSTRUCTIONS:
 - Keep section headers simple and consistent
 
 `;
+        
+        // Combine base template with user preferences
+        const combinedContent = `${formattingInstructions}${baseTemplate}\n\n--- USER PREFERENCES ---\n${userPreferences}`;
+        
         messages.push({
           role: 'system',
-          content: formattingInstructions + promptContent,
+          content: combinedContent,
         } as ChatCompletionMessageParam);
       }
 
@@ -137,9 +145,23 @@ FORMATTING INSTRUCTIONS:
       return NextResponse.json({ error: 'Either prompt or messages is required' }, { status: 400 });
     }
 
+    // Determine which model to use: explicit model > user setting > master setting > default
+    let selectedModel = model;
+    if (!selectedModel) {
+      selectedModel = settings?.gptModel;
+    }
+    if (!selectedModel) {
+      selectedModel = await getModelForPurpose('generate_soap');
+    }
+    if (!selectedModel) {
+      selectedModel = 'gpt-4o'; // Final fallback
+    }
+
+    console.log(`[openai/route] Using model: ${selectedModel}`);
+
     // Call OpenAI API
     const completion = await openai.chat.completions.create({
-      model: model || settings?.gptModel || 'gpt-4',
+      model: selectedModel,
       messages,
       temperature: temperature !== undefined ? temperature : 0.7,
       max_tokens: maxTokens || 2000,
