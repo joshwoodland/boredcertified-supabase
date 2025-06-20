@@ -6,6 +6,7 @@ import {
 } from '@/app/lib/supabaseTypes';
 import OpenAI from 'openai';
 import { buildOpenAIMessages } from '@/app/utils/buildOpenAIMessages';
+import { getModelForPurpose } from '@/app/utils/masterSettings';
 import { v4 as uuidv4 } from 'uuid';
 
 // Add checkSupabaseConnection function if it doesn't exist in supabaseTypes
@@ -190,6 +191,10 @@ export async function POST(request: NextRequest) {
           console.warn('[notes/route] Could not fetch provider name and supervisor from settings, using defaults:', settingsError);
         }
 
+        // Get the AI model from master settings
+        const model = await getModelForPurpose('generate_soap');
+        console.log(`[notes/route] Using AI model: ${model}`);
+
         // Use the buildOpenAIMessages utility to structure the messages
         console.log('[notes/route] Building OpenAI messages with:', {
           hasTranscript: !!transcript,
@@ -214,7 +219,7 @@ export async function POST(request: NextRequest) {
 
         // Call OpenAI API
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o', // Use a capable model for medical content
+          model: model, // Use model from master settings
           messages,
           temperature: 0.3, // Lower temperature for more consistent output
           max_tokens: 2000,

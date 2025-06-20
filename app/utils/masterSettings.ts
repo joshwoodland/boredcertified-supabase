@@ -1,5 +1,4 @@
 import { createServerClient } from '@/app/lib/supabase';
-import { getInitialEvaluationTemplate, getFollowUpVisitTemplate } from './soapTemplates';
 
 export interface MasterSettings {
   id: string;
@@ -8,8 +7,6 @@ export interface MasterSettings {
   generate_soap_model: string;
   checklist_model: string;
   note_summary_model: string;
-  provider_name: string;
-  supervisor: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -75,27 +72,21 @@ export async function getMasterSettings(): Promise<MasterSettings> {
 }
 
 /**
- * Gets the SOAP template based on visit type, with dynamic provider name and supervisor
+ * Gets the base SOAP template from master settings
+ * Note: Provider name and supervisor should be fetched separately from app_settings
  */
 export async function getSoapTemplate(isInitialEvaluation: boolean): Promise<string> {
   try {
     const settings = await getMasterSettings();
-    
-    // Use the dynamic template generation functions that handle provider name and supervisor
-    if (isInitialEvaluation) {
-      return getInitialEvaluationTemplate(settings.provider_name, settings.supervisor);
-    } else {
-      return getFollowUpVisitTemplate(settings.provider_name, settings.supervisor);
-    }
+    return isInitialEvaluation 
+      ? settings.initial_eval_soap_template 
+      : settings.follow_up_visit_soap_template;
   } catch (error) {
     console.error('Error getting SOAP template:', error);
-    // Fallback to basic templates with default provider
-    const defaultProvider = 'Josh Woodland, APRN, PMHNP';
-    if (isInitialEvaluation) {
-      return getInitialEvaluationTemplate(defaultProvider, null);
-    } else {
-      return getFollowUpVisitTemplate(defaultProvider, null);
-    }
+    // Fallback to basic templates
+    return isInitialEvaluation 
+      ? 'Please generate a comprehensive SOAP note for this initial psychiatric evaluation.'
+      : 'Please generate a comprehensive SOAP note for this follow-up psychiatric visit.';
   }
 }
 
@@ -119,25 +110,6 @@ export async function getModelForPurpose(purpose: 'generate_soap' | 'checklist' 
   } catch (error) {
     console.error(`Error getting model for ${purpose}:`, error);
     return 'gpt-4o'; // Default fallback
-  }
-}
-
-/**
- * Gets provider name and supervisor from master settings
- */
-export async function getProviderInfo(): Promise<{ providerName: string; supervisor: string | null }> {
-  try {
-    const settings = await getMasterSettings();
-    return {
-      providerName: settings.provider_name,
-      supervisor: settings.supervisor
-    };
-  } catch (error) {
-    console.error('Error getting provider info:', error);
-    return {
-      providerName: 'Josh Woodland, APRN, PMHNP',
-      supervisor: null
-    };
   }
 }
 
@@ -183,8 +155,6 @@ function getDefaultMasterSettings(): MasterSettings {
     generate_soap_model: 'gpt-4o',
     checklist_model: 'gpt-4o',
     note_summary_model: 'gpt-4o',
-    provider_name: 'Josh Woodland, APRN, PMHNP',
-    supervisor: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };

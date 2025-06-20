@@ -9,8 +9,6 @@ CREATE TABLE IF NOT EXISTS public.master_settings (
   generate_soap_model TEXT NOT NULL DEFAULT 'gpt-4o',
   checklist_model TEXT NOT NULL DEFAULT 'gpt-4o',
   note_summary_model TEXT NOT NULL DEFAULT 'gpt-4o',
-  provider_name TEXT NOT NULL DEFAULT 'Josh Woodland, APRN, PMHNP',
-  supervisor TEXT NULL DEFAULT NULL,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
@@ -22,16 +20,15 @@ ALTER TABLE public.master_settings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow full access to authenticated users" ON public.master_settings 
   FOR ALL TO authenticated USING (true);
 
--- Insert initial values with the current hardcoded templates, models, and provider info
+-- Insert initial values with the current hardcoded templates and models
+-- NOTE: Provider names and supervisors remain in app_settings table (user-specific)
 INSERT INTO public.master_settings (
   id,
   initial_eval_soap_template,
   follow_up_visit_soap_template,
   generate_soap_model,
   checklist_model,
-  note_summary_model,
-  provider_name,
-  supervisor
+  note_summary_model
 ) VALUES (
   'default',
   '**You are an outstanding charting assistant**
@@ -215,7 +212,7 @@ Always end with "Patient responded positively."
 
 **Patient gives verbal consent for telehealth.**
 
-NOTE: Provider name and supervision details will be added dynamically based on settings.
+NOTE: Provider name and supervision details will be added dynamically based on user settings.
 
 — -
 Other instructions:
@@ -440,26 +437,20 @@ Themes discussed and processed today: (Select 2–3 relevant topics)
 
 **Patient gives verbal consent for telehealth.**
 
-NOTE: Provider name and supervision details will be added dynamically based on settings.',
+NOTE: Provider name and supervision details will be added dynamically based on user settings.',
   'gpt-4o',
   'gpt-4o',
-  'gpt-4o',
-  'Josh Woodland, APRN, PMHNP',
-  NULL
+  'gpt-4o'
 ) ON CONFLICT (id) DO UPDATE SET
   initial_eval_soap_template = EXCLUDED.initial_eval_soap_template,
   follow_up_visit_soap_template = EXCLUDED.follow_up_visit_soap_template,
   generate_soap_model = EXCLUDED.generate_soap_model,
   checklist_model = EXCLUDED.checklist_model,
   note_summary_model = EXCLUDED.note_summary_model,
-  provider_name = EXCLUDED.provider_name,
-  supervisor = EXCLUDED.supervisor,
   updated_at = now();
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_master_settings_id ON public.master_settings(id);
-CREATE INDEX IF NOT EXISTS idx_master_settings_provider_name ON public.master_settings(provider_name);
-CREATE INDEX IF NOT EXISTS idx_master_settings_supervisor ON public.master_settings(supervisor);
 
 COMMENT ON TABLE public.master_settings IS 'Master configuration settings for backend processes that can be edited without rebuilding the app';
 COMMENT ON COLUMN public.master_settings.initial_eval_soap_template IS 'SOAP note template for initial psychiatric evaluations';
@@ -467,5 +458,3 @@ COMMENT ON COLUMN public.master_settings.follow_up_visit_soap_template IS 'SOAP 
 COMMENT ON COLUMN public.master_settings.generate_soap_model IS 'AI model used for generating SOAP notes';
 COMMENT ON COLUMN public.master_settings.checklist_model IS 'AI model used for checklist operations';
 COMMENT ON COLUMN public.master_settings.note_summary_model IS 'AI model used for note summary generation';
-COMMENT ON COLUMN public.master_settings.provider_name IS 'Dynamic provider name used in SOAP note signatures';
-COMMENT ON COLUMN public.master_settings.supervisor IS 'Supervisor name for supervised practice (NULL for independent practice)';

@@ -64,9 +64,7 @@ export async function PUT(request: NextRequest) {
       follow_up_visit_soap_template,
       generate_soap_model,
       checklist_model,
-      note_summary_model,
-      provider_name,
-      supervisor
+      note_summary_model
     } = body;
 
     // Validate that at least one field is provided
@@ -74,9 +72,7 @@ export async function PUT(request: NextRequest) {
         !follow_up_visit_soap_template && 
         !generate_soap_model && 
         !checklist_model && 
-        !note_summary_model &&
-        !provider_name &&
-        supervisor === undefined) {
+        !note_summary_model) {
       return NextResponse.json(
         { error: 'At least one field must be provided for update' }, 
         { status: 400 }
@@ -112,12 +108,6 @@ export async function PUT(request: NextRequest) {
     }
     if (note_summary_model !== undefined) {
       updates.note_summary_model = note_summary_model;
-    }
-    if (provider_name !== undefined) {
-      updates.provider_name = provider_name;
-    }
-    if (supervisor !== undefined) {
-      updates.supervisor = supervisor;
     }
 
     // Update master settings
@@ -189,9 +179,7 @@ export async function DELETE(request: NextRequest) {
       follow_up_visit_soap_template: 'Please generate a comprehensive SOAP note for this follow-up psychiatric visit.',
       generate_soap_model: 'gpt-4o',
       checklist_model: 'gpt-4o',
-      note_summary_model: 'gpt-4o',
-      provider_name: 'Josh Woodland, APRN, PMHNP',
-      supervisor: null
+      note_summary_model: 'gpt-4o'
     };
 
     const { error: manualInsertError } = await supabase
